@@ -416,8 +416,8 @@ checks:
       system:
         severity: warning
         sentence: "{count} critical vulnerabilities with a fix available in this server's packages"
-        why: These flaws are public and already fixed. Installing the updates closes them.
-        fix: "sudo apt-get update && sudo apt-get upgrade"
+        why: These flaws are public and already fixed. Installing the updates closes them; a new kernel needs a restart afterwards.
+        fix: "sudo apt-get update && sudo apt-get upgrade --with-new-pkgs && sudo apt-get autoremove --purge"
       image:
         severity: warning
         sentence: "{count} critical vulnerabilities with a fix available in image {image}"

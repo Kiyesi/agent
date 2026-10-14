@@ -126,6 +126,24 @@ func trivyProblem(err error) (Result, bool) {
 	return Skip("failed", map[string]string{"reason": msg}), true
 }
 
+// kernelPkgRE finds the kernel version a package belongs to, such as
+// linux-headers-6.8.0-146-generic: 6.8.0-146.
+var kernelPkgRE = regexp.MustCompile(`^linux-(?:headers|image|image-unsigned|modules|modules-extra|tools|cloud-tools|buildinfo)-(\d+\.\d+\.\d+-\d+)`)
+
+// runningKernel is the running kernel's version without its flavour
+// (6.8.0-147 for 6.8.0-147-generic), or "" when it cannot be read.
+func runningKernel(env *Env) string {
+	b, err := fs.ReadFile(env.Sys.FS, "proc/sys/kernel/osrelease")
+	if err != nil {
+		return ""
+	}
+	m := regexp.MustCompile(`^(\d+\.\d+\.\d+-\d+)`).FindStringSubmatch(strings.TrimSpace(string(b)))
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
 func runTrivy(ctx context.Context, env *Env, args []string) (int, error) {
 	out, err := env.Sys.Exec.Run(ctx, "trivy", args...)
 	if err != nil {
@@ -135,6 +153,7 @@ func runTrivy(ctx context.Context, env *Env, args []string) (int, error) {
 		Results []struct {
 			Vulnerabilities []struct {
 				VulnerabilityID string `json:"VulnerabilityID"`
+				PkgName         string `json:"PkgName"`
 				FixedVersion    string `json:"FixedVersion"`
 			} `json:"Vulnerabilities"`
 		} `json:"Results"`
@@ -142,9 +161,15 @@ func runTrivy(ctx context.Context, env *Env, args []string) (int, error) {
 	if err := json.Unmarshal(out, &report); err != nil {
 		return 0, errors.New("trivy's answer was not the expected JSON")
 	}
+	// An old kernel left installed after an update is not running, and
+	// sudo apt-get autoremove removes it: it is not counted.
+	running := runningKernel(env)
 	seen := map[string]bool{}
 	for _, r := range report.Results {
 		for _, v := range r.Vulnerabilities {
+			if m := kernelPkgRE.FindStringSubmatch(v.PkgName); m != nil && running != "" && m[1] != running {
+				continue
+			}
 			if v.FixedVersion != "" {
 				seen[v.VulnerabilityID] = true
 			}
