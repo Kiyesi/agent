@@ -171,6 +171,8 @@ func seen(s api.Server, now time.Time) string {
 	switch {
 	case s.State == "disconnected":
 		return "disconnected"
+	case s.Covered != nil && !*s.Covered:
+		return "needs credit"
 	case !s.Connected || s.LastSeenAt == nil:
 		return "not connected"
 	case s.Silent:

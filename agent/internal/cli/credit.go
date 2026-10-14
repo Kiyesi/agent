@@ -42,12 +42,8 @@ func newCredit(io IO) *cobra.Command {
 				fmt.Fprintf(io.Out, "About %s left, until %s, at %d server-days used in the last week.\n",
 					plural(*cr.DaysLeft, "day", "days"), cr.RunsOutOn.Local().Format("2 Jan 2006"), cr.UsedLastWeek)
 			}
-			if !cr.State.Storing {
-				if cr.State.ReadOnly {
-					fmt.Fprintln(io.Out, "\nCredit ran out over a week ago: the dashboard is read-only, and new metrics, logs and traces are not stored.")
-				} else {
-					fmt.Fprintln(io.Out, "\nCredit ran out: new metrics, logs and traces are not stored. Scans, critical alerts and the status page keep working.")
-				}
+			if !cr.State.Storing && cr.Live {
+				fmt.Fprintln(io.Out, "\nNo credit, so the free plan: one server's scans and findings, alerts on Telegram, Slack\nand webhooks, and the status page at status.kiyesi.dev. Add credit for the rest.")
 				if cr.State.EraseOn != nil {
 					fmt.Fprintf(io.Out, "Stored history is deleted on %s unless you top up.\n", cr.State.EraseOn.Local().Format("2 Jan 2006"))
 				}
