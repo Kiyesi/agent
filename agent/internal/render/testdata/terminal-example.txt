@@ -1,0 +1,27 @@
+
+Kiyesi 0.1 · read-only scan · nothing leaves this server
+checkout-api-prod · Ubuntu 22.04 · 22 checks in 6.4 s
+
+GRADE  D  55/100     2 critical · 3 warnings · 17 passed
+
+CRITICAL
+ FAIL  Redis is open to the internet on port 6379 · likely
+       Fix: bind the port to 127.0.0.1 in docker-compose.yml, then
+            docker compose up -d redis
+ FAIL  The node process was killed for using too much memory at 10:41
+       Fix: sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile &&
+            sudo mkswap /swapfile && sudo swapon /swapfile &&
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+WARNING
+ WARN  SSL certificate for api.example.com expires in 9 days
+ WARN  SSH allows password login
+ WARN  Newest backup is 31 hours old
+
+DATA LOCATION
+ Server     DigitalOcean, London, UK     confirmed   outside Nigeria
+ Database   redis (this server)          confirmed   outside Nigeria
+ Database   checkout-db-prod:5432        likely      outside Nigeria
+
+Full report with every fix command: /var/lib/kiyesi/report-2026-10-08.txt
+

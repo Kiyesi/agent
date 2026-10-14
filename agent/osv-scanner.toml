@@ -1,0 +1,6 @@
+# Exceptions for the agent's modules. Each one expires so it is reviewed.
+
+[[IgnoredVulns]]
+id = "GO-2026-5932"
+ignoreUntil = 2027-01-08
+reason = "Advisory says not to use golang.org/x/crypto/openpgp; there is no fixed version. The agent does not import it (go list -deps, 11 October 2026); x/crypto comes in through the database drivers for scrypt, pbkdf2 and ocsp."

@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2019",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "esnext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "removeComments": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": []
+  },
+  "files": ["src/browser.ts"]
+}

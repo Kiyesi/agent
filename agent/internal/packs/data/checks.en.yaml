@@ -1,0 +1,526 @@
+# The wording for every check, in English. This file is the single source of
+# the words: the agent embeds it, and the docs pages are built from it.
+#
+# Placeholders such as {port} are filled in by the agent. A finding's
+# severity is critical, warning or info. "root" says whether the check needs
+# root to read what it needs, and why. Without root, such a check is skipped,
+# never counted as passed.
+
+version: 1
+language: en
+total_checks: 22
+
+skips:
+  needs-root: "needs root: run sudo kiyesi scan"
+  not-linux: "runs only on Linux"
+  timeout: "took too long and was stopped"
+  failed: "could not finish: {reason}"
+
+checks:
+  # ---------------------------------------------------------------- Health
+
+  - id: load
+    area: health
+    name: Load
+    reads: The 15-minute load average in /proc/loadavg and the number of CPU cores in /proc/cpuinfo.
+    root:
+      needed: never
+    passed: "15-minute load is {load} per CPU core"
+    findings:
+      high:
+        severity: warning
+        sentence: "The 15-minute load is {load} per CPU core, above {limit}"
+        why: >-
+          A load this high for this long usually means the server is too small for its work,
+          or one process is stuck. Load is a stand-in for CPU use until this server is
+          connected and Kiyesi can watch CPU every minute.
+        fix: "ps -eo pid,comm,%cpu --sort=-%cpu | head -n 6"
+
+  - id: memory
+    area: health
+    name: Memory and swap
+    reads: Memory and swap totals in /proc/meminfo.
+    root:
+      needed: never
+    passed: "{percent}% of {total} memory in use"
+    findings:
+      high:
+        severity: warning
+        sentence: "Memory is {percent}% in use, above {limit}%"
+        why: >-
+          When memory runs out, Linux kills a process to free it, usually the biggest one,
+          which is often the app.
+        fix: "ps -eo pid,comm,rss --sort=-rss | head -n 6"
+      no-swap:
+        severity: warning
+        sentence: "This server has {total} of memory and no swap"
+        why: >-
+          On a server under 2 GB with no swap, one spike in memory gets the app killed.
+          Swap gives it room to survive the spike.
+        fix: >-
+          sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile &&
+          sudo mkswap /swapfile && sudo swapon /swapfile &&
+          echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+  - id: disk
+    area: health
+    name: Disk
+    reads: The mounted file systems in /proc/self/mounts, and the space and inodes on each.
+    root:
+      needed: never
+    passed: "Every disk is under {limit}% full"
+    findings:
+      space-warning:
+        severity: warning
+        sentence: "Disk {mount} is {percent}% full"
+        why: When a disk fills, databases stop writing and apps crash.
+        fix: "sudo du -xh {mount} --max-depth=2 2>/dev/null | sort -rh | head -n 15"
+      space-critical:
+        severity: critical
+        sentence: "Disk {mount} is {percent}% full"
+        why: When a disk fills, databases stop writing and apps crash. This one is nearly there.
+        fix: "sudo du -xh {mount} --max-depth=2 2>/dev/null | sort -rh | head -n 15"
+      inodes-warning:
+        severity: warning
+        sentence: "Disk {mount} has used {percent}% of its inodes"
+        why: >-
+          When inodes run out, no new file can be created even with space left. Many tiny
+          files, such as old sessions or cache entries, cause it.
+        fix: "sudo find {mount} -xdev -type f | cut -d/ -f2-3 | sort | uniq -c | sort -rn | head"
+      inodes-critical:
+        severity: critical
+        sentence: "Disk {mount} has used {percent}% of its inodes"
+        why: >-
+          When inodes run out, no new file can be created even with space left. This disk is
+          nearly there.
+        fix: "sudo find {mount} -xdev -type f | cut -d/ -f2-3 | sort | uniq -c | sort -rn | head"
+
+  - id: containers
+    area: health
+    name: Containers
+    reads: Each container's state, restart count and health status, read from the Docker socket.
+    root:
+      needed: sometimes
+      why: The Docker socket can be read only by root and the docker group.
+    passed: "{count} containers running, none failing"
+    passed-none: "No containers on this server"
+    findings:
+      exited:
+        severity: warning
+        sentence: "Container {name} has stopped (exit code {code})"
+        why: A stopped container is a service that is not running.
+        fix: "docker logs --tail 50 {name}"
+      unhealthy:
+        severity: warning
+        sentence: "Container {name} is failing its health check"
+        why: Docker reports the container as unhealthy, so it is running but not answering properly.
+        fix: "docker inspect --format '{{json .State.Health.Log}}' {name}"
+      restarts:
+        severity: warning
+        sentence: "Container {name} restarted {count} times in the last hour"
+        why: A container that keeps restarting is crashing, and users see errors each time.
+        fix: "docker logs --tail 100 {name}"
+
+  - id: oom
+    area: health
+    name: Out-of-memory kills
+    reads: The kernel log for the last 24 hours, through journalctl or /var/log/kern.log.
+    root:
+      needed: sometimes
+      why: On Ubuntu the kernel log can be read only by root and the adm group.
+    passed: "No process was killed for memory in the last 24 hours"
+    skips:
+      no-kernel-log: "found no kernel log: neither journald nor /var/log/kern.log is on this system"
+    findings:
+      killed-no-swap:
+        severity: critical
+        sentence: "The {process} process was killed for using too much memory at {time}"
+        why: >-
+          This server has {total} of memory and no swap, so one spike takes the app down.
+        fix: >-
+          sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile &&
+          sudo mkswap /swapfile && sudo swapon /swapfile &&
+          echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+      killed:
+        severity: critical
+        sentence: "The {process} process was killed for using too much memory at {time}"
+        why: >-
+          When memory runs out, Linux kills the biggest process, and everyone using it gets
+          errors. Set a memory limit on the container that grows, or move to a server with
+          more memory.
+        fix: "ps -eo pid,comm,rss --sort=-rss | head -n 6"
+
+  - id: certificates
+    area: health
+    name: SSL certificates
+    reads: >-
+      The certificates in /etc/letsencrypt/live, Caddy's certificate folders, and the
+      certificate files named in nginx and Apache settings.
+    root:
+      needed: sometimes
+      why: Certificate folders such as /etc/letsencrypt/live can be read only by root.
+    passed: "{count} certificates, none expiring within {limit} days"
+    passed-none: "No certificates found on this server"
+    findings:
+      expiring:
+        severity: warning
+        sentence: "SSL certificate for {host} expires in {days} days"
+        why: When it expires, browsers and apps will refuse to connect.
+        fix: "sudo certbot renew"
+        fix-variants:
+          caddy: "Caddy renews by itself, so find out why it has not: sudo journalctl -u caddy --since -24h | grep -i error"
+          other: "Renew the certificate at {path} with whoever issued it, then reload the web server"
+      expired:
+        severity: critical
+        sentence: "SSL certificate for {host} expired {days} days ago"
+        why: Browsers and apps are refusing to connect to {host} now.
+        fix: "sudo certbot renew --force-renewal"
+        fix-variants:
+          caddy: "Caddy renews by itself, so find out why it has not: sudo journalctl -u caddy --since -24h | grep -i error"
+          other: "Renew the certificate at {path} with whoever issued it, then reload the web server"
+
+  - id: backups
+    area: health
+    name: Backups
+    reads: The age of the newest file in each backup folder named in /etc/kiyesi/config.yaml.
+    root:
+      needed: sometimes
+      why: Backup folders are often readable only by root.
+    passed: "Newest backup is {age} old"
+    findings:
+      not-set:
+        severity: warning
+        sentence: No backup is set up for Kiyesi to check
+        why: >-
+          Without a backup, a failed disk or one wrong command loses the data for good. If you
+          do have backups, tell Kiyesi where they are written.
+        fix: "Add the backup folder under backups.paths in /etc/kiyesi/config.yaml"
+      empty:
+        severity: warning
+        sentence: "No backup found in {path}"
+        why: The backup folder is set up but holds no files, so the backup job is not writing there.
+        fix: "crontab -l | grep -i backup"
+      old:
+        severity: warning
+        sentence: "Newest backup is {age} old"
+        why: Backups are expected every {limit} hours. The last one was written on {when}.
+        fix: "crontab -l | grep -i backup"
+
+  - id: updates
+    area: health
+    name: Pending updates
+    reads: >-
+      The security updates apt has waiting, from a dry run that changes nothing
+      (apt-get -s upgrade), and the date Kiyesi first saw each one.
+    root:
+      needed: never
+    passed: "No security update has waited more than {limit} days"
+    skips:
+      no-apt: "needs apt, so it runs on Debian and Ubuntu only"
+    findings:
+      waiting:
+        severity: warning
+        sentence: "{count} security updates have waited more than {limit} days"
+        why: Security updates fix flaws that attackers already know about.
+        fix: "sudo apt-get update && sudo apt-get upgrade"
+
+  # -------------------------------------------------------------- Security
+
+  - id: open-ports
+    area: security
+    name: Open ports
+    reads: The ports listening on public addresses, from /proc/net/tcp and /proc/net/tcp6, and the ports Docker publishes.
+    root:
+      needed: never
+    passed: "Only allowed ports are open ({ports})"
+    findings:
+      open:
+        severity: warning
+        sentence: "Port {port} is open on a public address"
+        why: >-
+          Every open port is a way in. Only ports you mean to serve should be open. If this one
+          should be open, add it to ports.allowed in /etc/kiyesi/config.yaml.
+        fix: "Bind the program to 127.0.0.1, or close the port: sudo ufw deny {port}"
+
+  - id: exposed-databases
+    area: security
+    name: Exposed databases
+    reads: >-
+      Whether MongoDB, Redis, PostgreSQL or MySQL listen on a public address or are published
+      by Docker, and whether the firewall on this server blocks them.
+    root:
+      needed: sometimes
+      why: Reading the firewall rules needs root.
+    passed: "No database is open to the internet"
+    findings:
+      open:
+        severity: critical
+        confidence: likely
+        sentence: "{database} is open to the internet on port {port}"
+        why: >-
+          Anyone can connect and read or wipe the data. A cloud firewall outside the server
+          cannot be seen from here, so this is likely, not confirmed.
+        fix: "bind the port to 127.0.0.1 in docker-compose.yml, then\ndocker compose up -d {service}"
+        fix-variants:
+          docker-run: "recreate the container with -p 127.0.0.1:{port}:{port} in place of -p {port}:{port}"
+          redis: "set bind 127.0.0.1 ::1 in /etc/redis/redis.conf, then sudo systemctl restart redis-server"
+          mongodb: "set bindIp: 127.0.0.1 under net: in /etc/mongod.conf, then sudo systemctl restart mongod"
+          postgresql: "set listen_addresses = 'localhost' in postgresql.conf, then sudo systemctl restart postgresql"
+          mysql: "set bind-address = 127.0.0.1 in /etc/mysql/mysql.conf.d/mysqld.cnf, then sudo systemctl restart mysql"
+
+  - id: docker-firewall
+    area: security
+    name: Docker bypassing the firewall
+    reads: The ports Docker publishes on all addresses, and the ufw rules for them.
+    root:
+      needed: sometimes
+      why: Reading the ufw rules and the Docker socket needs root.
+    passed: "Docker publishes no port the firewall says is closed"
+    findings:
+      bypass:
+        severity: warning
+        sentence: "Docker publishes port {port} past the firewall"
+        why: >-
+          ufw says this port is closed, but Docker opens it anyway, so it can be reached from
+          the internet.
+        fix: "bind the port to 127.0.0.1 in docker-compose.yml, then\ndocker compose up -d {service}"
+
+  - id: ssh
+    area: security
+    name: SSH settings
+    reads: /etc/ssh/sshd_config and the files in /etc/ssh/sshd_config.d.
+    root:
+      needed: never
+    passed: "SSH allows neither root login nor password login"
+    passed-none: "No SSH server on this machine"
+    findings:
+      password:
+        severity: warning
+        sentence: SSH allows password login
+        why: Passwords can be guessed by automated attacks. Keys cannot. Check that your key works before you turn passwords off.
+        fix: >-
+          echo "PasswordAuthentication no" | sudo tee /etc/ssh/sshd_config.d/00-kiyesi-no-password.conf &&
+          sudo systemctl reload ssh
+      root:
+        severity: warning
+        sentence: SSH allows root login
+        why: >-
+          Attackers try root first. Sign in as a normal user and use sudo. Check that such a
+          user can sign in before you turn root login off.
+        fix: >-
+          echo "PermitRootLogin no" | sudo tee /etc/ssh/sshd_config.d/00-kiyesi-no-root.conf &&
+          sudo systemctl reload ssh
+
+  - id: firewall
+    area: security
+    name: Firewall
+    reads: Whether ufw, firewalld or an nftables or iptables rule set is on.
+    root:
+      needed: sometimes
+      why: When ufw and firewalld are off, reading nftables or iptables rules needs root.
+    passed: "The firewall is on ({firewall})"
+    findings:
+      off:
+        severity: warning
+        sentence: No firewall is on
+        why: Without a firewall, every port a program opens can be reached from the internet.
+        fix: "sudo ufw allow OpenSSH && sudo ufw enable"
+
+  - id: login-protection
+    area: security
+    name: Login attack protection
+    reads: Whether fail2ban, sshguard or CrowdSec is running, and whether SSH allows password login.
+    root:
+      needed: never
+    passed: "{protection}"
+    findings:
+      missing:
+        severity: warning
+        sentence: Nothing blocks repeated SSH password guesses
+        why: >-
+          SSH allows password login and nothing locks out an address that keeps guessing.
+          Turning off password login also solves this.
+        fix: "sudo apt-get install -y fail2ban && sudo systemctl enable --now fail2ban"
+
+  - id: secrets-in-files
+    area: security
+    name: Secrets in files
+    reads: >-
+      Environment files, Compose files and shell history in the folders listed under
+      secrets.paths in /etc/kiyesi/config.yaml. Kiyesi reports where a secret is, never its value.
+    root:
+      needed: sometimes
+      why: Other users' files and /root can be read only by root.
+    passed: "No exposed secrets in {count} files checked"
+    findings:
+      world-readable:
+        severity: warning
+        sentence: "{path} holds secrets and every user on this server can read it"
+        why: Any user or program on the server can read the secrets in this file.
+        fix: "sudo chmod 600 {path}"
+      in-compose:
+        severity: warning
+        sentence: "A secret is written into {path} at line {line}"
+        why: >-
+          Anyone who can read this file, or the repository it is in, has the secret. Keep
+          secrets in an env file only the owner can read.
+        fix: "Move the value to an env file with chmod 600, and point env_file at it in {path}"
+      in-history:
+        severity: warning
+        sentence: "A secret was typed into shell history in {path} at line {line}"
+        why: Shell history is kept in plain text, so the secret stays on disk after the command ran.
+        fix: "Delete line {line} from {path}, then change the secret"
+
+  - id: risky-containers
+    area: security
+    name: Risky containers
+    reads: Each running container's settings for privileged mode, mounted volumes and user, read from the Docker socket.
+    root:
+      needed: sometimes
+      why: The Docker socket can be read only by root and the docker group.
+    passed: "No container is privileged, has the Docker socket, or runs as root"
+    passed-none: "No containers on this server"
+    findings:
+      privileged:
+        severity: critical
+        sentence: "Container {name} runs in privileged mode"
+        why: A privileged container can take over the whole server.
+        fix: "Remove privileged: true from the service in docker-compose.yml, and add only the capabilities it needs"
+      docker-socket:
+        severity: critical
+        sentence: "Container {name} has the Docker socket mounted"
+        why: Whoever controls this container controls Docker, and so the whole server.
+        fix: "Remove the /var/run/docker.sock volume from the service, or give it a read-only socket proxy"
+      root:
+        severity: warning
+        sentence: "Container {name} runs as root"
+        why: If the app is broken into, the attacker is root inside the container, one step from the server.
+        fix: "Add user: \"1000:1000\" to the service in docker-compose.yml, or a USER line to its Dockerfile"
+
+  - id: vulnerabilities
+    area: security
+    name: Known vulnerabilities
+    reads: >-
+      System packages and container images, checked by Trivy if it is already installed.
+      Kiyesi never downloads Trivy or its database during a scan.
+    root:
+      needed: sometimes
+      why: Trivy needs root to read every system package and the Docker socket.
+    passed: "No critical vulnerability with a fix available"
+    skips:
+      not-installed: "Trivy is not installed. Install Trivy 0.74.0 or newer to check"
+      no-database: "Trivy has no vulnerability database here, and Kiyesi never downloads one during a scan. Run trivy image --download-db-only once, then scan again"
+      bad-version: "Trivy {version} is a compromised release from March 2026. Remove it and install 0.74.0 or newer"
+      failed: "Trivy could not finish: {reason}"
+    findings:
+      system:
+        severity: warning
+        sentence: "{count} critical vulnerabilities with a fix available in this server's packages"
+        why: These flaws are public and already fixed. Installing the updates closes them.
+        fix: "sudo apt-get update && sudo apt-get upgrade"
+      image:
+        severity: warning
+        sentence: "{count} critical vulnerabilities with a fix available in image {image}"
+        why: These flaws are public and already fixed in newer packages for this image.
+        fix: "Update the base image of {image}, rebuild it, and restart its containers"
+
+  # --------------------------------------------------------- Data location
+  # Each data-location finding says confirmed or likely. Only the provider's
+  # own details count as confirmed: an address can be placed in the wrong
+  # country. Being outside the home country is shown in the report's DATA
+  # LOCATION section and does not cost grade points, as in the UI design;
+  # only payment data outside the home country is critical.
+
+  - id: server-location
+    area: data-location
+    name: Server location
+    reads: >-
+      The cloud provider's own details: /run/cloud-init/instance-data.json, the maker in
+      /sys/class/dmi/id/sys_vendor, and the provider's metadata address on its local network
+      (169.254.169.254). Nothing is sent there; the scan only reads the region.
+    root:
+      needed: never
+    passed: "This server is in {place}, inside {home}"
+    skips:
+      unknown: "the provider's details could not be read, so the country is found from this server's address once it is connected"
+    findings:
+      outside:
+        severity: info
+        confidence: confirmed
+        sentence: "This server is in {place}, outside {home}"
+        why: >-
+          {home}'s data-location rule applies to data stored on this server. {rule}
+          The provider's own details say where it is.
+        fix: "Move the server to a region inside {home}, or keep data that must stay in {home} off it"
+
+  - id: database-connections
+    area: data-location
+    name: Database connections
+    reads: >-
+      The database hosts in env files, Compose files and connection settings in the folders
+      under secrets.paths, and in running containers' environments, by the setting's usual names
+      or by a value that is a database's address. Only the host and port are kept, never the
+      user or password.
+    root:
+      needed: sometimes
+      why: Other users' files and /root can be read only by root.
+    passed: "{count} database hosts checked, none outside {home}"
+    passed-none: "No database connection settings found"
+    findings:
+      outside:
+        severity: info
+        confidence: likely
+        sentence: "Database {host} is in {place}, outside {home}"
+        why: >-
+          The region in the host's name places this database in {place}. Names can mislead, so
+          this is likely, not confirmed.
+        fix: "Move the database to a region inside {home}, or check with the provider where it is"
+
+  - id: backup-destinations
+    area: data-location
+    name: Backup destinations
+    reads: >-
+      The storage targets in rclone settings, restic repositories, AWS CLI settings, and the
+      backup commands in cron jobs and scripts under secrets.paths.
+    root:
+      needed: sometimes
+      why: rclone settings and cron jobs in /root and other users' folders can be read only by root.
+    passed: "{count} backup destinations checked, none outside {home}"
+    passed-none: "No backup destination found in the settings Kiyesi reads"
+    findings:
+      outside:
+        severity: info
+        confidence: likely
+        sentence: "Backups go to {target} in {place}, outside {home}"
+        why: >-
+          A backup holds a full copy of the data, so the rule for {home} applies to it too.
+        fix: "Point the backup at a bucket or server inside {home}"
+
+  - id: outside-services
+    area: data-location
+    name: Outside services
+    reads: >-
+      The log, monitoring, email and SMS services named in env files, Compose files and running
+      containers' environments, such as Sentry, SMTP hosts, Twilio and Termii.
+    root:
+      needed: sometimes
+      why: Other users' files and /root can be read only by root.
+    passed: "{count} outside services listed for review"
+    passed-none: "No outside log, monitoring, email or SMS service found"
+    findings: {}
+
+  - id: payment-data
+    area: data-location
+    name: Payment data tag
+    reads: The databases listed under payment_data in /etc/kiyesi/config.yaml.
+    root:
+      needed: never
+    passed: "{count} databases marked as holding payment data, all inside {home}"
+    passed-none: "No database is marked as holding payment data. List them under payment_data in /etc/kiyesi/config.yaml"
+    findings:
+      outside:
+        severity: critical
+        sentence: "Payment data in {host} is stored outside {home}"
+        why: >-
+          You marked {host} as holding payment data, and it is in {place}. {rule}
+        fix: "Move {host} to a provider inside {home} before the rule's deadline"

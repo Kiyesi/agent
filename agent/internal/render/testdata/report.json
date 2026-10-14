@@ -1,0 +1,255 @@
+{
+  "schema": "kiyesi.scan/v1",
+  "version": "0.1.0",
+  "host": {
+    "name": "checkout-api-prod",
+    "os": "Ubuntu 22.04",
+    "tested": true,
+    "root": true
+  },
+  "started_at": "2026-10-08T10:45:00Z",
+  "seconds": 6.4,
+  "grade": {
+    "score": 55,
+    "letter": "D",
+    "based_on": 22,
+    "total": 22
+  },
+  "counts": {
+    "critical": 2,
+    "warnings": 3,
+    "info": 0,
+    "passed": 17,
+    "skipped": 0,
+    "run": 22
+  },
+  "checks": [
+    {
+      "id": "exposed-databases",
+      "name": "Exposed databases",
+      "area": "",
+      "status": "fail",
+      "findings": [
+        {
+          "check": "exposed-databases",
+          "severity": "critical",
+          "confidence": "likely",
+          "sentence": "Redis is open to the internet on port 6379",
+          "why": "Anyone can connect and read or wipe the data. A cloud firewall outside the server cannot be seen from here, so this is likely, not confirmed.",
+          "fix": "bind the port to 127.0.0.1 in docker-compose.yml, then\ndocker compose up -d redis"
+        }
+      ]
+    },
+    {
+      "id": "oom",
+      "name": "Out-of-memory kills",
+      "area": "",
+      "status": "fail",
+      "findings": [
+        {
+          "check": "oom",
+          "severity": "critical",
+          "sentence": "The node process was killed for using too much memory at 10:41",
+          "why": "This server has 1 GB of memory and no swap, so one spike takes the app down.",
+          "fix": "sudo fallocate -l 1G /swapfile \u0026\u0026 sudo chmod 600 /swapfile \u0026\u0026 sudo mkswap /swapfile \u0026\u0026 sudo swapon /swapfile \u0026\u0026 echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab"
+        }
+      ]
+    },
+    {
+      "id": "certificates",
+      "name": "SSL certificates",
+      "area": "",
+      "status": "fail",
+      "findings": [
+        {
+          "check": "certificates",
+          "severity": "warning",
+          "sentence": "SSL certificate for api.example.com expires in 9 days",
+          "why": "When it expires, browsers and apps will refuse to connect.",
+          "fix": "sudo certbot renew"
+        }
+      ]
+    },
+    {
+      "id": "ssh",
+      "name": "SSH settings",
+      "area": "",
+      "status": "fail",
+      "findings": [
+        {
+          "check": "ssh",
+          "severity": "warning",
+          "sentence": "SSH allows password login",
+          "why": "Passwords can be guessed by automated attacks. Keys cannot. Check that your key works before you turn passwords off.",
+          "fix": "echo \"PasswordAuthentication no\" | sudo tee /etc/ssh/sshd_config.d/00-kiyesi-no-password.conf \u0026\u0026 sudo systemctl reload ssh"
+        }
+      ]
+    },
+    {
+      "id": "backups",
+      "name": "Backups",
+      "area": "",
+      "status": "fail",
+      "findings": [
+        {
+          "check": "backups",
+          "severity": "warning",
+          "sentence": "Newest backup is 31 hours old",
+          "why": "Backups are expected every 24 hours. The last one was written on Wed 7 Oct at 04:00.",
+          "fix": "crontab -l | grep -i backup"
+        }
+      ]
+    },
+    {
+      "id": "server-location",
+      "name": "Server location",
+      "area": "",
+      "status": "fail",
+      "locations": [
+        {
+          "check": "server-location",
+          "kind": "Server",
+          "name": "DigitalOcean, London, UK",
+          "place": "London, UK",
+          "country": "GB",
+          "confidence": "confirmed"
+        }
+      ]
+    },
+    {
+      "id": "database-connections",
+      "name": "Database connections",
+      "area": "",
+      "status": "fail",
+      "locations": [
+        {
+          "check": "database-connections",
+          "kind": "Database",
+          "name": "redis (this server)",
+          "place": "London, UK",
+          "country": "GB",
+          "confidence": "confirmed"
+        },
+        {
+          "check": "database-connections",
+          "kind": "Database",
+          "name": "checkout-db-prod:5432",
+          "place": "London, UK",
+          "country": "GB",
+          "confidence": "likely"
+        }
+      ]
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    },
+    {
+      "id": "x",
+      "name": "Load",
+      "area": "",
+      "status": "pass",
+      "summary": "15-minute load is 0.20 per CPU core"
+    }
+  ],
+  "home_country": {
+    "code": "NG",
+    "name": "Nigeria",
+    "rule": "On 15 June 2026 the Central Bank of Nigeria directed that payment transaction data created in Nigeria be stored and managed in Nigeria by 1 January 2027."
+  },
+  "report_file": "/var/lib/kiyesi/report-2026-10-08.txt"
+}

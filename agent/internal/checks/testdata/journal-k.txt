@@ -1,0 +1,1 @@
+2026-10-08T10:41:07+0000 checkout-api-prod kernel: Memory cgroup out of memory: Killed process 48211 (node) total-vm:1834448kB, anon-rss:612340kB, file-rss:0kB, shmem-rss:0kB, UID:1000 pgtables:1912kB oom_score_adj:0

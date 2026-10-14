@@ -1,0 +1,24 @@
+{
+  "_beta_keys": ["subplatform"],
+  "base64_encoded_keys": [],
+  "sensitive_keys": [],
+  "v1": {
+    "availability_zone": null,
+    "cloud_name": "digitalocean",
+    "cloud_platform": "digitalocean",
+    "distro": "ubuntu",
+    "distro_release": "jammy",
+    "distro_version": "22.04",
+    "instance_id": "512345678",
+    "kernel_release": "5.15.0-122-generic",
+    "local_hostname": "checkout-api-prod",
+    "machine": "x86_64",
+    "platform": "digitalocean",
+    "public_ssh_keys": [],
+    "python_version": "3.10.12",
+    "region": "lon1",
+    "subplatform": "metadata (http://169.254.169.254/metadata/v1.json)",
+    "system_platform": "Linux-5.15.0-122-generic-x86_64-with-glibc2.35",
+    "variant": "ubuntu"
+  }
+}

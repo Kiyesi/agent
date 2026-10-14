@@ -1,0 +1,64 @@
+Kiyesi 0.1 · read-only scan · full report
+checkout-api-prod · Ubuntu 22.04 · 22 checks in 6.4 s
+Scanned on Thu 8 Oct 2026 at 10:45 UTC, as root
+
+GRADE  D  55/100     2 critical · 3 warnings · 17 passed
+
+CRITICAL
+ FAIL  Redis is open to the internet on port 6379 · likely
+       Why: Anyone can connect and read or wipe the data. A cloud firewall
+            outside the server cannot be seen from here, so this is likely,
+            not confirmed.
+       Fix: bind the port to 127.0.0.1 in docker-compose.yml, then
+            docker compose up -d redis
+
+ FAIL  The node process was killed for using too much memory at 10:41
+       Why: This server has 1 GB of memory and no swap, so one spike takes
+            the app down.
+       Fix: sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile &&
+            sudo mkswap /swapfile && sudo swapon /swapfile &&
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+WARNING
+ WARN  SSL certificate for api.example.com expires in 9 days
+       Why: When it expires, browsers and apps will refuse to connect.
+       Fix: sudo certbot renew
+
+ WARN  SSH allows password login
+       Why: Passwords can be guessed by automated attacks. Keys cannot. Check
+            that your key works before you turn passwords off.
+       Fix: echo "PasswordAuthentication no" |
+            sudo tee /etc/ssh/sshd_config.d/00-kiyesi-no-password.conf &&
+            sudo systemctl reload ssh
+
+ WARN  Newest backup is 31 hours old
+       Why: Backups are expected every 24 hours. The last one was written on
+            Wed 7 Oct at 04:00.
+       Fix: crontab -l | grep -i backup
+
+DATA LOCATION (home country: Nigeria)
+ Server     DigitalOcean, London, UK     confirmed   outside Nigeria
+ Database   redis (this server)          confirmed   outside Nigeria (London, UK)
+ Database   checkout-db-prod:5432        likely      outside Nigeria (London, UK)
+ Rule: On 15 June 2026 the Central Bank of Nigeria directed that payment
+       transaction data created in Nigeria be stored and managed in Nigeria by
+       1 January 2027.
+
+PASSED
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+ PASS  Load: 15-minute load is 0.20 per CPU core
+
+Kiyesi only read this server. It changed nothing and sent nothing.
