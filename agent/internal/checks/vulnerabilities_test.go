@@ -3,6 +3,7 @@ package checks
 import (
 	"context"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/kiyesi/kiyesi/agent/internal/system"
@@ -44,6 +45,23 @@ func TestVulnerabilitiesNeverDownloads(t *testing.T) {
 		if ran != "trivy --version" && !contains(ran, "--skip-db-update") {
 			t.Errorf("ran Trivy without --skip-db-update: %q", ran)
 		}
+	}
+}
+
+func TestVulnerabilitiesLeaveOutOldKernelsThatAreNotRunning(t *testing.T) {
+	report := `{"Results":[{"Vulnerabilities":[
+		{"VulnerabilityID":"CVE-1","PkgName":"linux-headers-6.8.0-146-generic","FixedVersion":"6.8.0-147.147"},
+		{"VulnerabilityID":"CVE-2","PkgName":"linux-modules-6.8.0-142-generic","FixedVersion":"6.8.0-147.147"},
+		{"VulnerabilityID":"CVE-3","PkgName":"linux-image-6.8.0-147-generic","FixedVersion":"6.8.0-148.148"},
+		{"VulnerabilityID":"CVE-4","PkgName":"openssl","FixedVersion":"3.0.13-0ubuntu3.6"}
+	]}]}`
+	e := newTestEnv().command("trivy --version", "Version: 0.74.0\n").command(trivyRootfs, report)
+	e.fs["proc/sys/kernel/osrelease"] = &fstest.MapFile{Data: []byte("6.8.0-147-generic\n")}
+	r := run(t, vulnerabilitiesCheck{}, e)
+	wantStatus(t, r, StatusFail, "system")
+	// Old kernels 146 and 142 are not running: only the running kernel and openssl count.
+	if r.Findings[0].Vars["count"] != "2" {
+		t.Errorf("count = %v", r.Findings[0].Vars)
 	}
 }
 
