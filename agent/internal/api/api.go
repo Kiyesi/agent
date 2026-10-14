@@ -268,6 +268,9 @@ type Server struct {
 	LastSeenAt   *time.Time `json:"lastSeenAt"`
 	Silent       bool       `json:"silent"`
 	LastScan     *Summary   `json:"lastScan"`
+	// Watched: every server with credit; on the free plan, one. Absent from
+	// older services, which watched every server.
+	Covered *bool `json:"covered"`
 	// The calm streak: whole days since a scan last found something critical.
 	Calm *struct {
 		Days int `json:"days"`
