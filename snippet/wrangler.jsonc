@@ -1,0 +1,15 @@
+// The browser snippet on Cloudflare's network, at
+// https://cdn.kiyesi.dev/v1/browser.js: plain files, no Worker code.
+// Deploy from snippet/ after `pnpm build` (which also copies the file into
+// public/v1/):
+//   npx wrangler@4.148.0 deploy
+{
+  "name": "kiyesi-cdn",
+  "compatibility_date": "2026-10-01",
+  "routes": [{ "pattern": "cdn.kiyesi.dev", "custom_domain": true }],
+  "workers_dev": false,
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "none"
+  }
+}

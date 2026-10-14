@@ -1,0 +1,190 @@
+# Cloud providers and their regions, for the data-location checks.
+#
+# vendors: what the provider writes in /sys/class/dmi/id/sys_vendor.
+# cloud_init: the cloud_name cloud-init reports in /run/cloud-init/instance-data.json.
+# hosts: hostname patterns for managed databases and storage. (?P<region>...)
+#   captures the region code, which is looked up in regions.
+# regions: region code -> city and ISO country code.
+
+version: 1
+providers:
+  - id: digitalocean
+    name: DigitalOcean
+    vendors: [DigitalOcean]
+    cloud_init: [digitalocean]
+    hosts:
+      - '^db-[a-z]+-(?P<region>[a-z]+\d)-\d+-do-user-.*\.db\.ondigitalocean\.com$'
+      - '^(?P<region>[a-z]+\d)\.digitaloceanspaces\.com$'
+      - '\.(?P<region>[a-z]+\d)\.digitaloceanspaces\.com$'
+    regions:
+      nyc1: { city: New York, country: US }
+      nyc2: { city: New York, country: US }
+      nyc3: { city: New York, country: US }
+      sfo2: { city: San Francisco, country: US }
+      sfo3: { city: San Francisco, country: US }
+      atl1: { city: Atlanta, country: US }
+      ams3: { city: Amsterdam, country: NL }
+      lon1: { city: London, country: GB }
+      fra1: { city: Frankfurt, country: DE }
+      tor1: { city: Toronto, country: CA }
+      blr1: { city: Bangalore, country: IN }
+      sgp1: { city: Singapore, country: SG }
+      syd1: { city: Sydney, country: AU }
+
+  - id: aws
+    name: AWS
+    vendors: [Amazon EC2]
+    cloud_init: [aws]
+    hosts:
+      - '\.(?P<region>[a-z]{2}-[a-z]+-\d)\.rds\.amazonaws\.com$'
+      - '\.(?P<region>[a-z]{2}-[a-z]+-\d)\.cache\.amazonaws\.com$'
+      - '(^|\.)s3[.-](?P<region>[a-z]{2}-[a-z]+-\d)\.amazonaws\.com$'
+      - '\.(?P<region>[a-z]{2}-[a-z]+-\d)\.docdb\.amazonaws\.com$'
+      - '^aws-\d+-(?P<region>[a-z]{2}-[a-z]+-\d)\.pooler\.supabase\.com$'
+      - '\.(?P<region>[a-z]{2}-[a-z]+-\d)\.aws\.neon\.tech$'
+    regions:
+      us-east-1: { city: Virginia, country: US }
+      us-east-2: { city: Ohio, country: US }
+      us-west-1: { city: California, country: US }
+      us-west-2: { city: Oregon, country: US }
+      ca-central-1: { city: Montreal, country: CA }
+      ca-west-1: { city: Calgary, country: CA }
+      mx-central-1: { city: Querétaro, country: MX }
+      sa-east-1: { city: São Paulo, country: BR }
+      eu-west-1: { city: Dublin, country: IE }
+      eu-west-2: { city: London, country: GB }
+      eu-west-3: { city: Paris, country: FR }
+      eu-central-1: { city: Frankfurt, country: DE }
+      eu-central-2: { city: Zurich, country: CH }
+      eu-north-1: { city: Stockholm, country: SE }
+      eu-south-1: { city: Milan, country: IT }
+      eu-south-2: { city: Spain, country: ES }
+      af-south-1: { city: Cape Town, country: ZA }
+      me-south-1: { city: Bahrain, country: BH }
+      me-central-1: { city: UAE, country: AE }
+      il-central-1: { city: Tel Aviv, country: IL }
+      ap-south-1: { city: Mumbai, country: IN }
+      ap-south-2: { city: Hyderabad, country: IN }
+      ap-southeast-1: { city: Singapore, country: SG }
+      ap-southeast-2: { city: Sydney, country: AU }
+      ap-southeast-3: { city: Jakarta, country: ID }
+      ap-southeast-4: { city: Melbourne, country: AU }
+      ap-northeast-1: { city: Tokyo, country: JP }
+      ap-northeast-2: { city: Seoul, country: KR }
+      ap-northeast-3: { city: Osaka, country: JP }
+      ap-east-1: { city: Hong Kong, country: HK }
+
+  - id: gcp
+    name: Google Cloud
+    vendors: [Google]
+    cloud_init: [gce]
+    hosts: []
+    regions:
+      us-central1: { city: Iowa, country: US }
+      us-east1: { city: South Carolina, country: US }
+      us-east4: { city: Virginia, country: US }
+      us-west1: { city: Oregon, country: US }
+      northamerica-northeast1: { city: Montreal, country: CA }
+      southamerica-east1: { city: São Paulo, country: BR }
+      europe-west1: { city: Belgium, country: BE }
+      europe-west2: { city: London, country: GB }
+      europe-west3: { city: Frankfurt, country: DE }
+      europe-west4: { city: Netherlands, country: NL }
+      europe-west6: { city: Zurich, country: CH }
+      europe-west9: { city: Paris, country: FR }
+      africa-south1: { city: Johannesburg, country: ZA }
+      me-west1: { city: Tel Aviv, country: IL }
+      asia-south1: { city: Mumbai, country: IN }
+      asia-southeast1: { city: Singapore, country: SG }
+      asia-northeast1: { city: Tokyo, country: JP }
+      australia-southeast1: { city: Sydney, country: AU }
+
+  - id: azure
+    name: Azure
+    vendors: [Microsoft Corporation]
+    cloud_init: [azure]
+    hosts: []
+    regions:
+      eastus: { city: Virginia, country: US }
+      eastus2: { city: Virginia, country: US }
+      westus: { city: California, country: US }
+      westus2: { city: Washington, country: US }
+      centralus: { city: Iowa, country: US }
+      canadacentral: { city: Toronto, country: CA }
+      brazilsouth: { city: São Paulo, country: BR }
+      northeurope: { city: Dublin, country: IE }
+      westeurope: { city: Amsterdam, country: NL }
+      uksouth: { city: London, country: GB }
+      ukwest: { city: Cardiff, country: GB }
+      francecentral: { city: Paris, country: FR }
+      germanywestcentral: { city: Frankfurt, country: DE }
+      southafricanorth: { city: Johannesburg, country: ZA }
+      southafricawest: { city: Cape Town, country: ZA }
+      uaenorth: { city: Dubai, country: AE }
+      centralindia: { city: Pune, country: IN }
+      southeastasia: { city: Singapore, country: SG }
+      australiaeast: { city: Sydney, country: AU }
+      japaneast: { city: Tokyo, country: JP }
+
+  - id: hetzner
+    name: Hetzner
+    vendors: [Hetzner]
+    cloud_init: [hetzner]
+    hosts:
+      - '^(?P<region>fsn1|nbg1|hel1)\.your-objectstorage\.com$'
+    regions:
+      fsn1: { city: Falkenstein, country: DE }
+      nbg1: { city: Nuremberg, country: DE }
+      hel1: { city: Helsinki, country: FI }
+      ash: { city: Ashburn, country: US }
+      hil: { city: Hillsboro, country: US }
+      sin: { city: Singapore, country: SG }
+
+  - id: vultr
+    name: Vultr
+    vendors: [Vultr]
+    cloud_init: [vultr]
+    hosts:
+      - '^(?P<region>[a-z]{3}\d)\.vultrobjects\.com$'
+    regions:
+      ewr: { city: New Jersey, country: US }
+      lax: { city: Los Angeles, country: US }
+      lhr: { city: London, country: GB }
+      ams: { city: Amsterdam, country: NL }
+      fra: { city: Frankfurt, country: DE }
+      cdg: { city: Paris, country: FR }
+      jnb: { city: Johannesburg, country: ZA }
+      sgp: { city: Singapore, country: SG }
+      bom: { city: Mumbai, country: IN }
+      nrt: { city: Tokyo, country: JP }
+      syd: { city: Sydney, country: AU }
+
+  - id: backblaze
+    name: Backblaze B2
+    vendors: []
+    cloud_init: []
+    hosts:
+      - '^s3\.(?P<region>[a-z]+-[a-z]+-\d{3})\.backblazeb2\.com$'
+    regions:
+      us-west-000: { city: California, country: US }
+      us-west-001: { city: California, country: US }
+      us-west-002: { city: California, country: US }
+      us-west-004: { city: Arizona, country: US }
+      us-east-005: { city: Virginia, country: US }
+      eu-central-003: { city: Amsterdam, country: NL }
+
+  - id: wasabi
+    name: Wasabi
+    vendors: []
+    cloud_init: []
+    hosts:
+      - '^s3\.(?P<region>[a-z]{2}-[a-z]+-\d)\.wasabisys\.com$'
+    regions:
+      us-east-1: { city: Virginia, country: US }
+      us-east-2: { city: Virginia, country: US }
+      us-west-1: { city: Oregon, country: US }
+      eu-central-1: { city: Amsterdam, country: NL }
+      eu-central-2: { city: Frankfurt, country: DE }
+      eu-west-1: { city: London, country: GB }
+      eu-west-2: { city: Paris, country: FR }
+      ap-southeast-1: { city: Singapore, country: SG }

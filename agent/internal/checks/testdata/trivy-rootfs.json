@@ -1,0 +1,28 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "/",
+  "ArtifactType": "filesystem",
+  "Results": [
+    {
+      "Target": "ubuntu 22.04",
+      "Class": "os-pkgs",
+      "Type": "ubuntu",
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2026-0001",
+          "PkgName": "openssl",
+          "InstalledVersion": "3.0.2-0ubuntu1.15",
+          "FixedVersion": "3.0.2-0ubuntu1.18",
+          "Severity": "CRITICAL"
+        },
+        {
+          "VulnerabilityID": "CVE-2026-0001",
+          "PkgName": "libssl3",
+          "InstalledVersion": "3.0.2-0ubuntu1.15",
+          "FixedVersion": "3.0.2-0ubuntu1.18",
+          "Severity": "CRITICAL"
+        }
+      ]
+    }
+  ]
+}

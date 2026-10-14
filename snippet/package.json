@@ -1,0 +1,16 @@
+{
+  "name": "@kiyesi/snippet",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node scripts/size.ts && node scripts/publish.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm build",
+    "test:browser": "pnpm build && playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.19.1",
+    "typescript": "6.0.3"
+  }
+}

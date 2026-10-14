@@ -1,0 +1,23 @@
+# Nigeria: the first country rule pack. A pack holds one country's
+# data-location rule and its list of local data centres.
+#
+# The list of local data centres needs a named keeper (an open decision in
+# the PRD). Until then, treat it as a starting point to review, not a
+# complete list.
+
+version: 1
+code: NG
+name: Nigeria
+rule: >-
+  On 15 June 2026 the Central Bank of Nigeria directed that payment
+  transaction data created in Nigeria be stored and managed in Nigeria by
+  1 January 2027.
+rule_source: Central Bank of Nigeria circular, 15 June 2026 (check the exact scope against the Bank's own text)
+local_data_centres:
+  - Rack Centre, Lagos
+  - MDXi (MainOne), Lagos
+  - Open Access Data Centres, Lagos
+  - Digital Realty, Lagos
+  - Africa Data Centres, Lagos
+  - Kasi Cloud, Lagos
+  - Galaxy Backbone, Abuja

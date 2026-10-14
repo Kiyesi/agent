@@ -1,0 +1,5 @@
+2026-10-08T09:12:01.123456+00:00 checkout-api-prod kernel: [123456.789] eth0: renamed from veth1a2b3c
+2026-10-08T10:41:07.004512+00:00 checkout-api-prod kernel: [129481.112233] node invoked oom-killer: gfp_mask=0x140cca(GFP_HIGHUSER_MOVABLE|__GFP_COMP), order=0, oom_score_adj=0
+2026-10-08T10:41:07.004650+00:00 checkout-api-prod kernel: [129481.113001] oom-kill:constraint=CONSTRAINT_NONE,nodemask=(null),cpuset=docker-4f1c.scope,mems_allowed=0,global_oom,task_memcg=/system.slice/docker-4f1c.scope,task=node,pid=48211,uid=1000
+2026-10-08T10:41:07.004700+00:00 checkout-api-prod kernel: [129481.113050] Out of memory: Killed process 48211 (node) total-vm:1834448kB, anon-rss:612340kB, file-rss:0kB, shmem-rss:0kB, UID:1000 pgtables:1912kB oom_score_adj:0
+2026-10-06T03:02:11.000000+00:00 checkout-api-prod kernel: [1000.1] Out of memory: Killed process 100 (old-job) total-vm:1kB

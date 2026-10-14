@@ -1,0 +1,1163 @@
+[
+  {
+    "path": "kiyesi",
+    "use": "kiyesi [flags]",
+    "short": "Server health and security, with the fix for every problem",
+    "long": "Kiyesi checks a Linux server's health and security and prints each problem\nin one sentence with the command that fixes it. It only reads: it never\nchanges a file, a setting or a container.\n\nAlone, kiyesi shows what needs you now and the next command to run.",
+    "example": "  kiyesi              what needs you now, and the next command\n  sudo kiyesi scan    this server's report; nothing leaves it",
+    "flags": [
+      {
+        "name": "env",
+        "usage": "show only production or staging, in any list"
+      },
+      {
+        "name": "json",
+        "usage": "print what needs you now as JSON, for scripts"
+      },
+      {
+        "name": "project",
+        "usage": "show only this project, by name, in any list"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi ack",
+    "use": "kiyesi ack <ref>",
+    "short": "Acknowledge an incident or any other work, so your team sees someone is on it",
+    "example": "  kiyesi ack INC-12\n  kiyesi ack job-3f9a1c"
+  },
+  {
+    "path": "kiyesi activity",
+    "use": "kiyesi activity [flags]",
+    "short": "Who did what, newest first",
+    "long": "The activity log: every change anyone made, sign-ins, and what Kiyesi did by\nitself, such as an escalation. Kept 12 months.",
+    "example": "  kiyesi activity\n  kiyesi activity --limit 100",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      },
+      {
+        "name": "limit",
+        "usage": "how many lines, up to 100",
+        "default": "30"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi advisories",
+    "use": "kiyesi advisories [server] [flags]",
+    "short": "Software past its end of life, and packages with published fixes for known flaws",
+    "long": "Compares what each server has installed with endoflife.date and OSV, every day.\nAdvisories never change the grade and never send an alert.",
+    "example": "  kiyesi advisories\n  kiyesi advisories checkout-api-prod",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print JSON"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi agent",
+    "use": "kiyesi agent [flags]",
+    "short": "Run as the background service: scan and send results (started by kiyesi connect)",
+    "long": "Runs a scan now and every 15 minutes, says the server is alive every minute,\nand sends both to the service. Results that cannot be sent wait on disk and\nare sent later. It is normally started by the system service.",
+    "example": "  sudo systemctl status kiyesi\n  KIYESI_API=https://api.kiyesi.dev KIYESI_TOKEN=ksv_... kiyesi agent --container",
+    "flags": [
+      {
+        "name": "config",
+        "usage": "the settings file",
+        "default": "/etc/kiyesi/config.yaml"
+      },
+      {
+        "name": "container",
+        "usage": "run beside a managed service (Render, Heroku, Fly.io, …): no scan and no host figures; the databases in the settings and the runs of kiyesi run. Reads KIYESI_API and KIYESI_TOKEN"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi alerts",
+    "use": "kiyesi alerts [flags]",
+    "short": "Show where alerts go, and what is open now",
+    "example": "  kiyesi alerts\n  kiyesi alerts test    # send a test message to every channel",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi alerts test",
+    "use": "kiyesi alerts test",
+    "short": "Send a test message to every alert channel"
+  },
+  {
+    "path": "kiyesi assign",
+    "use": "kiyesi assign <ref> <teammate> [flags]",
+    "short": "Give an incident, finding, error, job or database warning to someone",
+    "long": "Gives one piece of work to a teammate, by name, or to you with \"me\". They are\ntold on their own alert channel, with the evidence, the fix and your note.\nWith only the reference, says who Kiyesi suggests and why.",
+    "example": "  kiyesi assign INC-12\n  kiyesi assign INC-12 Amaka --note \"Started after 3.8.1\"\n  kiyesi assign job-3f9a1c me",
+    "flags": [
+      {
+        "name": "note",
+        "usage": "a note they see with the alert"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi badge",
+    "use": "kiyesi badge <server> [flags]",
+    "short": "The grade badge for a project's README: turn it on and print the line to paste",
+    "long": "A small image that shows the server's grade and links to Kiyesi. It shows the\ngrade only, never the server's name, and is off until you turn it on.\n--off stops it at once; turning it on again gives it a new address.",
+    "example": "  kiyesi badge checkout-api-prod\n  kiyesi badge checkout-api-prod --off",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      },
+      {
+        "name": "off",
+        "usage": "turn the badge off"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi connect",
+    "use": "kiyesi connect --token <token> [flags]",
+    "short": "Link this server to the service and start sending results",
+    "long": "Checks the token with the service, saves it where only root can read it, and\ninstalls and starts the kiyesi system service. The service runs a scan now and\nevery 15 minutes, and says it is alive every minute. It only reads, opens no\nport, and masks secrets before anything is sent.",
+    "example": "  sudo kiyesi connect --token ksv_...",
+    "flags": [
+      {
+        "name": "api",
+        "usage": "the service address; change it only for a service you run yourself",
+        "default": "https://api.kiyesi.dev"
+      },
+      {
+        "name": "no-service",
+        "usage": "save the token but do not install the system service"
+      },
+      {
+        "name": "token",
+        "usage": "the server token, starting with ksv_"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi costs",
+    "use": "kiyesi costs [flags]",
+    "short": "Monthly cost against use, with a suggestion for each server",
+    "long": "What each server costs a month, how much of it is used at its busiest, and\nwhether it is too small, larger than needed or the right size. Prices are\ntyped once in the dashboard, in the currency your provider bills in, and\nshown in your team's currency too, at a public rate fetched once a day.",
+    "example": "  kiyesi costs\n  kiyesi costs --currency NGN",
+    "flags": [
+      {
+        "name": "currency",
+        "usage": "show the costs in this currency, such as NGN"
+      },
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi credit",
+    "use": "kiyesi credit [flags]",
+    "short": "Your team's credit: the balance, days left, and what used it",
+    "long": "One credit is one server for one day. Top up in the dashboard, under Credit:\nnothing renews by itself and no card is kept.",
+    "example": "  kiyesi credit",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi credit topup",
+    "use": "kiyesi credit topup",
+    "short": "Open the Credit page in the browser, to top up",
+    "long": "You pay on Flutterwave's page, in the dashboard's Credit screen: the terminal never handles a card.",
+    "example": "  kiyesi credit topup"
+  },
+  {
+    "path": "kiyesi databases",
+    "use": "kiyesi databases [flags]",
+    "short": "Storage, connections and slow queries for each database",
+    "long": "Lists the databases Kiyesi watches: storage against its limit, connections,\nslow queries in the last hour, the newest backup, and when it is full at the\nrate it grows. On a server, kiyesi databases check tests the settings.",
+    "example": "  kiyesi databases\n  sudo kiyesi databases check",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi databases check",
+    "use": "kiyesi databases check [flags]",
+    "short": "Read the databases in this server's settings now, and show what Kiyesi sees",
+    "long": "Connects to each database in the settings file with its read-only user and\nprints what the agent sends: sizes and counts, never a row, never the address.",
+    "example": "  sudo kiyesi databases check",
+    "flags": [
+      {
+        "name": "config",
+        "usage": "the settings file",
+        "default": "/etc/kiyesi/config.yaml"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi datamap",
+    "use": "kiyesi datamap [flags]",
+    "short": "Where every server, database and backup sits, against your home country",
+    "long": "Lists every server, database, backup and outside service with its provider and\ncountry, and flags payment data outside the home country. It is evidence of\nwhere data sits, not a certificate of compliance.",
+    "example": "  kiyesi datamap\n  kiyesi datamap --outside\n  kiyesi datamap --report --pdf data-map.pdf",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print JSON"
+      },
+      {
+        "name": "outside",
+        "usage": "only what sits outside the home country"
+      },
+      {
+        "name": "pdf",
+        "usage": "where to save the report (default data-map-<date>.pdf)"
+      },
+      {
+        "name": "report",
+        "usage": "make the report for an auditor and save it"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi deploy",
+    "use": "kiyesi deploy --app <name> --version <version> [flags]",
+    "short": "Mark a deploy, from your deploy script, so charts and History show it",
+    "long": "Records that a version of an app was deployed, and who shipped it. Run it at the\nend of a deploy. In CI, set KIYESI_DEPLOY_TOKEN; on a connected server it uses\nthe server's own token; on a laptop, sign in with kiyesi login first.",
+    "example": "  kiyesi deploy --app checkout-api --version 3.8.1\n  KIYESI_DEPLOY_TOKEN=kdp_... kiyesi deploy --app web --version $GIT_SHA --server web-prod",
+    "flags": [
+      {
+        "name": "api",
+        "usage": "the service address, with a deploy token",
+        "default": "https://api.kiyesi.dev"
+      },
+      {
+        "name": "app",
+        "usage": "the app that was deployed"
+      },
+      {
+        "name": "by",
+        "usage": "who shipped it (default: the CI user, then the last commit's author)"
+      },
+      {
+        "name": "env",
+        "usage": "production or staging, with --project"
+      },
+      {
+        "name": "project",
+        "usage": "the project, when it went to several servers"
+      },
+      {
+        "name": "server",
+        "usage": "the server it went to (needed with a deploy token or kiyesi login)"
+      },
+      {
+        "name": "version",
+        "usage": "its version, tag or commit"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi deploys",
+    "use": "kiyesi deploys [flags]",
+    "short": "Recent deploys with their verdict: healthy or roll back",
+    "long": "Each deploy is watched for 10 minutes after it goes out, then judged healthy\nor roll back, with the evidence and the roll-back command.",
+    "example": "  kiyesi deploys --since 7d\n  kiyesi deploys --server checkout-api-prod",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      },
+      {
+        "name": "server",
+        "usage": "only this server"
+      },
+      {
+        "name": "since",
+        "usage": "how far back: 24h, 7d, 30d or 90d",
+        "default": "7d"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi deploys remove",
+    "use": "kiyesi deploys remove <app> <version>",
+    "short": "Remove a deploy marked by mistake, with its History lines",
+    "long": "Removes the deploy marker, its verdict, its lines in History and a roll-back\nalert it raised. The activity log keeps that you removed it.",
+    "example": "  kiyesi deploys remove checkout-api 3.8.1-oops"
+  },
+  {
+    "path": "kiyesi drill",
+    "use": "kiyesi drill [flags]",
+    "short": "Send a practice incident through the escalation steps, and see who was reached",
+    "long": "Each person in the escalation steps gets a message marked PRACTICE on the\nchannel a real incident would use, one minute apart. The result says who was\nreached, how fast each acknowledged, and which channel failed and why. It\nnever shows on a status page and uses no credit.",
+    "example": "  kiyesi drill\n  kiyesi drill --last\n  kiyesi drill --no-wait",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      },
+      {
+        "name": "last",
+        "usage": "show the last drill's result"
+      },
+      {
+        "name": "no-wait",
+        "usage": "start it and do not wait for the steps"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi errors",
+    "use": "kiyesi errors [flags]",
+    "short": "Browser errors from your frontends, grouped, with file and line",
+    "long": "Lists what went wrong in your users' browsers, busiest first: the error,\nwhere in the code (the real file and line once source maps are uploaded),\nhow often, for how many people, and when it was first seen.",
+    "example": "  kiyesi errors\n  kiyesi errors --frontend storefront-web --since 7d",
+    "flags": [
+      {
+        "name": "frontend",
+        "usage": "only this frontend"
+      },
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      },
+      {
+        "name": "since",
+        "usage": "how far back: 24h, 7d or 30d",
+        "default": "24h"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi explain",
+    "use": "kiyesi explain <id> [flags]",
+    "short": "A plain paragraph about an incident, for a client or a manager",
+    "long": "Written from the same pattern as the fix, with no technical terms and no\nserver, file or teammate's name. No AI. Read it before you send it.",
+    "example": "  kiyesi explain INC-11\n  kiyesi explain INC-11 | pbcopy",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi findings",
+    "use": "kiyesi findings [server] [flags]",
+    "short": "Every finding on your servers, worst first, with the command that fixes it",
+    "long": "The problems the latest scans found, each in one sentence with why it\nmatters and the fix. Kiyesi never runs a fix: copy it and run it yourself.",
+    "example": "  kiyesi findings\n  kiyesi findings checkout-api-prod --severity critical",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      },
+      {
+        "name": "severity",
+        "usage": "only critical, warning or info"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi history",
+    "use": "kiyesi history [flags]",
+    "short": "Deploys, findings, grade changes, restarts and outages, in time order",
+    "example": "  kiyesi history --since yesterday\n  kiyesi history --server checkout-api-prod --since 7d",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      },
+      {
+        "name": "server",
+        "usage": "only this server"
+      },
+      {
+        "name": "since",
+        "usage": "how far back: 1h, 24h (or yesterday), 7d, 30d or 90d",
+        "default": "24h"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi incident",
+    "use": "kiyesi incident <id> [flags]",
+    "short": "One incident: the likely source, the evidence, the timeline and the fix",
+    "example": "  kiyesi incident INC-12",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi incidents",
+    "use": "kiyesi incidents [flags]",
+    "short": "Open incidents with their likely source and status",
+    "long": "Lists incidents, newest first: each failure grouped from its symptoms, with\nthe likely source and how sure Kiyesi is. Open one with: kiyesi incident <id>",
+    "example": "  kiyesi incidents\n  kiyesi incidents --status all",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      },
+      {
+        "name": "status",
+        "usage": "open, fixed or all",
+        "default": "open"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi jobs",
+    "use": "kiyesi jobs [name] [flags]",
+    "short": "Scheduled jobs with their last run and status",
+    "long": "Lists the timed jobs wrapped with kiyesi run: when each runs, its last run,\nhow long it took, when it is next expected, and whether it failed, ran long or\ndid not run. Give a job's name to see its recent runs.",
+    "example": "  kiyesi jobs\n  kiyesi jobs nightly-backup",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi login",
+    "use": "kiyesi login [flags]",
+    "short": "Sign in from this computer, to see your servers here",
+    "long": "Shows a code and opens the dashboard, where you approve the sign-in. The\ntoken is kept in the system keychain (the macOS Keychain, or the Secret\nService on Linux), or in a file only you can read where there is none.",
+    "example": "  kiyesi login\n  kiyesi servers",
+    "flags": [
+      {
+        "name": "api",
+        "usage": "the service address; change it only for a service you run yourself",
+        "default": "https://api.kiyesi.dev"
+      },
+      {
+        "name": "no-browser",
+        "usage": "print the address instead of opening the browser"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi logout",
+    "use": "kiyesi logout",
+    "short": "Sign out on this computer"
+  },
+  {
+    "path": "kiyesi logs",
+    "use": "kiyesi logs [server] [flags]",
+    "short": "Search the logs of your servers, or follow them live",
+    "long": "Shows log lines from your servers' containers, web servers and system log,\noldest first. Passwords and tokens were masked on the server before they were sent.",
+    "example": "  kiyesi logs --server checkout-api-prod --level error --since 1h\n  kiyesi logs checkout-api-prod --follow\n  kiyesi logs --search \"heap limit\" --since 24h\n  kiyesi logs --server checkout-api-prod --since 7d --output checkout.jsonl",
+    "flags": [
+      {
+        "name": "follow",
+        "short": "f",
+        "usage": "keep showing new lines as they arrive, until Ctrl+C"
+      },
+      {
+        "name": "json",
+        "usage": "print JSON (one line per log line with --follow)"
+      },
+      {
+        "name": "level",
+        "usage": "error, or warn for warnings and errors"
+      },
+      {
+        "name": "limit",
+        "usage": "the most lines to show, up to 1000",
+        "default": "300"
+      },
+      {
+        "name": "output",
+        "short": "o",
+        "usage": "save every matching line to this file instead: .txt, or .jsonl for JSON lines (up to 100,000 lines)"
+      },
+      {
+        "name": "raw",
+        "usage": "print JSON lines in full, rather than a short summary of each"
+      },
+      {
+        "name": "search",
+        "usage": "only lines with these words, in any case"
+      },
+      {
+        "name": "server",
+        "usage": "only this server"
+      },
+      {
+        "name": "since",
+        "usage": "how far back: 15m, 1h, 6h, 24h or 7d",
+        "default": "1h"
+      },
+      {
+        "name": "source",
+        "usage": "only this container, service or file, such as checkout-api or nginx"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi metrics",
+    "use": "kiyesi metrics <server> [flags]",
+    "short": "CPU, memory, disk and requests over time, drawn in the terminal",
+    "example": "  kiyesi metrics checkout-api-prod --since 24h",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the numbers as JSON"
+      },
+      {
+        "name": "since",
+        "usage": "how far back: 1h, 24h, 7d or 30d",
+        "default": "24h"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi mine",
+    "use": "kiyesi mine [flags]",
+    "short": "Everything assigned to you, and what nobody owns yet",
+    "long": "Lists the incidents, findings, browser errors, jobs and database warnings\ngiven to you, then those without an owner. Take one with: kiyesi assign <ref> me",
+    "example": "  kiyesi mine\n  kiyesi mine --all",
+    "flags": [
+      {
+        "name": "all",
+        "usage": "also list what everyone else owns"
+      },
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi mute",
+    "use": "kiyesi mute <server> <30m|2h|1d|off>",
+    "short": "Silence a server's alerts for a set time. Every mute ends",
+    "example": "  kiyesi mute checkout-api-prod 30m\n  kiyesi mute checkout-api-prod off"
+  },
+  {
+    "path": "kiyesi open",
+    "use": "kiyesi open [incident, server or screen]",
+    "short": "Open the matching dashboard page in the browser",
+    "long": "With an incident number (INC-12), a server's name, or a screen such as\nlogs or credit; alone, the dashboard's home. The address is printed too.",
+    "example": "  kiyesi open INC-12\n  kiyesi open checkout-api-prod\n  kiyesi open credit"
+  },
+  {
+    "path": "kiyesi passport",
+    "use": "kiyesi passport <server> [flags]",
+    "short": "The server's passport: what runs on it, ports, jobs, people and how-to",
+    "long": "Written by Kiyesi from what the agent sees, and rewritten after every scan, for\na handover or a client's question. It never shows passwords, keys or tokens.\nAdd --pdf to save it, or --share for a read-only link that lasts 7 days.",
+    "example": "  kiyesi passport checkout-api-prod\n  kiyesi passport checkout-api-prod --pdf\n  kiyesi passport checkout-api-prod --share",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      },
+      {
+        "name": "pdf",
+        "usage": "save it as a PDF in this folder"
+      },
+      {
+        "name": "share",
+        "usage": "make a read-only link that lasts 7 days"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi platforms",
+    "use": "kiyesi platforms [flags]",
+    "short": "List the managed platforms linked, and the services each one sends",
+    "long": "Apps on Render, Heroku, Railway, Fly.io, Vercel, Netlify or anywhere else report\nthrough a platform link made in Settings, Managed services. Each service a\nplatform names is its own server, with no scan: the platform runs the machine.",
+    "example": "  kiyesi platforms",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi preflight",
+    "use": "kiyesi preflight [server] [flags]",
+    "short": "Safe to deploy? Go or wait, with the reasons and what to do first",
+    "long": "Six checks on what Kiyesi already holds for the server: memory, disk, backup\nage, certificate, open incidents on it, and the last deploy's verdict. It\nexits with 0 for go and 1 for wait, so a deploy pipeline can use it. It only\nadvises and never stops a deploy by itself. In CI, set KIYESI_DEPLOY_TOKEN.",
+    "example": "  kiyesi preflight checkout-api-prod\n  kiyesi preflight              on a connected server: this one\n  kiyesi preflight checkout-api-prod --json",
+    "flags": [
+      {
+        "name": "api",
+        "usage": "the Kiyesi API, with a deploy token",
+        "default": "https://api.kiyesi.dev"
+      },
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi projects",
+    "use": "kiyesi projects [flags]",
+    "short": "Your projects, which group servers, checks and status pages",
+    "example": "  kiyesi projects\n  kiyesi projects rename Checkout Payments\n  kiyesi projects delete Old",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi projects delete",
+    "use": "kiyesi projects delete <name>",
+    "short": "Delete a project once nothing is left in it",
+    "long": "Deletes an empty project. While servers, checks, status pages, reports or\npeople's access are still in it, it says what is left, and deletes nothing.",
+    "example": "  kiyesi projects delete Old"
+  },
+  {
+    "path": "kiyesi projects rename",
+    "use": "kiyesi projects rename <name> <new name>",
+    "short": "Give a project a new name",
+    "example": "  kiyesi projects rename Checkout Payments"
+  },
+  {
+    "path": "kiyesi report",
+    "use": "kiyesi report --project <name> --month <month> [flags]",
+    "short": "Make a monthly report and print its share link",
+    "long": "Makes a project's report for a whole past month, under your name and logo, and\nprints a read-only link to send your client. --pdf saves it as a PDF too.\nA month can be reported once it is over and the project has all of it.",
+    "example": "  kiyesi report --project Checkout --month 2026-09\n  kiyesi report --project Checkout --month 2026-09 --share 7 --pdf checkout-september.pdf",
+    "flags": [
+      {
+        "name": "month",
+        "usage": "the month, such as 2026-09"
+      },
+      {
+        "name": "pdf",
+        "usage": "also save it as a PDF to this file"
+      },
+      {
+        "name": "project",
+        "usage": "the project, by name"
+      },
+      {
+        "name": "share",
+        "usage": "how many days the link works: 7, 30 or 90; 0 for no link",
+        "default": "30"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi report card",
+    "use": "kiyesi report card [flags]",
+    "short": "The Monday report card: what was caught last week, what was fixed, and how fast",
+    "long": "Counts the incidents and critical problems caught last week in what you can see,\nhow many were fixed and the typical time to fix. It never names who caused a\nproblem. Owners and admins get it by email on Monday mornings.",
+    "example": "  kiyesi report card\n  kiyesi report card --this-week",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      },
+      {
+        "name": "this-week",
+        "usage": "this week so far, instead of last week"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi reports",
+    "use": "kiyesi reports [flags]",
+    "short": "Your monthly client reports and data map reports",
+    "long": "Lists the reports you can see, newest first. Kiyesi makes each project's\nmonthly report on the first day of the month; make one for a past month with\nkiyesi report.",
+    "example": "  kiyesi reports",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the list as JSON"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi resolve",
+    "use": "kiyesi resolve <ref> --note \"what fixed it\" [flags]",
+    "short": "Mark an incident or any other work fixed, and save what fixed it",
+    "long": "Marks an incident fixed. The note shows first the next time the same failure happens.",
+    "example": "  kiyesi resolve INC-12 --note \"Rolled back to 2.13.4, added the missing check\"",
+    "flags": [
+      {
+        "name": "note",
+        "usage": "what fixed it, in a line"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi run",
+    "use": "kiyesi run --name <job> -- <command> [flags]",
+    "short": "Run a timed job and record it, so a failed or missed run alerts you",
+    "long": "Runs the command exactly as it would run without Kiyesi: the same output\nand exit code. Each run's start, end, exit code and last lines of output are\nrecorded, and the agent sends them. Put it in front of the command in your\ncrontab or systemd timer; Kiyesi reads the schedule from there.",
+    "example": "  0 4 * * * kiyesi run --name nightly-backup -- /opt/scripts/backup.sh",
+    "flags": [
+      {
+        "name": "name",
+        "usage": "the job's name, such as nightly-backup"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi scan",
+    "use": "kiyesi scan [flags]",
+    "short": "Scan this server and print the report. Nothing leaves the server",
+    "long": "Runs the health and security checks on this server and prints a grade,\neach problem in one sentence, and the fix for each critical one. The full\nreport, with every fix, is saved to /var/lib/kiyesi (or ~/.local/state/kiyesi\nwithout root). Without root, checks that need it are skipped and say so.",
+    "example": "  sudo kiyesi scan\n  sudo kiyesi scan --fail-on critical   # exit 1 if anything is critical, for a deploy pipeline",
+    "flags": [
+      {
+        "name": "config",
+        "usage": "the settings file",
+        "default": "/etc/kiyesi/config.yaml"
+      },
+      {
+        "name": "fail-on",
+        "usage": "exit with code 1 when a finding is at this level or worse: critical or warning"
+      },
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts and pipelines"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi server",
+    "use": "kiyesi server <name> [flags]",
+    "short": "Show a server's latest report: grade, problems and fixes",
+    "example": "  kiyesi server checkout-api-prod",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the server and its full report as JSON"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi servers",
+    "use": "kiyesi servers [flags]",
+    "short": "List your servers, worst first",
+    "example": "  kiyesi servers\n  kiyesi servers --json",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi servers delete",
+    "use": "kiyesi servers delete <name> [flags]",
+    "short": "Delete a server and, after 7 days, everything it sent",
+    "long": "Hides the server everywhere and stops its token at once, and emails every\nowner and admin. After 7 days its scans, alerts, history, metrics and logs\nare erased for good; until then, kiyesi servers restore brings it back.\nIt asks you to type the name again and a code from your authenticator app.",
+    "example": "  kiyesi servers delete old-web-1",
+    "flags": [
+      {
+        "name": "code",
+        "usage": "the code from your authenticator app, instead of typing it when asked"
+      },
+      {
+        "name": "confirm",
+        "usage": "the server's name again, instead of typing it when asked"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi servers disconnect",
+    "use": "kiyesi servers disconnect <name>",
+    "short": "Stop a server sending results; its history stays until it expires",
+    "long": "The server's token stops working at once and it no longer counts as silent.\nIts scans, metrics, logs and history stay until they expire. To connect it\nagain, make a new token with kiyesi servers reconnect.",
+    "example": "  kiyesi servers disconnect old-web-1"
+  },
+  {
+    "path": "kiyesi servers reconnect",
+    "use": "kiyesi servers reconnect <name> [flags]",
+    "short": "Make a new token for a server, to connect it again",
+    "long": "Makes a new token and prints the command to run on the server. Any older\ntoken stops working. It asks for a code from your authenticator app.",
+    "example": "  kiyesi servers reconnect old-web-1",
+    "flags": [
+      {
+        "name": "code",
+        "usage": "the code from your authenticator app, instead of typing it when asked"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi servers rename",
+    "use": "kiyesi servers rename <name> <new name>",
+    "short": "Give a server a new name; its agent and token are unchanged",
+    "example": "  kiyesi servers rename web-1 checkout-web"
+  },
+  {
+    "path": "kiyesi servers restore",
+    "use": "kiyesi servers restore <name>",
+    "short": "Bring back a server deleted in the last 7 days, with its history",
+    "example": "  kiyesi servers restore old-web-1"
+  },
+  {
+    "path": "kiyesi sessions",
+    "use": "kiyesi sessions [flags]",
+    "short": "Where you are signed in: each browser and kiyesi command",
+    "example": "  kiyesi sessions\n  kiyesi sessions end 2\n  kiyesi sessions end --others",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi sessions end",
+    "use": "kiyesi sessions end <number> [flags]",
+    "short": "Sign out one session, by its number in kiyesi sessions, or every other",
+    "example": "  kiyesi sessions end 2\n  kiyesi sessions end --others",
+    "flags": [
+      {
+        "name": "others",
+        "usage": "every session but this one"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi sourcemaps",
+    "use": "kiyesi sourcemaps",
+    "short": "Upload a build's source maps, so browser errors show the real file and line"
+  },
+  {
+    "path": "kiyesi sourcemaps upload",
+    "use": "kiyesi sourcemaps upload <build folder> [flags]",
+    "short": "Upload every .map file in a build folder, for one version",
+    "long": "Run it in your build step, after building, with the same version as the\nsnippet's data-version. In CI, set KIYESI_DEPLOY_TOKEN. Add --delete to remove\nthe maps from the folder afterwards, so they are not published with the site.",
+    "example": "  kiyesi sourcemaps upload --version 2.14.0 ./dist\n  KIYESI_DEPLOY_TOKEN=kdp_... kiyesi sourcemaps upload --frontend storefront-web --version $GIT_SHA --delete ./dist",
+    "flags": [
+      {
+        "name": "api",
+        "usage": "the service address, with a deploy token",
+        "default": "https://api.kiyesi.dev"
+      },
+      {
+        "name": "delete",
+        "usage": "delete each map from the folder once uploaded, so it is not published"
+      },
+      {
+        "name": "frontend",
+        "usage": "the frontend, as named in Settings (not needed when the team has only one)"
+      },
+      {
+        "name": "version",
+        "usage": "the version the snippet reports, as in data-version"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi status",
+    "use": "kiyesi status [flags]",
+    "short": "Your public status pages, and what each one shows now",
+    "long": "Each project can have a public status page at status.kiyesi.dev, showing the\nuptime checks you chose under names your customers know. Post updates with\nkiyesi status post.",
+    "example": "  kiyesi status\n  kiyesi status post \"We found the cause and are fixing it.\" --state fixing",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi status post",
+    "use": "kiyesi status post <text> [flags]",
+    "short": "Publish an update on a status page, and email its subscribers",
+    "long": "Adds the next step to the problem that is open on the page, or, with --title,\nstarts a new one. --state resolved closes it. It goes on the public page and to\neveryone who asked for email updates: write plain words, no server names.",
+    "example": "  kiyesi status post \"Some customers cannot place orders.\" --title \"Some orders are failing\"\n  kiyesi status post \"All orders go through again.\" --state resolved",
+    "flags": [
+      {
+        "name": "page",
+        "usage": "the page's address or title, when you have more than one"
+      },
+      {
+        "name": "state",
+        "usage": "investigating, identified, fixing, monitoring or resolved",
+        "default": "investigating"
+      },
+      {
+        "name": "title",
+        "usage": "start a new problem with this title, such as \"Some orders are failing\""
+      }
+    ]
+  },
+  {
+    "path": "kiyesi team",
+    "use": "kiyesi team [flags]",
+    "short": "List teammates: role, what they can see, what they work on",
+    "example": "  kiyesi team\n  kiyesi team invite seun@example.com --role member --area backend",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi team access",
+    "use": "kiyesi team access <person> [flags]",
+    "short": "Set one person's role, where it applies and when it ends",
+    "long": "Sets a teammate's role, the projects it applies in (all of them unless you\nname some), servers left out, and the day it ends. It applies on their next\nclick. Asks for the code from your authenticator app.",
+    "example": "  kiyesi team access kemi@example.com --role \"Frontend contractor\" --projects Storefront --until 2026-11-30\n  kiyesi team access Bola --role client --projects \"Demo client\" --for-good",
+    "flags": [
+      {
+        "name": "code",
+        "usage": "the code from your authenticator app, instead of typing it when asked"
+      },
+      {
+        "name": "for-good",
+        "usage": "access with no end date"
+      },
+      {
+        "name": "leave-out",
+        "usage": "servers to leave out, separated by commas"
+      },
+      {
+        "name": "projects",
+        "usage": "projects it applies in, separated by commas; all when left out"
+      },
+      {
+        "name": "role",
+        "usage": "the role's name, such as member or \"Frontend contractor\""
+      },
+      {
+        "name": "until",
+        "usage": "the day access ends, such as 2026-11-30"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi team invite",
+    "use": "kiyesi team invite <email> [flags]",
+    "short": "Invite someone by email into a role",
+    "long": "Emails an invite that works once, for 7 days. They choose a password and set up\nan authenticator app. Only an owner can invite owners and admins.",
+    "example": "  kiyesi team invite seun@example.com --role member --area backend",
+    "flags": [
+      {
+        "name": "area",
+        "usage": "what they work on: frontend, backend, database or devops"
+      },
+      {
+        "name": "role",
+        "usage": "owner, admin, member, viewer, billing or client",
+        "default": "member"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi team leave",
+    "use": "kiyesi team leave [flags]",
+    "short": "Leave the team these commands are for",
+    "long": "Your open work goes back to Unassigned, and you need a new invite to come back.\nA team's only owner makes someone else an owner first.",
+    "example": "  kiyesi team leave",
+    "flags": [
+      {
+        "name": "yes",
+        "usage": "do not ask first"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi team roles",
+    "use": "kiyesi team roles [flags]",
+    "short": "List the roles and what each one allows",
+    "example": "  kiyesi team roles",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi team use",
+    "use": "kiyesi team use [team]",
+    "short": "Choose which of your teams commands are for",
+    "long": "Someone in several teams chooses one; commands then show only that team.\nWithout a name, lists your teams and which one is in use.",
+    "example": "  kiyesi team use\n  kiyesi team use Globex"
+  },
+  {
+    "path": "kiyesi tips",
+    "use": "kiyesi tips [server] [flags]",
+    "short": "Improvements that are not urgent, for each server",
+    "example": "  kiyesi tips\n  kiyesi tips checkout-api-prod",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print JSON"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi trace",
+    "use": "kiyesi trace <id> [flags]",
+    "short": "One request from the browser to the database, by its ID",
+    "long": "Shows one request as a row of steps, each with the time it took and how\nthat is known, where most of the time went, and its log lines.",
+    "example": "  kiyesi trace req_2b77f0d3",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi traces",
+    "use": "kiyesi traces [flags]",
+    "short": "Slow or failed requests, and where their time went",
+    "long": "Lists requests followed by their ID from the browser through the web server\nand the backend to the database, newest first: the slow (a second or more)\nor failed ones, or all with --all. Open one with: kiyesi trace <id>",
+    "example": "  kiyesi traces\n  kiyesi traces --all --since 1h --search /api/orders",
+    "flags": [
+      {
+        "name": "all",
+        "usage": "every request, not only the slow or failed ones"
+      },
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      },
+      {
+        "name": "search",
+        "usage": "a request ID, or an address such as /api/orders"
+      },
+      {
+        "name": "since",
+        "usage": "how far back: 1h, 24h or 7d",
+        "default": "24h"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi uninstall",
+    "use": "kiyesi uninstall [flags]",
+    "short": "Remove the agent and its files from this server",
+    "long": "Stops and removes the kiyesi service, the server token and settings in\n/etc/kiyesi, the results waiting in /var/lib/kiyesi, and the kiyesi program.\nWhat the server already sent stays in the dashboard: there, disconnect the\nserver to keep it until it expires, or delete it to erase it.",
+    "example": "  sudo kiyesi uninstall",
+    "flags": [
+      {
+        "name": "keep-program",
+        "usage": "remove the service and its files but keep the kiyesi program, for one-off scans"
+      },
+      {
+        "name": "yes",
+        "short": "y",
+        "usage": "do not ask first"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi update",
+    "use": "kiyesi update [flags]",
+    "short": "Install the newest kiyesi, after checking its signature",
+    "long": "Downloads the newest release from get.kiyesi.dev, checks its signature with\nthe release key built into this program and the file's checksum, then\nreplaces this program in one step and restarts the agent if it runs.\nNothing is changed if any check fails. Updates never happen by themselves.",
+    "example": "  kiyesi update --check\n  sudo kiyesi update",
+    "flags": [
+      {
+        "name": "check",
+        "usage": "only say whether a newer version is out"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi uptime",
+    "use": "kiyesi uptime [flags]",
+    "short": "Your uptime checks and their state",
+    "example": "  kiyesi uptime\n  kiyesi uptime add https://example.com/health",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi uptime add",
+    "use": "kiyesi uptime add <address> [flags]",
+    "short": "Check an address from outside every minute",
+    "example": "  kiyesi uptime add https://example.com/health --name Shop",
+    "flags": [
+      {
+        "name": "name",
+        "usage": "a short name for the check"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi uptime edit",
+    "use": "kiyesi uptime edit <name or address> [flags]",
+    "short": "Change a check's name, address or project; its history stays",
+    "example": "  kiyesi uptime edit Shop --address https://shop.example.com/health\n  kiyesi uptime edit Shop --name \"Shop health\" --project Checkout",
+    "flags": [
+      {
+        "name": "address",
+        "usage": "a new address to check"
+      },
+      {
+        "name": "env",
+        "usage": "production or staging, with --project"
+      },
+      {
+        "name": "name",
+        "usage": "a new name"
+      },
+      {
+        "name": "project",
+        "usage": "move it to this project"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi version",
+    "use": "kiyesi version [flags]",
+    "short": "Print the version of this program",
+    "example": "  kiyesi version --json",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi watch",
+    "use": "kiyesi watch",
+    "short": "A live view of what needs you, open incidents and every server",
+    "long": "Refreshes in place every 15 seconds. Choose a row and press enter for an\nincident's evidence or a server's findings, o to open it in the browser.\nWhen the output is not a terminal, it prints the view once and stops.",
+    "example": "  kiyesi watch\n  kiyesi watch --project Checkout"
+  },
+  {
+    "path": "kiyesi whoami",
+    "use": "kiyesi whoami [flags]",
+    "short": "Your role, what you can see, and when your access ends",
+    "example": "  kiyesi whoami",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  }
+]

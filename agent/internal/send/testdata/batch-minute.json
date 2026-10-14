@@ -1,0 +1,100 @@
+{
+  "batch_id": "0f8b8c3e-6f5d-4b7a-9c1e-2d3f4a5b6c7d",
+  "sent_at": "2026-10-09T10:00:05Z",
+  "agent_version": "0.26.0",
+  "items": [
+    {
+      "kind": "heartbeat",
+      "at": "2026-10-09T10:00:05Z"
+    },
+    {
+      "kind": "metrics",
+      "at": "2026-10-09T10:00:05Z",
+      "metrics": {
+        "cpu_percent": 31.5,
+        "load1": 0.42,
+        "memory": {
+          "total_bytes": 2048000000,
+          "used_bytes": 1500000000,
+          "swap_total_bytes": 2147483648,
+          "swap_used_bytes": 0
+        },
+        "disks": [
+          {
+            "mount": "/",
+            "used_bytes": 20000000000,
+            "total_bytes": 50000000000
+          }
+        ],
+        "net": {
+          "rx_bps": 1200,
+          "tx_bps": 3400
+        },
+        "containers": [
+          {
+            "name": "checkout-api",
+            "cpu_percent": 31.5,
+            "mem_bytes": 209715200,
+            "mem_limit_bytes": 536870912
+          }
+        ],
+        "http": [
+          {
+            "endpoint": "GET /api/users/:id",
+            "requests": 120,
+            "errors": 2,
+            "avg_ms": 12.5,
+            "p95_ms": 40
+          }
+        ],
+        "http_source": "caddy (container)"
+      }
+    },
+    {
+      "kind": "event",
+      "at": "2026-10-09T10:00:05Z",
+      "event": {
+        "kind": "image_changed",
+        "subject": "checkout-api",
+        "detail": "checkout-api:3.8.1"
+      }
+    },
+    {
+      "kind": "logs",
+      "at": "2026-10-09T10:00:05Z",
+      "logs": {
+        "lines": [
+          {
+            "at": "2026-10-09T09:59:15Z",
+            "source": "checkout-api",
+            "kind": "container",
+            "level": "info",
+            "text": "Connecting to redis://default:[masked]@redis:6379"
+          },
+          {
+            "at": "2026-10-09T09:59:25Z",
+            "source": "checkout-api",
+            "kind": "container",
+            "level": "error",
+            "text": "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory"
+          },
+          {
+            "at": "2026-10-09T09:59:35Z",
+            "source": "nginx",
+            "kind": "file",
+            "level": "error",
+            "text": "203.0.113.9 - - [09/Oct/2026:10:00:05 +0000] \"POST /api/orders HTTP/1.1\" 502 157 \"-\" \"curl/8.5.0\""
+          },
+          {
+            "at": "2026-10-09T09:59:45Z",
+            "source": "kernel",
+            "kind": "journal",
+            "level": "error",
+            "text": "Out of memory: Killed process 21877 (node)"
+          }
+        ],
+        "dropped": 0
+      }
+    }
+  ]
+}
