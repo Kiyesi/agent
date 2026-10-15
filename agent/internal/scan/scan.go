@@ -30,6 +30,17 @@ type Report struct {
 	Checks     []CheckResult `json:"checks"`
 	Home       Home          `json:"home_country"`
 	ReportFile string        `json:"report_file,omitempty"`
+
+	// raw is each check's result as it returned it, for kiyesi fix. It
+	// is never sent or saved.
+	raw map[string]checks.Result
+}
+
+// Raw returns a check's result as the check returned it, with each
+// finding's key and values, on a report this program just made.
+func (r Report) Raw(id string) (checks.Result, bool) {
+	res, ok := r.raw[id]
+	return res, ok
 }
 
 // Home is the country data should stay in, and its rule.
@@ -102,6 +113,9 @@ type Finding struct {
 	Sentence   string `json:"sentence"`
 	Why        string `json:"why"`
 	Fix        string `json:"fix"`
+	// AutoFix names the kiyesi fix that makes this change, when one can:
+	// sudo kiyesi fix <name>.
+	AutoFix string `json:"auto_fix,omitempty"`
 }
 
 // Timeouts per check. Trivy can take minutes on a large server.
@@ -141,8 +155,10 @@ func Run(ctx context.Context, env *checks.Env, reg *checks.Registry, pack *packs
 			Root:   env.Sys.Root,
 		},
 	}
+	r.raw = map[string]checks.Result{}
 	for i, c := range all {
 		r.Checks = append(r.Checks, describe(pack, c.ID(), results[i]))
+		r.raw[c.ID()] = results[i]
 	}
 	r.Counts, r.Grade = grade(r.Checks, pack.TotalChecks)
 	r.Home = home(env.Cfg.HomeCountry)
@@ -208,9 +224,12 @@ func describe(pack *packs.Pack, id string, res checks.Result) CheckResult {
 				out.Findings = append(out.Findings, Finding{Check: id, Severity: "warning", Sentence: id + ": " + f.Key, Why: "No wording for this finding.", Fix: "Report this to Kiyesi."})
 				continue
 			}
-			fix := ft.Fix
+			fix, auto := ft.Fix, ft.Auto
 			if v, ok := ft.FixVariants[f.Variant]; ok && f.Variant != "" {
 				fix = v
+			}
+			if f.Variant != "" {
+				auto = "" // a variant, such as a certificate Caddy looks after, needs a person
 			}
 			confidence := ft.Confidence
 			if f.Confidence != "" {
@@ -223,6 +242,7 @@ func describe(pack *packs.Pack, id string, res checks.Result) CheckResult {
 				Sentence:   strings.TrimSpace(packs.Fill(ft.Sentence, f.Vars)),
 				Why:        strings.TrimSpace(packs.Fill(ft.Why, f.Vars)),
 				Fix:        strings.TrimSpace(packs.Fill(fix, f.Vars)),
+				AutoFix:    auto,
 			})
 		}
 	}

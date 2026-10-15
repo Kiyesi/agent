@@ -1,0 +1,80 @@
+{
+  "batch_id": "0f8b8c3e-6f5d-4b7a-9c1e-2d3f4a5b6c7d",
+  "sent_at": "2026-10-09T10:00:05Z",
+  "agent_version": "0.28.0",
+  "items": [
+    {
+      "kind": "scan",
+      "at": "2026-10-09T10:00:00Z",
+      "report": {
+        "schema": "kiyesi.scan/v1",
+        "version": "0.2.0",
+        "host": {
+          "name": "checkout-api-prod",
+          "os": "Ubuntu 24.04",
+          "tested": true,
+          "root": true
+        },
+        "started_at": "2026-10-09T10:00:00Z",
+        "seconds": 0,
+        "grade": {
+          "score": 95,
+          "letter": "A",
+          "based_on": 22,
+          "total": 22
+        },
+        "counts": {
+          "critical": 0,
+          "warnings": 1,
+          "info": 0,
+          "passed": 21,
+          "skipped": 0,
+          "run": 22
+        },
+        "checks": [
+          {
+            "id": "ssh",
+            "name": "SSH settings",
+            "area": "security",
+            "status": "fail",
+            "findings": [
+              {
+                "check": "ssh",
+                "severity": "warning",
+                "sentence": "SSH allows password login",
+                "why": "DB_PASSWORD=[masked]",
+                "fix": "mysql -u root -p[masked] app",
+                "auto_fix": "ssh-password"
+              }
+            ]
+          }
+        ],
+        "home_country": {
+          "code": "NG",
+          "name": "Nigeria"
+        }
+      }
+    },
+    {
+      "kind": "fixed",
+      "at": "2026-10-09T10:00:05Z",
+      "fixed": {
+        "id": "7f3a",
+        "fix": "ssh-password",
+        "done": "SSH password login off",
+        "user": "ada"
+      }
+    },
+    {
+      "kind": "fixed",
+      "at": "2026-10-09T10:00:05Z",
+      "fixed": {
+        "id": "1c0e",
+        "fix": "firewall",
+        "done": "Firewall on",
+        "user": "ada",
+        "undo": true
+      }
+    }
+  ]
+}

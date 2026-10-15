@@ -50,6 +50,11 @@ func Terminal(w io.Writer, r scan.Report, saveErr error, viaSudo bool) error {
 	line("")
 	line(grey.Render(fmt.Sprintf("Kiyesi %s · read-only scan · nothing leaves this server", version.Short())))
 	body(&b, r)
+	if n := fixable(r); n > 0 {
+		line(bold.Render(fmt.Sprintf("Kiyesi can fix %d of these for you:", n)) + " sudo kiyesi fix")
+		line(grey.Render("It says what it will change, and asks first."))
+		line("")
+	}
 	if saveErr != nil {
 		line(grey.Render("The full report could not be saved: " + saveErr.Error() + ". Run sudo kiyesi scan, or kiyesi scan --json."))
 	} else if r.ReportFile != "" {
@@ -70,6 +75,9 @@ func Stored(w io.Writer, r scan.Report, name string) error {
 	var b strings.Builder
 	b.WriteString("\n" + grey.Render(fmt.Sprintf("Kiyesi %s · %s · latest scan sent by the agent", version.Short(), name)) + "\n")
 	body(&b, r)
+	if n := fixable(r); n > 0 {
+		b.WriteString(bold.Render(fmt.Sprintf("Kiyesi can fix %d of these on the server:", n)) + " sudo kiyesi fix\n\n")
+	}
 	b.WriteString(grey.Render("Every fix command: kiyesi server "+name+" --json, or the dashboard.") + "\n\n")
 	_, err := io.WriteString(w, b.String())
 	return err
@@ -116,6 +124,19 @@ func body(b *strings.Builder, r scan.Report) {
 		}
 		line("")
 	}
+}
+
+// fixable counts the findings kiyesi fix can make for you.
+func fixable(r scan.Report) int {
+	n := 0
+	for _, c := range r.Checks {
+		for _, f := range c.Findings {
+			if f.AutoFix != "" {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 func hostLine(r scan.Report) string {

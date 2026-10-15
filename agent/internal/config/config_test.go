@@ -76,3 +76,22 @@ func TestHomeCountryAndPaymentData(t *testing.T) {
 		t.Errorf("config = %+v", c)
 	}
 }
+
+// fix: off forbids sudo kiyesi fix on a server; it is on by default, and
+// the ways people write yes and no all work.
+func TestFixOnOrOff(t *testing.T) {
+	c := Default()
+	if err := Parse([]byte(""), &c); err != nil || c.Fix != "on" {
+		t.Fatalf("default: %q %v", c.Fix, err)
+	}
+	for in, want := range map[string]string{"fix: off\n": "off", "fix: false\n": "off", "fix: no\n": "off", "fix: on\n": "on", "fix: true\n": "on", "fix: OFF\n": "off"} {
+		c := Default()
+		if err := Parse([]byte(in), &c); err != nil || c.Fix != want {
+			t.Errorf("%q: %q %v", in, c.Fix, err)
+		}
+	}
+	c = Default()
+	if err := Parse([]byte("fix: sometimes\n"), &c); err == nil {
+		t.Error("fix: sometimes was accepted")
+	}
+}

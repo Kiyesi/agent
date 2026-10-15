@@ -164,6 +164,7 @@ checks:
     findings:
       expiring:
         severity: warning
+        auto: certificates
         sentence: "SSL certificate for {host} expires in {days} days"
         why: When it expires, browsers and apps will refuse to connect.
         fix: "sudo certbot renew"
@@ -172,6 +173,7 @@ checks:
           other: "Renew the certificate at {path} with whoever issued it, then reload the web server"
       expired:
         severity: critical
+        auto: certificates
         sentence: "SSL certificate for {host} expired {days} days ago"
         why: Browsers and apps are refusing to connect to {host} now.
         fix: "sudo certbot renew --force-renewal"
@@ -220,6 +222,7 @@ checks:
     findings:
       waiting:
         severity: warning
+        auto: updates
         sentence: "{count} security updates have waited more than {limit} days"
         why: Security updates fix flaws that attackers already know about.
         fix: "sudo apt-get update && sudo apt-get upgrade"
@@ -296,6 +299,7 @@ checks:
     findings:
       password:
         severity: warning
+        auto: ssh-password
         sentence: SSH allows password login
         why: Passwords can be guessed by automated attacks. Keys cannot. Check that your key works before you turn passwords off.
         fix: >-
@@ -303,6 +307,7 @@ checks:
           sudo systemctl reload ssh
       root:
         severity: warning
+        auto: ssh-root
         sentence: SSH allows root login
         why: >-
           Attackers try root first. Sign in as a normal user and use sudo. Check that such a
@@ -322,6 +327,7 @@ checks:
     findings:
       off:
         severity: warning
+        auto: firewall
         sentence: No firewall is on
         why: Without a firewall, every port a program opens can be reached from the internet.
         fix: "sudo ufw allow OpenSSH && sudo ufw enable"
@@ -336,6 +342,7 @@ checks:
     findings:
       missing:
         severity: warning
+        auto: login-protection
         sentence: Nothing blocks repeated SSH password guesses
         why: >-
           SSH allows password login and nothing locks out an address that keeps guessing.
@@ -355,6 +362,7 @@ checks:
     findings:
       world-readable:
         severity: warning
+        auto: secret-files
         sentence: "{path} holds secrets and every user on this server can read it"
         why: Any user or program on the server can read the secrets in this file.
         fix: "sudo chmod 600 {path}"
@@ -415,6 +423,7 @@ checks:
     findings:
       system:
         severity: warning
+        auto: updates
         sentence: "{count} critical vulnerabilities with a fix available in this server's packages"
         why: These flaws are public and already fixed. Installing the updates closes them; a new kernel needs a restart afterwards.
         fix: "sudo apt-get update && sudo apt-get upgrade --with-new-pkgs && sudo apt-get autoremove --purge"

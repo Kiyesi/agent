@@ -57,6 +57,18 @@ type Item struct {
 	Databases []dbwatch.Figures `json:"databases,omitempty"`
 	// What is installed, for the service's advisories and tips.
 	Software *software.List `json:"software,omitempty"`
+	// A change sudo kiyesi fix made or undid, for the server's history.
+	Fixed *Fixed `json:"fixed,omitempty"`
+}
+
+// Fixed is one change kiyesi fix made on this server, or undid.
+type Fixed struct {
+	ID   string `json:"id"`
+	Fix  string `json:"fix"`
+	Done string `json:"done"`
+	// User is the person who ran sudo kiyesi fix.
+	User string `json:"user"`
+	Undo bool   `json:"undo,omitempty"`
 }
 
 // Software makes the item for what is installed.
@@ -129,6 +141,16 @@ func Scan(r scan.Report, now time.Time) Batch {
 		BatchID: NewID(), SentAt: now.UTC().Format(time.RFC3339), AgentVersion: version.Version,
 		Items: []Item{{Kind: "scan", At: r.StartedAt.UTC().Format(time.RFC3339), Report: &r}},
 	}
+}
+
+// Fixes makes a batch with the scan after kiyesi fix, and what it changed.
+func Fixes(r scan.Report, now time.Time, fixed []Fixed) Batch {
+	b := Scan(r, now)
+	stamp := now.UTC().Format(time.RFC3339)
+	for i := range fixed {
+		b.Items = append(b.Items, Item{Kind: "fixed", At: stamp, Fixed: &fixed[i]})
+	}
+	return b
 }
 
 // ErrNotAllowed means the token was refused: sending again will not help.

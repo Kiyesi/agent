@@ -45,6 +45,9 @@ func File(r scan.Report) string {
 			for _, l := range wrap("Fix: "+f.Fix, fixWidth, 5) {
 				line("       " + l)
 			}
+			if f.AutoFix != "" {
+				line("       Or let Kiyesi do it: sudo kiyesi fix " + f.AutoFix)
+			}
 			line("")
 		}
 	}
