@@ -194,6 +194,7 @@ func TestBatchGoldenForTheAPI(t *testing.T) {
 	r.Home = scan.Home{Code: "NG", Name: "Nigeria"}
 	r.Checks[0].Name, r.Checks[0].Area, r.Checks[0].Status = "SSH settings", "security", "fail"
 	r.Checks[0].Findings[0].Check, r.Checks[0].Findings[0].Severity, r.Checks[0].Findings[0].Sentence = "ssh", "warning", "SSH allows password login"
+	r.Checks[0].Findings[0].AutoFix = "ssh-password"
 	at := time.Date(2026, 10, 9, 10, 0, 5, 0, time.UTC)
 	cpu, load, avg, p95 := 31.5, 0.42, 12.5, 40.0
 	used, limit := uint64(209715200), uint64(536870912)
@@ -217,7 +218,12 @@ func TestBatchGoldenForTheAPI(t *testing.T) {
 	// A server with no timed jobs: an empty list, which JSON leaves out.
 	noJobs := Heartbeat(at)
 	noJobs.Items = append(noJobs.Items, Jobs(at, nil, []jobs.Schedule{})...)
-	batches := map[string]Batch{"batch-scan.json": Scan(r, at), "batch-heartbeat.json": Heartbeat(at), "batch-minute.json": Minute(at, m, events, logs), "batch-no-jobs.json": noJobs}
+	batches := map[string]Batch{"batch-scan.json": Scan(r, at), "batch-heartbeat.json": Heartbeat(at), "batch-minute.json": Minute(at, m, events, logs), "batch-no-jobs.json": noJobs,
+		// After sudo kiyesi fix: the new scan, a change made and one undone.
+		"batch-fixed.json": Fixes(r, at, []Fixed{
+			{ID: "7f3a", Fix: "ssh-password", Done: "SSH password login off", User: "ada"},
+			{ID: "1c0e", Fix: "firewall", Done: "Firewall on", User: "ada", Undo: true},
+		})}
 	for name, b := range batches {
 		// A fixed id, so the files only change when the shape does.
 		b.BatchID = "0f8b8c3e-6f5d-4b7a-9c1e-2d3f4a5b6c7d"

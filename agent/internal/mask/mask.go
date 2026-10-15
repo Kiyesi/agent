@@ -68,6 +68,11 @@ func walk(v reflect.Value) {
 		}
 	case reflect.Struct:
 		for i := range v.NumField() {
+			// An unexported field is never sent (JSON leaves it out), and
+			// reflection may not change it.
+			if !v.Type().Field(i).IsExported() {
+				continue
+			}
 			if v.Field(i).CanSet() || v.Field(i).Kind() != reflect.String {
 				walk(v.Field(i))
 			}

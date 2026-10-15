@@ -32,15 +32,16 @@ func finding(tb testing.TB, check, key, variant string, vars map[string]string) 
 		tb.Fatal(err)
 	}
 	ft := p.Check(check).Findings[key]
-	fix := ft.Fix
+	fix, auto := ft.Fix, ft.Auto
 	if variant != "" {
-		fix = ft.FixVariants[variant]
+		fix, auto = ft.FixVariants[variant], ""
 	}
 	return scan.Finding{
 		Check: check, Severity: ft.Severity, Confidence: ft.Confidence,
 		Sentence: packs.Fill(ft.Sentence, vars),
 		Why:      strings.TrimSpace(packs.Fill(ft.Why, vars)),
 		Fix:      strings.TrimSpace(packs.Fill(fix, vars)),
+		AutoFix:  auto,
 	}
 }
 
@@ -205,6 +206,38 @@ func TestTerminalSaysWhatTheGradeIsBasedOn(t *testing.T) {
 // always the renderer's real output.
 func TestExampleForTheDocs(t *testing.T) {
 	golden(t, "terminal-example.txt", terminal(t, designReport(t), colorprofile.NoTTY))
+}
+
+// Two of the design's findings (the certificate and SSH passwords) are
+// ones kiyesi fix can make, so the report says so, and the saved report
+// names the fix under each.
+func TestReportsOfferKiyesiFix(t *testing.T) {
+	r := designReport(t)
+	if got := terminal(t, r, colorprofile.NoTTY); !strings.Contains(got, "Kiyesi can fix 2 of these for you: sudo kiyesi fix\nIt says what it will change, and asks first.\n") {
+		t.Errorf("no kiyesi fix line in:\n%s", got)
+	}
+	file := File(r)
+	for _, want := range []string{"Or let Kiyesi do it: sudo kiyesi fix ssh-password", "Or let Kiyesi do it: sudo kiyesi fix certificates"} {
+		if !strings.Contains(file, want) {
+			t.Errorf("missing %q in the saved report", want)
+		}
+	}
+	if strings.Count(file, "Or let Kiyesi do it") != 2 {
+		t.Errorf("a finding kiyesi fix cannot make was offered:\n%s", file)
+	}
+	var b bytes.Buffer
+	if err := Stored(&colorprofile.Writer{Forward: &b, Profile: colorprofile.NoTTY}, r, "checkout-api-prod"); err != nil || !strings.Contains(b.String(), "Kiyesi can fix 2 of these on the server: sudo kiyesi fix") {
+		t.Errorf("laptop view: %v\n%s", err, b.String())
+	}
+	// None to offer, no line.
+	for i := range r.Checks {
+		for j := range r.Checks[i].Findings {
+			r.Checks[i].Findings[j].AutoFix = ""
+		}
+	}
+	if got := terminal(t, r, colorprofile.NoTTY); strings.Contains(got, "kiyesi fix") {
+		t.Errorf("offered kiyesi fix with nothing to fix:\n%s", got)
+	}
 }
 
 func TestTerminalMarksAnUntestedSystem(t *testing.T) {

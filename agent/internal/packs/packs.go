@@ -57,6 +57,8 @@ type Finding struct {
 	Why         string            `yaml:"why"`
 	Fix         string            `yaml:"fix"`
 	FixVariants map[string]string `yaml:"fix-variants"`
+	// Auto names the kiyesi fix that makes this change, when one can.
+	Auto string `yaml:"auto"`
 }
 
 var (

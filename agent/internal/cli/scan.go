@@ -84,26 +84,32 @@ func newScan(io IO) *cobra.Command {
 // The error is for problems the user must fix; saveErr only means the
 // report file could not be written.
 func runScan(ctx context.Context, configPath string, reuseSlowFor time.Duration) (r scan.Report, saveErr, err error) {
+	r, _, saveErr, err = scanWithEnv(ctx, configPath, reuseSlowFor)
+	return r, saveErr, err
+}
+
+// scanWithEnv is runScan that also returns what the checks read, for kiyesi fix.
+func scanWithEnv(ctx context.Context, configPath string, reuseSlowFor time.Duration) (r scan.Report, env *checks.Env, saveErr, err error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
-		return r, nil, usageErr("%v\nFix the file, or move it away to use the defaults.", err)
+		return r, nil, nil, usageErr("%v\nFix the file, or move it away to use the defaults.", err)
 	}
 	pack, err := packs.English()
 	if err != nil {
-		return r, nil, &exitError{code: ExitUsage, msg: "The built-in wording is damaged: " + err.Error() + ". Reinstall Kiyesi."}
+		return r, nil, nil, &exitError{code: ExitUsage, msg: "The built-in wording is damaged: " + err.Error() + ". Reinstall Kiyesi."}
 	}
 	root := os.Geteuid() == 0
 	dir := report.Dir(root)
 	sys := newSystem(root, dir)
 	sys.Docker = system.FilterDocker(sys.Docker, cfg.Containers.Include, cfg.Containers.Exclude)
-	env := checks.NewEnv(sys, cfg)
+	env = checks.NewEnv(sys, cfg)
 	env.ReuseSlowFor = reuseSlowFor
 	r = scan.Run(ctx, env, checks.Default(), pack)
 	path, saveErr := report.Save(dir, sys.Now(), render.File(r))
 	if saveErr == nil {
 		r.ReportFile = path
 	}
-	return r, saveErr, nil
+	return r, env, saveErr, nil
 }
 
 // viaSudo is true when root runs the scan on behalf of another user.

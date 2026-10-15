@@ -23,5 +23,8 @@
  Database   redis (this server)          confirmed   [33moutside Nigeria[m
  Database   checkout-db-prod:5432        likely      [33moutside Nigeria[m
 
+[1mKiyesi can fix 2 of these for you:[m sudo kiyesi fix
+[90mIt says what it will change, and asks first.[m
+
 [90mFull report with every fix command: /var/lib/kiyesi/report-2026-10-08.txt[m
 

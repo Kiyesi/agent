@@ -28,6 +28,9 @@ type Config struct {
 	Limits      Limits     `yaml:"limits"`
 	Logs        Logs       `yaml:"logs"`
 	Containers  Containers `yaml:"containers"`
+	// Fix is "off" to forbid sudo kiyesi fix on this server, for a team
+	// whose rules allow no tool to change a server. On by default.
+	Fix string `yaml:"fix"`
 	// Databases are read by the agent with a read-only user (PRD feature 24).
 	// Their addresses and passwords stay in this file and are never sent.
 	Databases []Database `yaml:"databases"`
@@ -181,6 +184,14 @@ func (c *Config) validate() error {
 				return errors.New("logs.include, logs.exclude and logs.drop entries must be 1 to 200 characters")
 			}
 		}
+	}
+	switch strings.ToLower(c.Fix) {
+	case "", "on", "true", "yes":
+		c.Fix = "on"
+	case "off", "false", "no":
+		c.Fix = "off"
+	default:
+		return fmt.Errorf("fix must be on or off, not %q", c.Fix)
 	}
 	for _, p := range c.Ports.Allowed {
 		if p < 1 || p > 65535 {
