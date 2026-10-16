@@ -41,6 +41,30 @@ type Env struct {
 
 	databasesOnce sync.Once
 	databases     []dbConn
+
+	// stateMu makes each change to the state file whole: checks run at
+	// the same time, and each loads, changes and saves the one file.
+	stateMu sync.Mutex
+}
+
+// EditState loads the state file, lets fn change it, and saves it, one
+// check at a time, so no check's change is lost to another's.
+func (e *Env) EditState(fn func(m map[string]string)) error {
+	e.stateMu.Lock()
+	defer e.stateMu.Unlock()
+	if e.Sys.State == nil {
+		fn(map[string]string{})
+		return nil
+	}
+	m, err := e.Sys.State.Load()
+	if err != nil {
+		return err
+	}
+	if m == nil {
+		m = map[string]string{}
+	}
+	fn(m)
+	return e.Sys.State.Save(m)
 }
 
 // NewEnv returns an Env for one scan.
@@ -101,15 +125,12 @@ func (e *Env) remember(id string, r Result) {
 	if e.ReuseSlowFor <= 0 || e.Sys.State == nil || r.Status == StatusSkip {
 		return
 	}
-	state, err := e.Sys.State.Load()
-	if err != nil {
-		return
-	}
 	data, err := json.Marshal(r)
 	if err != nil {
 		return
 	}
-	state["result/"+id] = string(data)
-	state["result-at/"+id] = e.Sys.Now().UTC().Format(time.RFC3339)
-	_ = e.Sys.State.Save(state)
+	_ = e.EditState(func(state map[string]string) {
+		state["result/"+id] = string(data)
+		state["result-at/"+id] = e.Sys.Now().UTC().Format(time.RFC3339)
+	})
 }

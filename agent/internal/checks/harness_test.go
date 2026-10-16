@@ -67,13 +67,17 @@ type testEnv struct {
 	state  *system.MemState
 }
 
+// newTestEnv is a server whose team is in Nigeria, the first country with
+// a rule pack; tests of a team with no home country clear it.
 func newTestEnv() *testEnv {
+	cfg := config.Default()
+	cfg.HomeCountry = "NG"
 	return &testEnv{
 		fs:     fstest.MapFS{},
 		runner: &fakeRunner{has: map[string]bool{}, outs: map[string]string{}, errs: map[string]error{}},
 		usage:  map[string]system.Usage{},
 		root:   true,
-		cfg:    config.Default(),
+		cfg:    cfg,
 		state:  &system.MemState{M: map[string]string{}},
 	}
 }

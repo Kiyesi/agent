@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -114,7 +115,7 @@ func newAgent(io IO) *cobra.Command {
 					}
 					return &m, ev, col.TakeLogs(), items
 				},
-				client: send.NewClient(conf.API, token),
+				client: withHome(send.NewClient(conf.API, token), io.Err),
 				outbox: send.Outbox{Dir: outboxDir(), MaxBytes: outboxBytes},
 				scan: func(ctx context.Context) (scan.Report, error) {
 					r, _, err := runScan(ctx, configPath, slowChecksEvery)
@@ -226,6 +227,14 @@ func applyLogSettings(col *collect.Collector, docker system.Docker, path string,
 	col.Logs = c.Logs.Enabled
 	col.Rules = collect.LogRules{Exclude: c.Logs.Exclude, Drop: c.Logs.Drop}
 	col.Journal = collect.JournalRules{On: c.Logs.Journal, Auth: c.Logs.Auth, Firewall: c.Logs.Firewall, Include: c.Logs.Include}
+	// The sign-in watch, unless logins: off. Kept across settings changes,
+	// so the pairs already seen are not forgotten.
+	switch {
+	case c.Logins == "off":
+		col.Signins = nil
+	case col.Signins == nil:
+		col.Signins = &collect.SigninWatch{Path: filepath.Join(stateDir(), "signins.json")}
+	}
 }
 
 func loadConnection() (agentConf, string, error) {
@@ -356,4 +365,15 @@ func readDatabases(ctx context.Context, configPath string, r *dbwatch.Reader, no
 		}
 	}
 	return out
+}
+
+// withHome keeps the team's home country from the service's replies, so the
+// next scan compares with it.
+func withHome(c *send.Client, errOut io.Writer) *send.Client {
+	c.OnHome = func(code string) {
+		if err := saveTeamHome(code); err != nil {
+			fmt.Fprintf(errOut, "cannot keep the team's home country: %v\n", err)
+		}
+	}
+	return c
 }

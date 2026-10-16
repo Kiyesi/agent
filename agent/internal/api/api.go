@@ -60,7 +60,10 @@ type Client struct {
 	// Project and Env narrow any list (--project, --env); empty for all.
 	Project string
 	Env     string
-	HTTP    *http.Client
+	// Via is "mcp" when an AI assistant asks through kiyesi mcp: the service
+	// then answers only reads, and only when the team allowed AI assistants.
+	Via  string
+	HTTP *http.Client
 }
 
 // New returns a client with a time limit on every request.
@@ -113,6 +116,9 @@ func (c *Client) send(ctx context.Context, method, path string, in any) ([]byte,
 		req.Header.Set("X-Kiyesi-Env", c.Env)
 	}
 	req.Header.Set("User-Agent", "kiyesi-cli/"+version.Version)
+	if c.Via != "" {
+		req.Header.Set("X-Kiyesi-Client", c.Via)
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("cannot reach %s: %w", c.API, err)
@@ -211,6 +217,8 @@ type Me struct {
 	Team struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
+		// AIAssistants is the team's choice: may AI assistants read Kiyesi.
+		AIAssistants bool `json:"aiAssistants"`
 	} `json:"team"`
 	Role     string `json:"role"`
 	RoleName string `json:"roleName"`
@@ -1033,4 +1041,25 @@ func (c *Client) Findings(ctx context.Context, severity string) ([]Finding, erro
 	}
 	err := c.do(ctx, http.MethodGet, path, nil, &out)
 	return out.Findings, err
+}
+
+// Expiry is one thing in the expiry calendar: a domain, a certificate or a typed date.
+type Expiry struct {
+	ID        string     `json:"id"`
+	Kind      string     `json:"kind"`
+	Name      string     `json:"name"`
+	ExpiresAt *time.Time `json:"expiresAt"`
+	DaysLeft  *int       `json:"daysLeft"`
+	Source    string     `json:"source"`
+	Detail    *string    `json:"detail"`
+	NeedsDate bool       `json:"needsDate"`
+}
+
+// Expiries lists the expiry calendar, soonest first.
+func (c *Client) Expiries(ctx context.Context) ([]Expiry, error) {
+	var out struct {
+		Expiries []Expiry `json:"expiries"`
+	}
+	err := c.do(ctx, http.MethodGet, "/v1/expiries", nil, &out)
+	return out.Expiries, err
 }

@@ -564,6 +564,13 @@
     ]
   },
   {
+    "path": "kiyesi mcp",
+    "use": "kiyesi mcp",
+    "short": "Let your own AI assistant read Kiyesi, with your access (an MCP server)",
+    "long": "Runs an MCP server on this computer for an AI assistant such as Claude, Cursor,\nVS Code or Windsurf. It answers from Kiyesi with your login and your role, and\nonly reads: servers, findings, incidents, alerts, logs, metrics, history and\nuptime. An owner must first allow AI assistants for the team, in the dashboard:\nTeam and security, AI assistants. Your assistant starts it; you do not run it\nby hand. Sign in first with kiyesi login.",
+    "example": "  claude mcp add kiyesi -- kiyesi mcp\n  # Cursor, VS Code and others: a server named kiyesi, command kiyesi, argument mcp"
+  },
+  {
     "path": "kiyesi metrics",
     "use": "kiyesi metrics <server> [flags]",
     "short": "CPU, memory, disk and requests over time, drawn in the terminal",
@@ -686,6 +693,19 @@
     "use": "kiyesi projects rename <name> <new name>",
     "short": "Give a project a new name",
     "example": "  kiyesi projects rename Checkout Payments"
+  },
+  {
+    "path": "kiyesi renewals",
+    "use": "kiyesi renewals [flags]",
+    "short": "What runs out soon: domains, certificates and your own dates",
+    "long": "Lists the expiry calendar, soonest first: the domains and certificates found\nfrom your uptime checks, and the dates your team added. Kiyesi warns 30, 7 and\n1 day before each. Add a date in the dashboard, on Renewals.",
+    "example": "  kiyesi renewals\n  kiyesi renewals --json",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the list as JSON, for scripts"
+      }
+    ]
   },
   {
     "path": "kiyesi report",

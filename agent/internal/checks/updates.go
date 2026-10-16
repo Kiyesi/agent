@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,30 +32,28 @@ func (updatesCheck) Run(ctx context.Context, env *Env) Result {
 	// apt does not record when an update appeared, so the scan notes the
 	// day it first sees each one.
 	now := env.Sys.Now()
-	state, err := env.Sys.State.Load()
-	if err != nil {
-		return Failed(err)
-	}
-	next := map[string]string{}
-	for k, v := range state {
-		if !strings.HasPrefix(k, statePrefix) {
-			next[k] = v
-		}
-	}
 	limit := time.Duration(env.Cfg.Limits.UpdateDays) * 24 * time.Hour
 	old := 0
-	for _, pkg := range pending {
-		key := statePrefix + pkg
-		first, err := time.Parse(time.RFC3339, state[key])
-		if err != nil {
-			first = now
+	err = env.EditState(func(state map[string]string) {
+		// Updates no longer waiting are forgotten; the rest keep their first day.
+		for k := range state {
+			if strings.HasPrefix(k, statePrefix) && !slices.Contains(pending, strings.TrimPrefix(k, statePrefix)) {
+				delete(state, k)
+			}
 		}
-		next[key] = first.UTC().Format(time.RFC3339)
-		if now.Sub(first) > limit {
-			old++
+		for _, pkg := range pending {
+			key := statePrefix + pkg
+			first, err := time.Parse(time.RFC3339, state[key])
+			if err != nil {
+				first = now
+			}
+			state[key] = first.UTC().Format(time.RFC3339)
+			if now.Sub(first) > limit {
+				old++
+			}
 		}
-	}
-	if err := env.Sys.State.Save(next); err != nil {
+	})
+	if err != nil {
 		return Failed(err)
 	}
 	vars := map[string]string{"limit": strconv.Itoa(env.Cfg.Limits.UpdateDays), "count": strconv.Itoa(old)}

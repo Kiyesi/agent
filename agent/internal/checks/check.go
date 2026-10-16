@@ -64,6 +64,9 @@ type Result struct {
 	None bool
 	// Vars fill the pack's passed line.
 	Vars map[string]string
+	// NoHome means no home country is chosen, so nothing was compared with
+	// one. It uses the pack's passed-no-home line.
+	NoHome bool
 	// Locations are the rows this check adds to the data-location section.
 	Locations []Location
 	// SkipKey names the reason for a skip: a key in the check's own skips,

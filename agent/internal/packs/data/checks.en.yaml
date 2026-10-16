@@ -184,11 +184,14 @@ checks:
   - id: backups
     area: health
     name: Backups
-    reads: The age of the newest file in each backup folder named in /etc/kiyesi/config.yaml.
+    reads: >-
+      The age of the newest file in each backup folder named in /etc/kiyesi/config.yaml, and that
+      file itself, read through once when it is new (gzip, zip, tar, and PostgreSQL and MySQL dumps),
+      to check it would restore. Nothing is unpacked or sent.
     root:
       needed: sometimes
       why: Backup folders are often readable only by root.
-    passed: "Newest backup is {age} old"
+    passed: "Newest backup is {age} old{opens}"
     findings:
       not-set:
         severity: warning
@@ -207,6 +210,20 @@ checks:
         sentence: "Newest backup is {age} old"
         why: Backups are expected every {limit} hours. The last one was written on {when}.
         fix: "crontab -l | grep -i backup"
+      unreadable:
+        severity: critical
+        sentence: "The newest backup in {path} would not restore: {reason}"
+        why: >-
+          A backup that cannot be opened restores nothing, and you find out on the worst day. The
+          backup job may have stopped halfway, or the disk filled up while it wrote {file}.
+        fix: "Run the backup job by hand, check it finishes without errors, then: sudo kiyesi scan"
+      shrank:
+        severity: warning
+        sentence: "The newest backup in {path} is {size}, down from {before}"
+        why: >-
+          A backup that suddenly shrinks is often a failed dump: a database that could not be
+          reached, a changed password, or a table that went missing. Check {file} holds your data.
+        fix: "ls -lh {path}"
 
   - id: updates
     area: health
@@ -450,6 +467,7 @@ checks:
     root:
       needed: never
     passed: "This server is in {place}, inside {home}"
+    passed-no-home: "This server is in {place}. Choose a home country to compare it with"
     skips:
       unknown: "the provider's details could not be read, so the country is found from this server's address once it is connected"
     findings:
@@ -474,6 +492,7 @@ checks:
       needed: sometimes
       why: Other users' files and /root can be read only by root.
     passed: "{count} database hosts checked, none outside {home}"
+    passed-no-home: "{count} database hosts placed. Choose a home country to compare them with"
     passed-none: "No database connection settings found"
     findings:
       outside:
@@ -495,6 +514,7 @@ checks:
       needed: sometimes
       why: rclone settings and cron jobs in /root and other users' folders can be read only by root.
     passed: "{count} backup destinations checked, none outside {home}"
+    passed-no-home: "{count} backup destinations placed. Choose a home country to compare them with"
     passed-none: "No backup destination found in the settings Kiyesi reads"
     findings:
       outside:
@@ -525,6 +545,7 @@ checks:
     root:
       needed: never
     passed: "{count} databases marked as holding payment data, all inside {home}"
+    passed-no-home: "{count} databases marked as holding payment data. Choose a home country to compare them with"
     passed-none: "No database is marked as holding payment data. List them under payment_data in /etc/kiyesi/config.yaml"
     findings:
       outside:

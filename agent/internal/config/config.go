@@ -17,7 +17,9 @@ const DefaultPath = "/etc/kiyesi/config.yaml"
 
 // Config holds every setting the scan reads.
 type Config struct {
-	// HomeCountry is the ISO code of the country data should stay in.
+	// HomeCountry is the ISO code of the country data should stay in. Empty
+	// means the team's choice in the dashboard, or none: Kiyesi then shows
+	// where things are without calling any of them outside.
 	HomeCountry string `yaml:"home_country"`
 	// PaymentData lists the databases that hold payment data, by host,
 	// host:port, or the name a connection setting gives them.
@@ -31,6 +33,9 @@ type Config struct {
 	// Fix is "off" to forbid sudo kiyesi fix on this server, for a team
 	// whose rules allow no tool to change a server. On by default.
 	Fix string `yaml:"fix"`
+	// Logins is "off" to stop the sign-in watch: a note for each SSH
+	// sign-in from a user and address not seen before. On by default.
+	Logins string `yaml:"logins"`
 	// Databases are read by the agent with a read-only user (PRD feature 24).
 	// Their addresses and passwords stay in this file and are never sent.
 	Databases []Database `yaml:"databases"`
@@ -112,11 +117,10 @@ type Limits struct {
 // Default returns the PRD's default limits.
 func Default() Config {
 	return Config{
-		HomeCountry: "NG",
-		Ports:       Ports{Allowed: []int{22, 80, 443}},
-		Backups:     Backups{MaxAgeHours: 24},
-		Secrets:     Secrets{Paths: []string{"/srv", "/opt", "/home", "/root", "/var/www"}},
-		Logs:        Logs{Enabled: true, Journal: true},
+		Ports:   Ports{Allowed: []int{22, 80, 443}},
+		Backups: Backups{MaxAgeHours: 24},
+		Secrets: Secrets{Paths: []string{"/srv", "/opt", "/home", "/root", "/var/www"}},
+		Logs:    Logs{Enabled: true, Journal: true},
 		Limits: Limits{
 			LoadPerCore:         0.85,
 			MemoryPercent:       90,
@@ -160,8 +164,8 @@ func Parse(data []byte, c *Config) error {
 }
 
 func (c *Config) validate() error {
-	if len(c.HomeCountry) != 2 {
-		return errors.New("home_country must be a two-letter country code, such as NG")
+	if c.HomeCountry != "" && len(c.HomeCountry) != 2 {
+		return errors.New("home_country must be a two-letter country code, such as DE, NG or US, or left out")
 	}
 	c.HomeCountry = strings.ToUpper(c.HomeCountry)
 	l := c.Limits
@@ -184,6 +188,14 @@ func (c *Config) validate() error {
 				return errors.New("logs.include, logs.exclude and logs.drop entries must be 1 to 200 characters")
 			}
 		}
+	}
+	switch strings.ToLower(c.Logins) {
+	case "", "on", "true", "yes":
+		c.Logins = "on"
+	case "off", "false", "no":
+		c.Logins = "off"
+	default:
+		return fmt.Errorf("logins must be on or off, not %q", c.Logins)
 	}
 	switch strings.ToLower(c.Fix) {
 	case "", "on", "true", "yes":

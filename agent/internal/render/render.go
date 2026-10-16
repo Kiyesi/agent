@@ -224,10 +224,12 @@ func locationLine(l scan.Location, h scan.Home, width int, colour bool) string {
 		conf, verdict = "", "listed for review"
 	case l.Country == "":
 		conf, verdict = "unknown", "found once connected"
+	case h.Code == "":
+		verdict = ""
 	default:
 		verdict = "in " + home
 	}
-	outside := !l.Review && l.Country != "" && !strings.EqualFold(l.Country, h.Code)
+	outside := h.Code != "" && !l.Review && l.Country != "" && !strings.EqualFold(l.Country, h.Code)
 	if outside {
 		verdict = "outside " + home
 	}

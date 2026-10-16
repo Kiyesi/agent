@@ -65,8 +65,9 @@ func TestRejectsUnknownKeysAndBadValues(t *testing.T) {
 }
 
 func TestHomeCountryAndPaymentData(t *testing.T) {
+	// No country is assumed: the team chooses, from any country.
 	c := Default()
-	if c.HomeCountry != "NG" {
+	if c.HomeCountry != "" {
 		t.Errorf("default home country = %q", c.HomeCountry)
 	}
 	if err := Parse([]byte("home_country: gh\npayment_data: [checkout-db-prod, \"pay.example.com:5432\"]\n"), &c); err != nil {
