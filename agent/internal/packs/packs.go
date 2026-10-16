@@ -32,15 +32,17 @@ type Pack struct {
 
 // Check is the wording for one check.
 type Check struct {
-	ID         string             `yaml:"id"`
-	Area       string             `yaml:"area"`
-	Name       string             `yaml:"name"`
-	Reads      string             `yaml:"reads"`
-	Root       Root               `yaml:"root"`
-	Passed     string             `yaml:"passed"`
-	PassedNone string             `yaml:"passed-none"`
-	Skips      map[string]string  `yaml:"skips"`
-	Findings   map[string]Finding `yaml:"findings"`
+	ID         string `yaml:"id"`
+	Area       string `yaml:"area"`
+	Name       string `yaml:"name"`
+	Reads      string `yaml:"reads"`
+	Root       Root   `yaml:"root"`
+	Passed     string `yaml:"passed"`
+	PassedNone string `yaml:"passed-none"`
+	// PassedNoHome is the passed line when no home country is chosen.
+	PassedNoHome string             `yaml:"passed-no-home"`
+	Skips        map[string]string  `yaml:"skips"`
+	Findings     map[string]Finding `yaml:"findings"`
 }
 
 // Root says whether a check needs root, and why.

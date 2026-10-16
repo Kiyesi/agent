@@ -233,3 +233,21 @@ func TestDatabasesByValueAndOnThePrivateNetwork(t *testing.T) {
 		t.Errorf("unexpected finding %+v", f)
 	}
 }
+
+// With no home country chosen, every place is still shown, and nothing is
+// called outside: a team in any country starts without a wrong warning.
+func TestNoHomeCountryPlacesWithoutJudging(t *testing.T) {
+	e := newTestEnv().saved(t, "run/cloud-init/instance-data.json", "instance-data-do-lon1.json")
+	e.cfg.HomeCountry = ""
+	r := run(t, serverLocationCheck{}, e)
+	if r.Status != StatusPass || !r.NoHome || len(r.Findings) != 0 {
+		t.Fatalf("result = %+v", r)
+	}
+	if len(r.Locations) != 1 || r.Locations[0].Country != "GB" {
+		t.Fatalf("locations = %+v", r.Locations)
+	}
+	e.cfg.HomeCountry = "GB"
+	if r := run(t, serverLocationCheck{}, e); r.Status != StatusPass || r.NoHome {
+		t.Fatalf("with GB as home = %+v", r)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -208,7 +209,10 @@ func TestBatchGoldenForTheAPI(t *testing.T) {
 		HTTP:       []collect.EndpointStats{{Endpoint: "GET /api/users/:id", Requests: 120, Errors: 2, AvgMs: &avg, P95Ms: &p95}},
 		HTTPSource: "caddy (container)",
 	}
-	events := []collect.Event{{Kind: "image_changed", Subject: "checkout-api", Detail: "checkout-api:3.8.1"}}
+	events := []collect.Event{
+		{Kind: "image_changed", Subject: "checkout-api", Detail: "checkout-api:3.8.1"},
+		{Kind: "signin", Subject: "ada", Detail: "publickey", Address: "198.51.100.7", At: "2026-10-09T09:59:41Z"},
+	}
 	logs := &collect.Logs{Lines: []collect.LogLine{
 		{At: at.Add(-50 * time.Second), Source: "checkout-api", Kind: "container", Level: "info", Text: "Connecting to redis://default:" + "hunter2-not-real" + "@redis:6379"},
 		{At: at.Add(-40 * time.Second), Source: "checkout-api", Kind: "container", Level: "error", Text: "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory"},
@@ -237,6 +241,38 @@ func TestBatchGoldenForTheAPI(t *testing.T) {
 		_ = json.Indent(&pretty, raw, "", "  ")
 		if err := os.WriteFile("testdata/"+name, pretty.Bytes(), 0o644); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+// Each reply may name the team's home country; the agent keeps it for the
+// next scan. Anything that is not a two-letter code is ignored.
+func TestRepliesNameTheTeamsHomeCountry(t *testing.T) {
+	for _, tc := range []struct {
+		reply string
+		heard []string
+	}{
+		{`{"accepted":"x","home_country":"DE"}`, []string{"DE"}},
+		{`{"accepted":"x","home_country":null}`, []string{""}},
+		{`{"accepted":"x"}`, nil},
+		{`{"accepted":"x","home_country":"de"}`, nil},
+		{`{"accepted":"x","home_country":"DEU"}`, nil},
+		{`not json`, nil},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(tc.reply))
+		}))
+		var heard []string
+		c := NewClient(srv.URL, "ksv_test")
+		c.OnHome = func(code string) { heard = append(heard, code) }
+		body, _ := Encode(Heartbeat(time.Now()))
+		if err := c.deliver(context.Background(), body); err != nil {
+			t.Fatal(err)
+		}
+		srv.Close()
+		if fmt.Sprint(heard) != fmt.Sprint(tc.heard) {
+			t.Errorf("%s: heard %q, want %q", tc.reply, heard, tc.heard)
 		}
 	}
 }

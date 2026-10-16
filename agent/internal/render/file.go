@@ -54,7 +54,11 @@ func File(r scan.Report) string {
 	section("CRITICAL", "FAIL", crit)
 	section("WARNING", "WARN", warn)
 	if rows := locations(r); len(rows) > 0 {
-		line("DATA LOCATION (home country: " + r.Home.Name + ")")
+		if r.Home.Code == "" {
+			line("DATA LOCATION (no home country chosen: set home_country in /etc/kiyesi/config.yaml, or choose it in the dashboard)")
+		} else {
+			line("DATA LOCATION (home country: " + r.Home.Name + ")")
+		}
 		w := nameWidth(rows)
 		for _, l := range rows {
 			s := locationLine(l, r.Home, w, false)

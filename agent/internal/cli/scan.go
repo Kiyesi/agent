@@ -91,6 +91,11 @@ func runScan(ctx context.Context, configPath string, reuseSlowFor time.Duration)
 // scanWithEnv is runScan that also returns what the checks read, for kiyesi fix.
 func scanWithEnv(ctx context.Context, configPath string, reuseSlowFor time.Duration) (r scan.Report, env *checks.Env, saveErr, err error) {
 	cfg, err := config.Load(configPath)
+	// The server's own setting wins; else the team's choice, as the
+	// service last said it; else none.
+	if err == nil && cfg.HomeCountry == "" {
+		cfg.HomeCountry = teamHome()
+	}
 	if err != nil {
 		return r, nil, nil, usageErr("%v\nFix the file, or move it away to use the defaults.", err)
 	}

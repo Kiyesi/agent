@@ -29,3 +29,19 @@ func TestJobsListsEachJobAndItsRuns(t *testing.T) {
 		t.Errorf("unknown: %d %q", code, errOut)
 	}
 }
+
+func TestRenewalsListsWhatRunsOutSoonestFirst(t *testing.T) {
+	signInForTest(t)
+	code, out, errOut := runCLI(t, "renewals")
+	if code != ExitOK {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	for _, want := range []string{"20 Oct 2026 (in 4 days)", "shop.example.com", "certificate", "date not known: type it on Renewals", "shop.com.ng"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if code, out, _ := runCLI(t, "renewals", "--json"); code != ExitOK || !strings.Contains(out, `"needsDate": true`) {
+		t.Errorf("json: %d %s", code, out)
+	}
+}

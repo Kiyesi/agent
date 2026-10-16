@@ -332,3 +332,29 @@ func TestFixUndoListsAndPutsBack(t *testing.T) {
 		t.Errorf("%d %q", code, errOut)
 	}
 }
+
+// The team's home country, as the service last said it, is used when the
+// server's own settings name none; the server's own setting wins.
+func TestScanUsesTheTeamsHomeCountry(t *testing.T) {
+	testSystem(t)
+	t.Setenv("KIYESI_STATE", t.TempDir())
+	r, _, err := runScan(context.Background(), configFlag, 0)
+	if err != nil || r.Home.Code != "" {
+		t.Fatalf("no country anywhere: %q %v", r.Home.Code, err)
+	}
+	if err := saveTeamHome("DE"); err != nil {
+		t.Fatal(err)
+	}
+	if r, _, _ := runScan(context.Background(), configFlag, 0); r.Home.Code != "DE" || r.Home.Name != "Germany" {
+		t.Fatalf("team's choice: %+v", r.Home)
+	}
+	if err := os.WriteFile(configFlag, []byte("home_country: ng\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r, _, _ := runScan(context.Background(), configFlag, 0); r.Home.Code != "NG" {
+		t.Fatalf("the server's own setting: %+v", r.Home)
+	}
+	if err := saveTeamHome(""); err != nil || teamHome() != "" {
+		t.Fatalf("cleared: %q %v", teamHome(), err)
+	}
+}

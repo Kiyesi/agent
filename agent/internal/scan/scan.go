@@ -126,6 +126,8 @@ var (
 		"secrets-in-files": time.Minute,
 		// apt's dry run takes over 20 s on a 1-CPU server with little memory.
 		"updates": time.Minute,
+		// Reading a new backup through, up to 1 GB, once.
+		"backups": 2 * time.Minute,
 	}
 )
 
@@ -207,6 +209,9 @@ func describe(pack *packs.Pack, id string, res checks.Result) CheckResult {
 		if res.None && w.PassedNone != "" {
 			line = w.PassedNone
 		}
+		if res.NoHome && w.PassedNoHome != "" {
+			line = w.PassedNoHome
+		}
 		out.Summary = packs.Fill(line, res.Vars)
 	case checks.StatusSkip:
 		line := w.Skips[res.SkipKey]
@@ -250,6 +255,9 @@ func describe(pack *packs.Pack, id string, res checks.Result) CheckResult {
 }
 
 func home(code string) Home {
+	if code == "" {
+		return Home{}
+	}
 	h := Home{Code: code, Name: code}
 	places, err := packs.LoadPlaces()
 	if err != nil {

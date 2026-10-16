@@ -20,6 +20,7 @@ var actionOnly = map[string]string{
 	"kiyesi connect":               "links this server",
 	"kiyesi uninstall":             "removes the agent",
 	"kiyesi agent":                 "runs the agent service",
+	"kiyesi mcp":                   "speaks only JSON-RPC, to an AI assistant",
 	"kiyesi run":                   "wraps a job",
 	"kiyesi deploy":                "marks a deploy",
 	"kiyesi deploys remove":        "removes a deploy",

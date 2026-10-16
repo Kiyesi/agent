@@ -59,10 +59,13 @@ type Container struct {
 
 // Event is something that happened on the server.
 type Event struct {
-	// Kind is restart, image_changed or oom_kill.
+	// Kind is restart, image_changed, oom_kill or signin.
 	Kind    string `json:"kind"`
 	Subject string `json:"subject"`
 	Detail  string `json:"detail"`
+	// For a sign-in: the address it came from, and when.
+	Address string `json:"address,omitempty"`
+	At      string `json:"at,omitempty"`
 }
 
 // AccessLogs are the host files read for requests, when they exist.
@@ -110,6 +113,9 @@ type Collector struct {
 	Journal JournalRules
 	journal journal
 	buf     logBuffer
+
+	// Signins, when set, watches for SSH sign-ins not seen before.
+	Signins *SigninWatch
 }
 
 // TakeLogs returns the log lines gathered since the last call, or nil.
@@ -191,6 +197,9 @@ func (c *Collector) Collect(ctx context.Context) (Metrics, []Event) {
 		}
 	}
 
+	if c.Signins != nil {
+		events = append(events, c.Signins.Read(ctx, c.Sys, now)...)
+	}
 	c.at, c.cpu, c.net = now, cpu, net
 	return m, events
 }

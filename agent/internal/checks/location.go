@@ -23,6 +23,12 @@ type serverPlace struct {
 	known    bool
 }
 
+// outside is true when a country is known and is not the home country.
+// With no home country chosen, nothing is outside.
+func outside(env *Env, country string) bool {
+	return env.Cfg.HomeCountry != "" && country != env.Cfg.HomeCountry
+}
+
 // homeVars are the values every data-location sentence uses.
 func homeVars(env *Env, places *packs.Places) map[string]string {
 	home := env.Cfg.HomeCountry
@@ -154,12 +160,13 @@ func (serverLocationCheck) Run(ctx context.Context, env *Env) Result {
 	}
 	vars := with(homeVars(env, places), "place", s.place)
 	row := Location{Kind: "Server", Name: s.provider + ", " + s.place, Provider: s.provider, Place: s.place, Country: s.country, Confidence: "confirmed"}
-	if s.country != env.Cfg.HomeCountry {
+	if outside(env, s.country) {
 		r := Fail(Found("outside", vars))
 		r.Locations = []Location{row}
 		return r
 	}
 	r := Pass(vars)
+	r.NoHome = env.Cfg.HomeCountry == ""
 	r.Locations = []Location{row}
 	return r
 }
@@ -387,7 +394,7 @@ func (databaseConnectionsCheck) Run(ctx context.Context, env *Env) Result {
 		rows = append(rows, row)
 		// A database on this server is where the server is: the server
 		// check reports it, so it costs the grade once.
-		if !d.local && !d.private && d.known && d.country != env.Cfg.HomeCountry {
+		if !d.local && !d.private && d.known && outside(env, d.country) {
 			found = append(found, Found("outside", with(base, "host", d.name(), "place", d.place)))
 		}
 	}
@@ -396,6 +403,7 @@ func (databaseConnectionsCheck) Run(ctx context.Context, env *Env) Result {
 		r = Fail(found...)
 	} else {
 		r = Pass(with(base, "count", strconv.Itoa(len(dbs))))
+		r.NoHome = env.Cfg.HomeCountry == ""
 	}
 	r.Locations = rows
 	return r
@@ -538,7 +546,7 @@ func (backupDestinationsCheck) Run(_ context.Context, env *Env) Result {
 		row := Location{Kind: "Backup", Name: b.target, Host: b.host, Provider: b.provider, Place: b.place, Country: b.country}
 		if b.place != "" {
 			row.Confidence = "likely"
-			if b.country != env.Cfg.HomeCountry {
+			if outside(env, b.country) {
 				found = append(found, Found("outside", with(base, "target", b.target, "place", b.place)))
 			}
 		}
@@ -549,6 +557,7 @@ func (backupDestinationsCheck) Run(_ context.Context, env *Env) Result {
 		r = Fail(found...)
 	} else {
 		r = Pass(with(base, "count", strconv.Itoa(len(bs))))
+		r.NoHome = env.Cfg.HomeCountry == ""
 	}
 	r.Locations = rows
 	return r
@@ -633,7 +642,7 @@ func (paymentDataCheck) Run(ctx context.Context, env *Env) Result {
 			continue
 		}
 		matched++
-		if d.known && d.country != env.Cfg.HomeCountry {
+		if d.known && outside(env, d.country) {
 			conf := "likely"
 			if d.local && env.Server(ctx).known {
 				conf = "confirmed"
@@ -646,7 +655,9 @@ func (paymentDataCheck) Run(ctx context.Context, env *Env) Result {
 	if len(found) > 0 {
 		return Fail(found...)
 	}
-	return Pass(with(base, "count", strconv.Itoa(matched)))
+	r := Pass(with(base, "count", strconv.Itoa(matched)))
+	r.NoHome = env.Cfg.HomeCountry == ""
+	return r
 }
 
 func tagged(tags []string, d dbConn) bool {

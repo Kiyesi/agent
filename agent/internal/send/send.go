@@ -165,6 +165,10 @@ type Client struct {
 	API   string // https://api.example.com
 	Token string
 	HTTP  *http.Client
+	// OnHome hears the team's home country from each reply: a two-letter
+	// code, or "" when the team has not chosen one. A service that does not
+	// say leaves it unheard.
+	OnHome func(code string)
 }
 
 // CheckAPI refuses any address that is not HTTPS, apart from this machine,
@@ -256,9 +260,10 @@ func (c *Client) deliver(ctx context.Context, body []byte) error {
 		return err
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	reply, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	switch {
 	case resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusOK:
+		c.hearHome(reply)
 		return nil
 	case resp.StatusCode == http.StatusUnauthorized:
 		return ErrNotAllowed
@@ -266,6 +271,31 @@ func (c *Client) deliver(ctx context.Context, body []byte) error {
 		return ErrRejected
 	default:
 		return fmt.Errorf("the service answered %d", resp.StatusCode)
+	}
+}
+
+// hearHome passes on the team's home country when the reply names it.
+func (c *Client) hearHome(reply []byte) {
+	if c.OnHome == nil {
+		return
+	}
+	var r map[string]json.RawMessage
+	if json.Unmarshal(reply, &r) != nil {
+		return
+	}
+	raw, ok := r["home_country"]
+	if !ok {
+		return
+	}
+	var code *string
+	if json.Unmarshal(raw, &code) != nil {
+		return
+	}
+	switch {
+	case code == nil:
+		c.OnHome("")
+	case len(*code) == 2 && strings.ToUpper(*code) == *code && strings.Trim(*code, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") == "":
+		c.OnHome(*code)
 	}
 }
 
