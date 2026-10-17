@@ -8,7 +8,7 @@
 
 version: 1
 language: en
-total_checks: 22
+total_checks: 23
 
 skips:
   needs-root: "needs root: run sudo kiyesi scan"
@@ -449,6 +449,74 @@ checks:
         sentence: "{count} critical vulnerabilities with a fix available in image {image}"
         why: These flaws are public and already fixed in newer packages for this image.
         fix: "Update the base image of {image}, rebuild it, and restart its containers"
+
+  - id: leftovers
+    area: security
+    name: Leftovers
+    reads: >-
+      Env files and wp-config.php in the folders under secrets.paths and the web roots, for
+      debug and development settings (the setting's name, never another value); each running
+      container's image and environment; Git folders in /var/www and the other web roots;
+      the sizes of files in /var/log and of containers' logs; and Docker's own count of
+      images and build cache nothing uses.
+    root:
+      needed: sometimes
+      why: The Docker socket, containers' logs and other users' files can be read only by root.
+    passed: "Nothing left over from development, and no space wasted on logs or Docker"
+    findings:
+      debug:
+        severity: warning
+        sentence: "{path} turns on debug mode: {setting}"
+        why: >-
+          Debug mode shows visitors error pages with code, settings and sometimes secrets, and
+          is slower. It is meant for a developer's machine, not a server the internet reaches.
+        fix: "Change {setting} to the production value in {path} (false, or production), then restart the app"
+      debug-container:
+        severity: warning
+        sentence: "Container {name} runs in debug mode: {setting}"
+        why: >-
+          Debug mode shows visitors error pages with code, settings and sometimes secrets, and
+          is slower. It is meant for a developer's machine, not a server the internet reaches.
+        fix: "Change {setting} to the production value where the service's environment is set, then docker compose up -d"
+      dev-tool-public:
+        severity: critical
+        sentence: "Container {name} runs {tool}, a development tool, open to the internet"
+        why: >-
+          Tools like this give whoever reaches them your data or your email, often behind a
+          weak password or none, and they are among the first things attackers look for.
+        fix: "Remove the service, or publish its port on 127.0.0.1 only (\"127.0.0.1:8080:80\") and reach it with ssh -L 8080:localhost:8080 you@this-server"
+      dev-tool:
+        severity: warning
+        sentence: "Container {name} runs {tool}, a development tool"
+        why: >-
+          It is not reachable from the internet now, but one port change makes it so, and it
+          gives whoever reaches it your data. Run it on your own machine, or only when needed.
+        fix: "docker stop {name}, and remove its service from docker-compose.yml"
+      git-folder:
+        severity: warning
+        sentence: "{path} is a Git folder inside the web root"
+        why: >-
+          If the web server serves it, anyone can download the whole code and its history,
+          with every secret ever committed. The grade from outside checks whether it is served.
+        fix: "Move it out (sudo mv {path} /root/), and deploy with git archive or rsync --exclude .git next time"
+      big-log:
+        severity: warning
+        sentence: "{path} has grown to {size}"
+        why: A log this big is not being rotated. It fills the disk, and old lines are rarely read.
+        fix: "sudo logrotate -f /etc/logrotate.conf, and check /etc/logrotate.d has a rule for {path}"
+      big-container-log:
+        severity: warning
+        sentence: "Container {name}'s log has grown to {size}, with no size limit"
+        why: Docker keeps every line a container writes until its disk is full, unless told a limit.
+        fix: "Add to the service in docker-compose.yml: logging: { driver: json-file, options: { max-size: \"20m\", max-file: \"3\" } }, then docker compose up -d"
+      docker-waste:
+        severity: info
+        auto: docker-cleanup
+        sentence: "Docker keeps {size} that nothing uses: old images and build cache"
+        why: >-
+          Each deploy leaves the previous image and its build cache behind. It is disk you pay
+          for, and a full disk stops every app on the server. Volumes are never counted.
+        fix: "docker image prune -a --filter until=168h && docker builder prune --filter until=168h"
 
   # --------------------------------------------------------- Data location
   # Each data-location finding says confirmed or likely. Only the provider's

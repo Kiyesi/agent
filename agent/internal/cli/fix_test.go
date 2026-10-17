@@ -221,7 +221,7 @@ func TestFixOneByName(t *testing.T) {
 	if code != ExitOK || !strings.Contains(out, "Nothing to fix for certificates: it passed, or does not apply here.") {
 		t.Errorf("%d %s", code, out)
 	}
-	if code, _, errOut := runFixCLI(t, "", "fix", "everything"); code != ExitUsage || !strings.Contains(errOut, `There is no fix called "everything". The fixes are: certificates, firewall,`) {
+	if code, _, errOut := runFixCLI(t, "", "fix", "everything"); code != ExitUsage || !strings.Contains(errOut, `There is no fix called "everything". The fixes are: certificates, docker-cleanup, firewall,`) {
 		t.Errorf("%d %q", code, errOut)
 	}
 }

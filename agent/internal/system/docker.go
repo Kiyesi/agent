@@ -28,7 +28,22 @@ type Docker interface {
 	// Logs returns a container's output lines written after since, oldest
 	// first, each with the time Docker recorded it.
 	Logs(ctx context.Context, id string, since time.Time) ([]LogLine, error)
+	// DiskUsage is the space Docker could give back: images no container
+	// uses, and build cache nothing uses.
+	DiskUsage(ctx context.Context) (DiskUsage, error)
 }
+
+// DiskUsage is space Docker holds that nothing uses, in bytes. Volumes are
+// left out on purpose: an unused volume can still hold the only copy of data.
+type DiskUsage struct {
+	UnusedImages int64
+	// UnusedImageCount is how many images no container uses.
+	UnusedImageCount int
+	BuildCache       int64
+}
+
+// Reclaimable is all of it.
+func (u DiskUsage) Reclaimable() int64 { return u.UnusedImages + u.BuildCache }
 
 // LogLine is one line a container wrote.
 type LogLine struct {
@@ -282,6 +297,57 @@ func (c *dockerClient) Logs(ctx context.Context, id string, since time.Time) ([]
 	return parseLogStream(body, since), nil
 }
 
+// dfImage and dfCache are the parts of /system/df that are read.
+type dfImage struct {
+	Size       int64 `json:"Size"`
+	SharedSize int64 `json:"SharedSize"`
+	Containers int64 `json:"Containers"`
+}
+
+type dfCache struct {
+	Size   int64 `json:"Size"`
+	InUse  bool  `json:"InUse"`
+	Shared bool  `json:"Shared"`
+}
+
+// DiskUsage reads /system/df. Docker works the sizes out on each call,
+// which can take a few seconds on a busy server.
+func (c *dockerClient) DiskUsage(ctx context.Context) (DiskUsage, error) {
+	var df struct {
+		Images     []dfImage `json:"Images"`
+		BuildCache []dfCache `json:"BuildCache"`
+	}
+	if err := c.get(ctx, "/system/df?type=image&type=build-cache", &df); err != nil {
+		return DiskUsage{}, err
+	}
+	return readDiskUsage(df.Images, df.BuildCache), nil
+}
+
+// readDiskUsage counts only what is surely free: an unused image's layers
+// shared with another image are not counted, so the figure is never too big.
+func readDiskUsage(images []dfImage, cache []dfCache) DiskUsage {
+	var u DiskUsage
+	for _, i := range images {
+		if i.Containers != 0 {
+			continue
+		}
+		own := i.Size
+		if i.SharedSize > 0 {
+			own -= i.SharedSize
+		}
+		if own > 0 {
+			u.UnusedImages += own
+		}
+		u.UnusedImageCount++
+	}
+	for _, b := range cache {
+		if !b.InUse && !b.Shared && b.Size > 0 {
+			u.BuildCache += b.Size
+		}
+	}
+	return u
+}
+
 // parseLogStream reads Docker's log stream, framed or plain, and keeps the
 // lines written after since.
 func parseLogStream(body []byte, since time.Time) []LogLine {
@@ -382,4 +448,9 @@ func (f filteredDocker) Dies(ctx context.Context, since, until time.Time) (map[s
 
 func (f filteredDocker) Logs(ctx context.Context, id string, since time.Time) ([]LogLine, error) {
 	return f.inner.Logs(ctx, id, since)
+}
+
+// DiskUsage is Docker's as a whole: images and build cache belong to no container.
+func (f filteredDocker) DiskUsage(ctx context.Context) (DiskUsage, error) {
+	return f.inner.DiskUsage(ctx)
 }

@@ -10,8 +10,8 @@ func TestEnglishLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.TotalChecks != 22 {
-		t.Errorf("total_checks = %d, want 22", p.TotalChecks)
+	if p.TotalChecks != 23 {
+		t.Errorf("total_checks = %d, want 23", p.TotalChecks)
 	}
 	if p.Skips["needs-root"] == "" {
 		t.Error("the needs-root skip line is missing")

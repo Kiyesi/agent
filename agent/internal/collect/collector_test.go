@@ -15,6 +15,10 @@ type fakeDocker struct {
 }
 
 func (f *fakeDocker) Containers(context.Context) ([]system.Container, error) { return f.list, nil }
+func (f *fakeDocker) DiskUsage(context.Context) (system.DiskUsage, error) {
+	return system.DiskUsage{}, nil
+}
+
 func (f *fakeDocker) Dies(context.Context, time.Time, time.Time) (map[string]int, error) {
 	return nil, nil
 }

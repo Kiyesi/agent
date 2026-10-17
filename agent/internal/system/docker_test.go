@@ -34,6 +34,12 @@ func TestDockerClientReadsContainers(t *testing.T) {
 			_ = enc.Encode(map[string]any{"Actor": map[string]string{"ID": "abc"}})
 		}
 	})
+	// Two unused images, one sharing a layer with a used one; build cache
+	// in use is not counted.
+	mux.HandleFunc("GET /system/df", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"Images":[{"Size":500,"SharedSize":0,"Containers":1},{"Size":300,"SharedSize":100,"Containers":0},{"Size":200,"SharedSize":-1,"Containers":0}],
+		"BuildCache":[{"Size":1000,"InUse":false,"Shared":false},{"Size":50,"InUse":true,"Shared":false},{"Size":70,"InUse":false,"Shared":true}]}`))
+	})
 	srv := &http.Server{Handler: mux}
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Close() })
@@ -60,6 +66,13 @@ func TestDockerClientReadsContainers(t *testing.T) {
 	}
 	if dies["abc"] != 3 {
 		t.Errorf("dies = %v", dies)
+	}
+	u, err := d.DiskUsage(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u != (DiskUsage{UnusedImages: 400, UnusedImageCount: 2, BuildCache: 1000}) || u.Reclaimable() != 1400 {
+		t.Errorf("disk usage = %+v", u)
 	}
 }
 

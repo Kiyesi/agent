@@ -35,6 +35,7 @@ var allowed = map[string]bool{
 	"ufw":       true,
 	"apt-get":   true,
 	"certbot":   true,
+	"docker":    true, // docker image prune and docker builder prune, never a container or volume
 }
 
 // RealHost changes this machine.

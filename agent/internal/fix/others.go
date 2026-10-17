@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -303,6 +304,59 @@ func (updates) Apply(ctx context.Context, h Host, _ Input, c *Changes) error {
 	}
 	if installed(h, "/var/run/reboot-required") {
 		c.rec.Done += ". Restart the server when it suits you: sudo reboot"
+	}
+	return nil
+}
+
+// dockerCleanup gives back the disk Docker holds for nothing: images no
+// container uses and build cache, both a week old or more, so an image
+// just replaced can still be rolled back to. Containers and volumes are
+// never touched: a stopped container or an unused volume can hold data.
+type dockerCleanup struct{}
+
+func (dockerCleanup) Name() string      { return "docker-cleanup" }
+func (dockerCleanup) Targets() []Target { return []Target{{"leftovers", "docker-waste"}} }
+
+func (dockerCleanup) Plan(_ context.Context, h Host, in Input) Plan {
+	p := Plan{Done: "Unused Docker images and build cache removed"}
+	if !h.Has("docker") {
+		p.Refuse = "The docker command is not installed here. Run docker image prune -a --filter until=168h where it is."
+		return p
+	}
+	size := ""
+	for _, f := range in.Findings {
+		if s := f.Vars["size"]; s != "" {
+			size = " (" + s + " now)"
+			break
+		}
+	}
+	p.Say = "Removes Docker images no container uses, and build cache, both a week old or more" + size +
+		". Containers and volumes are never touched. This one cannot be undone: a removed image is pulled or built again when it is needed."
+	return p
+}
+
+// reclaimed reads "Total reclaimed space: 1.2GB" from docker's answer.
+var reclaimed = regexp.MustCompile(`Total reclaimed space:\s*(\S+)`)
+
+func (dockerCleanup) Apply(ctx context.Context, _ Host, _ Input, c *Changes) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+	out, err := c.Run(ctx, "docker", "image", "prune", "-a", "-f", "--filter", "until=168h")
+	if err != nil {
+		return err
+	}
+	freed := []string{}
+	if m := reclaimed.FindSubmatch(out); m != nil && string(m[1]) != "0B" {
+		freed = append(freed, string(m[1])+" of images")
+	}
+	// Build cache is a bonus: an old Docker without BuildKit has none to remove.
+	if out, err := c.Run(ctx, "docker", "builder", "prune", "-f", "--filter", "until=168h"); err == nil {
+		if m := reclaimed.FindSubmatch(out); m != nil && string(m[1]) != "0B" {
+			freed = append(freed, string(m[1])+" of build cache")
+		}
+	}
+	if len(freed) > 0 {
+		c.rec.Done += ": " + strings.Join(freed, " and ") + " freed"
 	}
 	return nil
 }
