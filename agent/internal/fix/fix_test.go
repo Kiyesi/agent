@@ -595,3 +595,39 @@ func TestStoreIDs(t *testing.T) {
 		ids[r.ID] = true
 	}
 }
+
+func TestDockerCleanupNeverTouchesContainersOrVolumes(t *testing.T) {
+	h := newHost()
+	h.programs["docker"] = true
+	h.answer = func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "docker image prune") {
+			return "Deleted Images:\nuntagged: shop:1.3\n\nTotal reclaimed space: 3.1GB\n", nil
+		}
+		return "Total reclaimed space: 0B\n", nil
+	}
+	in := input("ada")
+	in.Findings = []checks.Finding{checks.Found("docker-waste", map[string]string{"size": "4.2 GB"})}
+	p := dockerCleanup{}.Plan(context.Background(), h, in)
+	if p.Undoable || !strings.Contains(p.Say, "(4.2 GB now)") || !strings.Contains(p.Say, "cannot be undone") {
+		t.Fatalf("plan = %+v", p)
+	}
+	rec, err := Run(context.Background(), h, store(t), dockerCleanup{}, in, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !h.didRun("docker image prune -a -f --filter until=168h") || !h.didRun("docker builder prune -f --filter until=168h") {
+		t.Fatalf("ran %v", h.ran)
+	}
+	for _, c := range h.ran {
+		if strings.Contains(c, "volume") || strings.Contains(c, "container") || strings.Contains(c, "system prune") {
+			t.Fatalf("ran %q", c)
+		}
+	}
+	if rec.Done != "Unused Docker images and build cache removed: 3.1GB of images freed" {
+		t.Fatalf("done = %q", rec.Done)
+	}
+	delete(h.programs, "docker")
+	if p := (dockerCleanup{}).Plan(context.Background(), h, in); p.Refuse == "" {
+		t.Fatal("planned without docker")
+	}
+}

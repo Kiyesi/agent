@@ -9,6 +9,10 @@ import (
 type listDocker struct{ list []Container }
 
 func (d listDocker) Containers(context.Context) ([]Container, error) { return d.list, nil }
+func (d listDocker) DiskUsage(context.Context) (DiskUsage, error) {
+	return DiskUsage{}, nil
+}
+
 func (d listDocker) Dies(context.Context, time.Time, time.Time) (map[string]int, error) {
 	return map[string]int{"a": 1, "d": 3}, nil
 }

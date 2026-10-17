@@ -123,7 +123,7 @@ func NewRegistry(cs ...Check) (*Registry, error) {
 // All returns the checks in report order.
 func (r *Registry) All() []Check { return r.ordered }
 
-// Default returns the 22 checks, in the order of the PRD's tables: health,
+// Default returns the 23 checks, in the order of the PRD's tables: health,
 // security, then data location.
 func Default() *Registry {
 	r, err := NewRegistry(
@@ -131,7 +131,7 @@ func Default() *Registry {
 		certificatesCheck{}, backupsCheck{}, updatesCheck{},
 		openPortsCheck{}, exposedDatabasesCheck{}, dockerFirewallCheck{}, sshCheck{},
 		firewallCheck{}, loginProtectionCheck{}, secretsCheck{}, riskyContainersCheck{},
-		vulnerabilitiesCheck{},
+		vulnerabilitiesCheck{}, leftoversCheck{},
 		serverLocationCheck{}, databaseConnectionsCheck{}, backupDestinationsCheck{},
 		outsideServicesCheck{}, paymentDataCheck{},
 	)

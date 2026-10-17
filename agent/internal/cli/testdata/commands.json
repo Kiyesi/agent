@@ -377,7 +377,7 @@
     "path": "kiyesi fix",
     "use": "kiyesi fix [name...] [flags]",
     "short": "Fix what Kiyesi can fix on this server, after you say yes (needs sudo)",
-    "long": "Lists the findings Kiyesi can fix for you, says in plain words what each fix\nchanges, and asks. After you say yes it makes the changes, checks the server\nagain and shows the new grade. Every change that can be undone is kept:\nkiyesi fix undo lists them. Before a fix changes a file it saves it, and a fix\nthat fails halfway is put back at once.\n\nOnly you run this, at this server's terminal. The agent's service never runs\nit, and the dashboard cannot ask for it. To forbid it on a server, set\nfix: off in /etc/kiyesi/config.yaml. Names: certificates, firewall, login-protection, secret-files, ssh-password, ssh-root, updates.",
+    "long": "Lists the findings Kiyesi can fix for you, says in plain words what each fix\nchanges, and asks. After you say yes it makes the changes, checks the server\nagain and shows the new grade. Every change that can be undone is kept:\nkiyesi fix undo lists them. Before a fix changes a file it saves it, and a fix\nthat fails halfway is put back at once.\n\nOnly you run this, at this server's terminal. The agent's service never runs\nit, and the dashboard cannot ask for it. To forbid it on a server, set\nfix: off in /etc/kiyesi/config.yaml. Names: certificates, docker-cleanup, firewall, login-protection, secret-files, ssh-password, ssh-root, updates.",
     "example": "  sudo kiyesi fix                 the list, then asks\n  sudo kiyesi fix ssh-password    one fix\n  sudo kiyesi fix --dry-run       only show what it would change\n  sudo kiyesi fix undo            what can be undone",
     "flags": [
       {

@@ -41,10 +41,13 @@ func (f *fakeRunner) Run(_ context.Context, name string, args ...string) ([]byte
 }
 
 type fakeDocker struct {
-	cs   []system.Container
-	dies map[string]int
-	err  error
+	cs    []system.Container
+	dies  map[string]int
+	usage system.DiskUsage
+	err   error
 }
+
+func (f fakeDocker) DiskUsage(context.Context) (system.DiskUsage, error) { return f.usage, f.err }
 
 func (f fakeDocker) Containers(context.Context) ([]system.Container, error) { return f.cs, f.err }
 func (f fakeDocker) Logs(context.Context, string, time.Time) ([]system.LogLine, error) {

@@ -71,7 +71,7 @@ type Fixer interface {
 func All() []Fixer {
 	return []Fixer{
 		sshPassword{}, sshRoot{}, firewall{}, loginProtection{},
-		secretFile{}, certificates{}, updates{},
+		secretFile{}, certificates{}, updates{}, dockerCleanup{},
 	}
 }
 
