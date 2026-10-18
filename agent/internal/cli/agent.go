@@ -42,7 +42,8 @@ func newAgent(io IO) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "agent",
 		Short: "Run as the background service: scan and send results (started by kiyesi connect)",
-		Long: "Runs a scan now and every 15 minutes, says the server is alive every minute,\n" +
+		Long: "Runs a scan now and every 15 minutes, says the server is alive every minute\n" +
+			"(less often on the free plan, as the service asks),\n" +
 			"and sends both to the service. Results that cannot be sent wait on disk and\n" +
 			"are sent later. It is normally started by the system service.",
 		Example: "  sudo systemctl status kiyesi\n" +
@@ -272,17 +273,41 @@ type agentLoop struct {
 }
 
 func (a agentLoop) run(ctx context.Context) {
-	nextScan := a.now()
-	nextBeat := a.now()
+	// The service may ask for a slower pace (the free plan). It is only
+	// ever slower than the agent's own, and only while the service says so.
+	var heard *send.Pace
+	if a.client != nil {
+		prev := a.client.OnPace
+		a.client.OnPace = func(p send.Pace) {
+			if prev != nil {
+				prev(p)
+			}
+			heard = &p
+		}
+	}
+	var lastScan, lastBeat time.Time
 	nextSend := a.now()
 	failures := 0
 	tick := time.NewTicker(min(a.beatEvery, time.Second))
 	defer tick.Stop()
 	for {
 		now := a.now()
-		// A scanEvery of 0 never scans: an agent that only sends figures and logs.
-		if a.scanEvery > 0 && !now.Before(nextScan) {
-			nextScan = now.Add(a.scanEvery)
+		beatEvery, scanEvery, collectOn := a.beatEvery, a.scanEvery, true
+		if heard != nil && !heard.Collect {
+			beatEvery = max(a.beatEvery, heard.Beat)
+			if scanEvery > 0 {
+				scanEvery = heard.Scan
+				if scanEvery > 0 {
+					scanEvery = max(a.scanEvery, scanEvery)
+				}
+			}
+			collectOn = false
+		}
+		// A scanEvery of 0 never scans: an agent that only sends figures and
+		// logs, or a server the free plan does not watch. The first scan
+		// runs at once, so a new server's grade comes within a minute.
+		if scanEvery > 0 && (lastScan.IsZero() || now.Sub(lastScan) >= scanEvery) {
+			lastScan = now
 			if r, err := a.scan(ctx); err != nil {
 				fmt.Fprintf(a.log, "scan failed: %v\n", err)
 			} else if err := a.outbox.Put(send.Scan(r, now), now); err != nil {
@@ -290,12 +315,17 @@ func (a agentLoop) run(ctx context.Context) {
 			}
 			nextSend = now
 		}
-		if !now.Before(nextBeat) {
-			nextBeat = now.Add(a.beatEvery)
+		if lastBeat.IsZero() || now.Sub(lastBeat) >= beatEvery {
+			lastBeat = now
 			batch := send.Heartbeat(now)
 			if a.collect != nil {
 				m, events, logs, extra := a.collect(ctx)
-				batch = send.Minute(now, m, events, logs, extra...)
+				if collectOn {
+					batch = send.Minute(now, m, events, logs, extra...)
+				} else {
+					// The free plan stores no figures or logs: only what happened.
+					batch = send.Minute(now, nil, events, nil)
+				}
 			}
 			if err := a.outbox.Put(batch, now); err != nil {
 				fmt.Fprintf(a.log, "cannot keep the heartbeat for sending: %v\n", err)
