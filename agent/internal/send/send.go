@@ -169,6 +169,19 @@ type Client struct {
 	// code, or "" when the team has not chosen one. A service that does not
 	// say leaves it unheard.
 	OnHome func(code string)
+	// OnPace hears how often the service asks this agent to report and
+	// scan. A service that does not say, or says something out of bounds,
+	// leaves it unheard.
+	OnPace func(Pace)
+}
+
+// Pace is how often the service asks an agent to report and scan: less
+// often on the free plan, which stores no figures or logs (Collect false).
+// Scan 0 asks for no scans: a server the free plan does not watch.
+type Pace struct {
+	Beat    time.Duration
+	Scan    time.Duration
+	Collect bool
 }
 
 // CheckAPI refuses any address that is not HTTPS, apart from this machine,
@@ -264,6 +277,7 @@ func (c *Client) deliver(ctx context.Context, body []byte) error {
 	switch {
 	case resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusOK:
 		c.hearHome(reply)
+		c.hearPace(reply)
 		return nil
 	case resp.StatusCode == http.StatusUnauthorized:
 		return ErrNotAllowed
@@ -297,6 +311,30 @@ func (c *Client) hearHome(reply []byte) {
 	case len(*code) == 2 && strings.ToUpper(*code) == *code && strings.Trim(*code, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") == "":
 		c.OnHome(*code)
 	}
+}
+
+// hearPace passes on the pace when the reply says one within bounds: a
+// report every 30 seconds to 15 minutes, and a scan every 5 minutes to a
+// day, or none.
+func (c *Client) hearPace(reply []byte) {
+	if c.OnPace == nil {
+		return
+	}
+	var r struct {
+		Pace *struct {
+			Beat    int  `json:"beat_seconds"`
+			Scan    int  `json:"scan_seconds"`
+			Collect bool `json:"collect"`
+		} `json:"pace"`
+	}
+	if json.Unmarshal(reply, &r) != nil || r.Pace == nil {
+		return
+	}
+	p := r.Pace
+	if p.Beat < 30 || p.Beat > 900 || (p.Scan != 0 && (p.Scan < 300 || p.Scan > 86400)) {
+		return
+	}
+	c.OnPace(Pace{Beat: time.Duration(p.Beat) * time.Second, Scan: time.Duration(p.Scan) * time.Second, Collect: p.Collect})
 }
 
 // Outbox holds batches waiting to be sent, one file each, oldest first.

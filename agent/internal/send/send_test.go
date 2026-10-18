@@ -276,3 +276,35 @@ func TestRepliesNameTheTeamsHomeCountry(t *testing.T) {
 		}
 	}
 }
+
+func TestTheServiceCanAskForASlowerPace(t *testing.T) {
+	for _, tc := range []struct {
+		reply string
+		heard string
+	}{
+		{`{"pace":{"beat_seconds":300,"scan_seconds":21600,"collect":false}}`, "{5m0s 6h0m0s false}"},
+		{`{"pace":{"beat_seconds":300,"scan_seconds":0,"collect":false}}`, "{5m0s 0s false}"},
+		{`{"pace":{"beat_seconds":60,"scan_seconds":900,"collect":true}}`, "{1m0s 15m0s true}"},
+		// Out of bounds, or not said: nothing heard.
+		{`{"pace":{"beat_seconds":5,"scan_seconds":900,"collect":true}}`, ""},
+		{`{"pace":{"beat_seconds":300,"scan_seconds":60,"collect":false}}`, ""},
+		{`{"pace":{"beat_seconds":3600,"scan_seconds":900,"collect":true}}`, ""},
+		{`{"accepted":"x"}`, ""},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(tc.reply))
+		}))
+		heard := ""
+		c := NewClient(srv.URL, "ksv_test")
+		c.OnPace = func(p Pace) { heard = fmt.Sprint(p) }
+		body, _ := Encode(Heartbeat(time.Now()))
+		if err := c.deliver(context.Background(), body); err != nil {
+			t.Fatal(err)
+		}
+		srv.Close()
+		if heard != tc.heard {
+			t.Errorf("%s: heard %q, want %q", tc.reply, heard, tc.heard)
+		}
+	}
+}

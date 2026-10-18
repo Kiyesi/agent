@@ -61,7 +61,7 @@
     "path": "kiyesi agent",
     "use": "kiyesi agent [flags]",
     "short": "Run as the background service: scan and send results (started by kiyesi connect)",
-    "long": "Runs a scan now and every 15 minutes, says the server is alive every minute,\nand sends both to the service. Results that cannot be sent wait on disk and\nare sent later. It is normally started by the system service.",
+    "long": "Runs a scan now and every 15 minutes, says the server is alive every minute\n(less often on the free plan, as the service asks),\nand sends both to the service. Results that cannot be sent wait on disk and\nare sent later. It is normally started by the system service.",
     "example": "  sudo systemctl status kiyesi\n  KIYESI_API=https://api.kiyesi.dev KIYESI_TOKEN=ksv_... kiyesi agent --container",
     "flags": [
       {

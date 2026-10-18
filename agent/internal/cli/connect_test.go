@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kiyesi/kiyesi/agent/internal/collect"
 	"github.com/kiyesi/kiyesi/agent/internal/scan"
 	"github.com/kiyesi/kiyesi/agent/internal/send"
 )
@@ -104,6 +105,8 @@ type countingAPI struct {
 	mu    sync.Mutex
 	kinds map[string]int
 	down  atomic.Bool
+	// reply, when set, is the body of each answer, such as a pace.
+	reply string
 }
 
 func (c *countingAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -121,6 +124,9 @@ func (c *countingAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	c.mu.Unlock()
 	w.WriteHeader(http.StatusAccepted)
+	if c.reply != "" {
+		_, _ = w.Write([]byte(c.reply))
+	}
 }
 
 func (c *countingAPI) count(kind string) int {
@@ -194,5 +200,72 @@ func TestAgentLoopWithoutScansSendsOnlyHeartbeats(t *testing.T) {
 	}
 	if api.count("heartbeat") < 2 {
 		t.Errorf("sent %d heartbeats", api.count("heartbeat"))
+	}
+}
+
+// On the free plan the service asks for a report every 5 minutes and a scan
+// every 6 hours, without figures or logs. A minute passes on each turn of
+// the loop, so an hour takes a few seconds.
+func TestAgentLoopKeepsTheFreePlansSlowerPace(t *testing.T) {
+	api := &countingAPI{
+		kinds: map[string]int{},
+		reply: `{"accepted":"x","pace":{"beat_seconds":300,"scan_seconds":21600,"collect":false}}`,
+	}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	start := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	turns := 0
+	clock := func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		turns++
+		return start.Add(time.Duration(turns) * time.Minute)
+	}
+	scanned := 0
+	a := agentLoop{
+		client: send.NewClient(srv.URL, goodToken),
+		outbox: send.Outbox{Dir: t.TempDir(), MaxBytes: 1 << 20},
+		scan: func(context.Context) (scan.Report, error) {
+			scanned++
+			return scan.Report{Schema: scan.Schema, StartedAt: time.Now()}, nil
+		},
+		collect: func(context.Context) (*collect.Metrics, []collect.Event, *collect.Logs, []send.Item) {
+			return &collect.Metrics{}, []collect.Event{{Kind: "restart", Subject: "api"}}, nil, nil
+		},
+		scanEvery: 15 * time.Minute,
+		// Small, so the loop turns quickly; the fake clock says a minute passed.
+		beatEvery: 20 * time.Millisecond,
+		now:       clock,
+		log:       io.Discard,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { a.run(ctx); close(done) }()
+	for {
+		mu.Lock()
+		n := turns
+		mu.Unlock()
+		if n >= 60 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	// One scan at once, for a new server's first grade; the next is 6 hours on.
+	if scanned != 1 {
+		t.Errorf("scanned %d times in an hour", scanned)
+	}
+	// The first report, then one every 5 minutes: about 13 in an hour.
+	if b := api.count("heartbeat"); b < 11 || b > 14 {
+		t.Errorf("sent %d reports in an hour", b)
+	}
+	// Figures only before the service named the free plan; what happened, always.
+	if m := api.count("metrics"); m > 1 {
+		t.Errorf("sent figures %d times on the free plan", m)
+	}
+	if api.count("event") < 10 {
+		t.Errorf("sent %d events", api.count("event"))
 	}
 }
