@@ -46,10 +46,19 @@ func TestExecuteKeepsTheJobAsItIsAndRecordsTheRun(t *testing.T) {
 }
 
 func TestExecuteRunsTheJobEvenWithNowhereToRecord(t *testing.T) {
-	var out bytes.Buffer
-	code := Execute(filepath.Join(t.TempDir(), "missing"), "x", []string{"sh", "-c", "echo ok"}, nil, &out, &out, func() string { return "r" }, time.Now)
+	var out, errOut bytes.Buffer
+	code := Execute(filepath.Join(t.TempDir(), "missing"), "x", []string{"sh", "-c", "echo ok"}, nil, &out, &errOut, func() string { return "r" }, time.Now)
 	if code != 0 || out.String() != "ok\n" {
 		t.Errorf("code %d, output %q", code, out.String())
+	}
+	// One line says the run was not recorded, not one per record.
+	if strings.Count(errOut.String(), "\n") != 1 || !strings.HasPrefix(errOut.String(), "kiyesi run: this run is not recorded") {
+		t.Errorf("stderr = %q", errOut.String())
+	}
+	// No spool at all: the caller said why, so nothing more is said.
+	errOut.Reset()
+	if code := Execute("", "x", []string{"true"}, nil, &out, &errOut, func() string { return "r" }, time.Now); code != 0 || errOut.Len() != 0 {
+		t.Errorf("no spool: code %d, stderr %q", code, errOut.String())
 	}
 	if code := Execute(t.TempDir(), "x", []string{"/no/such/command"}, nil, &out, &out, func() string { return "r" }, time.Now); code != 127 {
 		t.Errorf("a missing command exits %d, want 127", code)

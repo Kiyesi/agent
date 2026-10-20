@@ -18,7 +18,8 @@ func newFindings(io IO) *cobra.Command {
 		Use:   "findings [server]",
 		Short: "Every finding on your servers, worst first, with the command that fixes it",
 		Long: "The problems the latest scans found, each in one sentence with why it\n" +
-			"matters and the fix. Kiyesi never runs a fix: copy it and run it yourself.",
+			"matters and the fix. The agent never runs a fix by itself: run sudo kiyesi fix\n" +
+			"on the server where one is offered, or run the command yourself.",
 		Example: "  kiyesi findings\n  kiyesi findings checkout-api-prod --severity critical",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -33,15 +34,17 @@ func newFindings(io IO) *cobra.Command {
 			if err != nil {
 				return apiErr(err)
 			}
+			var servers []api.Server
 			if len(args) == 1 {
-				servers, err := c.Servers(cmd.Context())
+				all, err := c.Servers(cmd.Context())
 				if err != nil {
 					return apiErr(err)
 				}
-				s, ok := find(servers, args[0])
+				s, ok := find(all, args[0])
 				if !ok {
 					return usageErr("There is no server called %q that you can see. Run kiyesi servers for the list.", args[0])
 				}
+				servers = []api.Server{s}
 				kept := list[:0]
 				for _, f := range list {
 					if f.Server.ID == s.ID {
@@ -57,7 +60,12 @@ func newFindings(io IO) *cobra.Command {
 				return render.JSON(io.Out, list)
 			}
 			if len(list) == 0 {
-				fmt.Fprintln(io.Out, "No findings: every check passed on the latest scans.")
+				if servers == nil {
+					if servers, err = c.Servers(cmd.Context()); err != nil {
+						return apiErr(err)
+					}
+				}
+				fmt.Fprintln(io.Out, noFindings(servers, severity, len(args) == 1))
 				return nil
 			}
 			for i, f := range list {
@@ -74,6 +82,9 @@ func newFindings(io IO) *cobra.Command {
 				for _, line := range strings.Split(strings.TrimSpace(f.Fix), "\n") {
 					fmt.Fprintf(io.Out, "            %s\n", line)
 				}
+				if f.AutoFix != nil && *f.AutoFix != "" {
+					fmt.Fprintf(io.Out, "          or: sudo kiyesi fix %s\n", *f.AutoFix)
+				}
 			}
 			return nil
 		},
@@ -82,4 +93,47 @@ func newFindings(io IO) *cobra.Command {
 	cmd.Flags().StringVar(&severity, "severity", "", "only critical, warning or info")
 	cmd.SetContext(context.Background())
 	return cmd
+}
+
+// noFindings says truthfully why the list is empty: no servers, only
+// managed services (never scanned), no scan yet, a --severity that hides
+// the rest, or every check passed.
+func noFindings(servers []api.Server, severity string, named bool) string {
+	if len(servers) == 0 {
+		return noServers()
+	}
+	var agents, scanned []api.Server
+	for _, s := range servers {
+		if s.Kind == "managed" {
+			continue
+		}
+		agents = append(agents, s)
+		if s.LastScan != nil {
+			scanned = append(scanned, s)
+		}
+	}
+	switch {
+	case len(agents) == 0 && named:
+		return servers[0].Name + " is a managed service: Kiyesi does not scan it, so it has no findings."
+	case len(agents) == 0:
+		return "Only managed services here: Kiyesi does not scan them, so there are no findings. Findings come from servers with the agent."
+	case len(scanned) == 0 && named:
+		return agents[0].Name + " has not sent a scan yet, so there are no findings yet."
+	case len(scanned) == 0:
+		return "No server has sent a scan yet, so there are no findings yet."
+	}
+	if severity != "" {
+		others := 0
+		for _, s := range scanned {
+			others += s.LastScan.Counts.Critical + s.LastScan.Counts.Warnings
+		}
+		if others > 0 {
+			return fmt.Sprintf("No %s findings on the latest scans. Run kiyesi findings without --severity for the rest.", severity)
+		}
+		return fmt.Sprintf("No %s findings on the latest scans.", severity)
+	}
+	if waiting := len(agents) - len(scanned); waiting > 0 {
+		return fmt.Sprintf("No findings on the latest scans. %s not sent a scan yet.", plural(waiting, "server has", "servers have"))
+	}
+	return "No findings: every check passed on the latest scans."
 }

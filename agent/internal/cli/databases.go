@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/kiyesi/kiyesi/agent/internal/api"
 	"github.com/kiyesi/kiyesi/agent/internal/config"
 	"github.com/kiyesi/kiyesi/agent/internal/dbwatch"
 	"github.com/kiyesi/kiyesi/agent/internal/render"
@@ -78,8 +79,9 @@ func newDatabases(io IO) *cobra.Command {
 				return nil
 			}
 			words := map[string]string{"ok": "ok", "attention": "NEEDS ATTENTION", "critical": "CRITICAL"}
+			now := time.Now()
 			tw := tabwriter.NewWriter(io.Out, 0, 0, 3, ' ', 0)
-			fmt.Fprintln(tw, "DATABASE\tENGINE\tWHERE\tSTORAGE\tCONNECTIONS\tSLOW, LAST HOUR\tSTATUS")
+			fmt.Fprintln(tw, "DATABASE\tENGINE\tWHERE\tSTORAGE\tCONNECTIONS\tSLOW, LAST HOUR\tNEWEST BACKUP\tFULL ON\tSTATUS")
 			for _, d := range list {
 				where := d.Server.Name
 				if d.Where == "hosted" {
@@ -89,12 +91,28 @@ func newDatabases(io IO) *cobra.Command {
 				if d.SlowLastHour != nil {
 					slow = strconv.FormatInt(*d.SlowLastHour, 10)
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", d.Name, d.Label, where, ofText(d.SizeBytes, d.LimitBytes, true), ofText(d.Connections, d.MaxConnections, false), slow, words[d.Status])
+				backup := "-"
+				if d.NewestBackupAt != nil {
+					backup = ago(now.Sub(*d.NewestBackupAt)) + " ago"
+				}
+				full := "-"
+				if d.FullAt != nil {
+					full = d.FullAt.Local().Format("2 Jan 2006")
+				}
+				status := words[d.Status]
+				if status == "ok" && d.Error != nil && *d.Error != "" {
+					// An older service said ok while the database could not be read.
+					status = "NEEDS ATTENTION"
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", d.Name, d.Label, where, ofText(d.SizeBytes, d.LimitBytes, true), ofText(d.Connections, d.MaxConnections, false), slow, backup, full, status)
 			}
 			if err := tw.Flush(); err != nil {
 				return err
 			}
 			for _, d := range list {
+				if d.Error != nil && *d.Error != "" && !unreachable(d) {
+					fmt.Fprintf(io.Out, "\n%s cannot be read: %s", d.Name, *d.Error)
+				}
 				for _, p := range d.Problems {
 					fmt.Fprintf(io.Out, "\n%s: %s", d.Name, p.Sentence)
 				}
@@ -107,6 +125,16 @@ func newDatabases(io IO) *cobra.Command {
 	cmd.AddCommand(newDatabasesCheck(io))
 	cmd.SetContext(context.Background())
 	return cmd
+}
+
+// unreachable says a problem already tells that the database cannot be read.
+func unreachable(d api.Database) bool {
+	for _, p := range d.Problems {
+		if p.Kind == "unreachable" {
+			return true
+		}
+	}
+	return false
 }
 
 func newDatabasesCheck(io IO) *cobra.Command {
@@ -179,7 +207,7 @@ func newCosts(io IO) *cobra.Command {
 			"whether it is too small, larger than needed or the right size. Prices are\n" +
 			"typed once in the dashboard, in the currency your provider bills in, and\n" +
 			"shown in your team's currency too, at a public rate fetched once a day.",
-		Example: "  kiyesi costs\n  kiyesi costs --currency NGN",
+		Example: "  kiyesi costs\n  kiyesi costs --currency EUR",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := signedIn()
@@ -187,7 +215,7 @@ func newCosts(io IO) *cobra.Command {
 				return err
 			}
 			if currency != "" && !regexp.MustCompile(`^[A-Za-z]{3}$`).MatchString(currency) {
-				return usageErr("--currency is three letters, such as NGN, KES, GBP or EUR.")
+				return usageErr("--currency is three letters, such as EUR, GBP or USD.")
 			}
 			out, err := c.CostList(cmd.Context(), strings.ToUpper(currency))
 			if err != nil {
@@ -265,7 +293,7 @@ func newCosts(io IO) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the result as JSON, for scripts")
-	cmd.Flags().StringVar(&currency, "currency", "", "show the costs in this currency, such as NGN")
+	cmd.Flags().StringVar(&currency, "currency", "", "show the costs in this currency, such as EUR or GBP")
 	cmd.SetContext(context.Background())
 	return cmd
 }

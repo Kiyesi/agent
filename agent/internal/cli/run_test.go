@@ -25,8 +25,15 @@ func TestRunPassesTheJobThroughAndRecordsIt(t *testing.T) {
 	if len(names) != 2 || !strings.HasSuffix(strings.Join(names, " "), ".start.json") && !strings.Contains(strings.Join(names, " "), ".end.json") {
 		t.Errorf("spool = %v", names)
 	}
-	if code, _, errOut := runCLI(t, "run", "--", "true"); code != ExitUsage || !strings.Contains(errOut, "--name") {
-		t.Errorf("no name: %d %q", code, errOut)
+	// Without a good name the job still runs, as cron expects, only unrecorded.
+	for _, args := range [][]string{{"run", "--", "sh", "-c", "echo ran; exit 3"}, {"run", "--name", "bad name!", "--", "sh", "-c", "echo ran; exit 3"}} {
+		code, out, errOut := runCLI(t, args...)
+		if code != 3 || out != "ran\n" || !strings.Contains(errOut, "this run is not recorded") || !strings.Contains(errOut, "--name") {
+			t.Errorf("%v: %d %q %q", args, code, out, errOut)
+		}
+	}
+	if files, _ := os.ReadDir(filepath.Join(state, "runs")); len(files) != 2 {
+		t.Errorf("an unnamed run was recorded: %d files", len(files))
 	}
 	if code, _, errOut := runCLI(t, "run", "--name", "x"); code != ExitUsage || !strings.Contains(errOut, "after --") {
 		t.Errorf("no command: %d %q", code, errOut)

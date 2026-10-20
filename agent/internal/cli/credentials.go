@@ -112,9 +112,27 @@ func loginPath() (string, error) {
 	return filepath.Join(d, "login.yaml"), nil
 }
 
-// saveLogin keeps the token, in the keychain when there is one. It says
-// where it went.
-func saveLogin(api, token string) (string, error) {
+// savedLogin reads login.yaml as it is, with or without a token, so a new
+// sign-in can keep the team chosen before. ok is false when there is none.
+func savedLogin() (login, bool) {
+	path, err := loginPath()
+	if err != nil {
+		return login{}, false
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- the user's own login file in their config folder
+	if err != nil {
+		return login{}, false
+	}
+	var l login
+	if yaml.Unmarshal(data, &l) != nil || l.API == "" {
+		return login{}, false
+	}
+	return l, true
+}
+
+// saveLogin keeps the token, in the keychain when there is one, and the
+// team chosen with kiyesi team use. It says where the token went.
+func saveLogin(api, token, team string) (string, error) {
 	path, err := loginPath()
 	if err != nil {
 		return "", err
@@ -126,7 +144,7 @@ func saveLogin(api, token string) (string, error) {
 	if err := os.Chmod(filepath.Dir(path), 0o700); err != nil { // #nosec G302 -- a folder: 0700 is owner-only
 		return "", err
 	}
-	l := login{API: api}
+	l := login{API: api, Team: team}
 	where := "the system keychain"
 	if !keychain.available() || keychain.set(api, token) != nil {
 		l.Token = token

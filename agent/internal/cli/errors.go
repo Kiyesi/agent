@@ -41,8 +41,9 @@ func newErrors(io IO) *cobra.Command {
 				return err
 			}
 			id := ""
+			var list []api.Frontend
 			if frontend != "" {
-				list, err := c.Frontends(cmd.Context())
+				list, err = c.Frontends(cmd.Context())
 				if err != nil {
 					return apiErr(err)
 				}
@@ -62,9 +63,18 @@ func newErrors(io IO) *cobra.Command {
 			if asJSON {
 				return render.JSON(io.Out, out)
 			}
-			fmt.Fprintf(io.Out, "Today: %s in %s.\n\n", plural(out.Today.Errors, "error", "errors"), plural(out.Today.Groups, "group", "groups"))
+			// The service counts a rolling 24 hours, whatever --since is.
+			fmt.Fprintf(io.Out, "Last 24 hours: %s in %s.\n\n", plural(out.Today.Errors, "error", "errors"), plural(out.Today.Groups, "group", "groups"))
 			if len(out.Groups) == 0 {
-				fmt.Fprintln(io.Out, "No browser errors in that time. Add the snippet to a frontend: Settings, Frontends.")
+				fmt.Fprintln(io.Out, "No browser errors in that time.")
+				// The snippet is worth suggesting only when no frontend reports
+				// yet, and only to someone who can add one.
+				if frontend == "" {
+					list, err = c.Frontends(cmd.Context())
+				}
+				if err == nil && len(list) == 0 && mayDo(cmd.Context(), c, "settings", "manage") {
+					fmt.Fprintln(io.Out, "No frontend sends errors yet. Add the snippet to one: Settings, Frontends.")
+				}
 				return nil
 			}
 			tw := tabwriter.NewWriter(io.Out, 0, 0, 3, ' ', 0)
@@ -168,6 +178,23 @@ func buildMaps(root string) ([]builtMap, error) {
 // maxMap is the largest map uploaded, unzipped; the service refuses bigger.
 const maxMap = 20 << 20
 
+// sourcemapClient picks how source maps are uploaded: a deploy token from
+// KIYESI_DEPLOY_TOKEN (for CI), or the person signed in with kiyesi login.
+// Never this server's own token: the service refuses it for source maps.
+func sourcemapClient(apiURL string, environ []string) (*api.Client, error) {
+	if t := strings.TrimSpace(envMap(environ)["KIYESI_DEPLOY_TOKEN"]); t != "" {
+		if !strings.HasPrefix(t, "kdp_") {
+			return nil, usageErr("KIYESI_DEPLOY_TOKEN is not a deploy token. Make one in the dashboard: Settings, Deploy tokens.")
+		}
+		return api.New(apiURL, t), nil
+	}
+	c, err := signedIn()
+	if err != nil {
+		return nil, &exitError{code: ExitNoAccess, msg: "Set KIYESI_DEPLOY_TOKEN (Settings, Deploy tokens), or sign in with kiyesi login. A server's own token cannot upload source maps."}
+	}
+	return c, nil
+}
+
 func newSourcemaps(io IO) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "sourcemaps",
@@ -196,12 +223,13 @@ func newSourcemaps(io IO) *cobra.Command {
 			if len(maps) == 0 {
 				return usageErr("No .map files in %s. Turn on source maps in your build, such as build.sourcemap: true in Vite.", root)
 			}
-			c, _, err := deployClient(apiURL, io.Environ)
+			c, err := sourcemapClient(apiURL, io.Environ)
 			if err != nil {
 				return err
 			}
 			start := time.Now()
-			sent, skipped := 0, 0
+			skipped := 0
+			var sent []string
 			var bytesSent int64
 			for _, m := range maps {
 				data, err := os.ReadFile(m.file) // #nosec G304 -- files the person pointed us at
@@ -225,22 +253,30 @@ func newSourcemaps(io IO) *cobra.Command {
 					}
 					return apiErr(err)
 				}
-				sent++
+				sent = append(sent, m.file)
 				bytesSent += int64(gz.Len())
 			}
+			if len(sent) == 0 {
+				return usageErr("No source maps were uploaded: every map in %s is larger than 20 MB. None were removed.", root)
+			}
+			// Only the maps the service has: a skipped one stays, so it is not lost.
 			if remove {
-				for _, m := range maps {
-					if err := os.Remove(m.file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				for _, f := range sent {
+					if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 						return err
 					}
 				}
 			}
-			fmt.Fprintf(io.Out, "Uploaded %s for version %s (%s) in %s.", plural(sent, "source map", "source maps"), ver, byteSize(bytesSent), time.Since(start).Round(time.Second))
+			fmt.Fprintf(io.Out, "Uploaded %s for version %s (%s) in %s.", plural(len(sent), "source map", "source maps"), ver, byteSize(bytesSent), time.Since(start).Round(time.Second))
 			if remove {
 				fmt.Fprint(io.Out, " Removed them from the folder.")
 			}
 			if skipped > 0 {
-				fmt.Fprintf(io.Out, " Skipped %d.", skipped)
+				fmt.Fprintf(io.Out, " Skipped %d larger than 20 MB", skipped)
+				if remove {
+					fmt.Fprint(io.Out, ", still in the folder: delete them before you publish")
+				}
+				fmt.Fprint(io.Out, ".")
 			}
 			fmt.Fprintln(io.Out)
 			return nil

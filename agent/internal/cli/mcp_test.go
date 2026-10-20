@@ -159,4 +159,13 @@ func TestMCPRejectsBadInput(t *testing.T) {
 	if text, isErr := textOf(t, got[1]); !isErr || !strings.Contains(text, `"forever" is not one of`) {
 		t.Errorf("bad range: %s", text)
 	}
+	// The service keeps error and warn only: info is not offered, and refused here.
+	got = converse(t, c, `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"logs","arguments":{"level":"info"}}}`)
+	if text, isErr := textOf(t, got[0]); !isErr || !strings.Contains(text, `"info" is not one of error, warning`) {
+		t.Errorf("info level: %s", text)
+	}
+	got = converse(t, c, `{"jsonrpc":"2.0","id":4,"method":"tools/list"}`)
+	if list, _ := json.Marshal(got[0]); strings.Contains(string(list), `"info"`) {
+		t.Errorf("the logs tool must not offer info: %s", list)
+	}
 }

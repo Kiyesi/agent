@@ -67,13 +67,37 @@ func newLogin(io IO) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			where, err := saveLogin(apiURL, token)
+			// Keep the team chosen with kiyesi team use, on the same service,
+			// and end the session signed in before so it does not stay live.
+			team := ""
+			if old, ok := savedLogin(); ok {
+				if old.API == apiURL {
+					team = old.Team
+				}
+				if prev, err := loadLogin(); err == nil && prev.Token != token {
+					_ = api.New(prev.API, prev.Token).Logout(ctx) // best effort
+				}
+			}
+			c.Token = token
+			me, meErr := c.Me(ctx)
+			if meErr == nil && team != "" && !inTeams(me, team) {
+				team = "" // not one of this person's teams: back to their oldest
+			}
+			where, err := saveLogin(apiURL, token, team)
 			if err != nil {
 				return err
 			}
-			c.Token = token
-			if me, err := c.Me(ctx); err == nil {
-				fmt.Fprintf(io.Out, "Signed in as %s (%s), %s in %s.\n", me.User.Name, me.User.Email, me.Role, me.Team.Name)
+			if meErr == nil {
+				name, role := me.Team.Name, me.RoleName
+				for _, t := range me.Teams {
+					if t.ID == team || (team == "" && t.ID == me.Team.ID) {
+						name, role = t.Name, t.RoleName
+					}
+				}
+				if role == "" {
+					role = me.Role
+				}
+				fmt.Fprintf(io.Out, "Signed in as %s (%s), %s in %s.\n", me.User.Name, me.User.Email, role, name)
 			} else {
 				fmt.Fprintln(io.Out, "Signed in.")
 			}
@@ -118,17 +142,38 @@ func newLogout(io IO) *cobra.Command {
 		Short: "Sign out on this computer",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if l, err := loadLogin(); err == nil {
-				// End the session on the service too; carry on if it cannot be reached.
-				_ = api.New(l.API, l.Token).Logout(context.Background())
+			l, err := loadLogin()
+			if err != nil {
+				if err := forgetLogin(); err != nil {
+					return err
+				}
+				fmt.Fprintln(io.Out, "You were not signed in.")
+				return nil
 			}
+			// End the session on the service too; carry on if it cannot be
+			// reached, but say so. A session already over is fine.
+			ended := api.New(l.API, l.Token).Logout(context.Background())
 			if err := forgetLogin(); err != nil {
 				return err
+			}
+			if ended != nil && !errors.Is(ended, api.ErrSignedOut) {
+				fmt.Fprintln(io.Out, "Signed out here; the session on the service could not be ended: end it with kiyesi sessions or the dashboard.")
+				return nil
 			}
 			fmt.Fprintln(io.Out, "Signed out.")
 			return nil
 		},
 	}
+}
+
+// inTeams says whether the person is in the team with this id.
+func inTeams(me api.Me, id string) bool {
+	for _, t := range me.Teams {
+		if t.ID == id {
+			return true
+		}
+	}
+	return me.Team.ID == id
 }
 
 func capital(s string) string {

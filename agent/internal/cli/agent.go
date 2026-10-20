@@ -20,6 +20,7 @@ import (
 	"github.com/kiyesi/kiyesi/agent/internal/config"
 	"github.com/kiyesi/kiyesi/agent/internal/dbwatch"
 	"github.com/kiyesi/kiyesi/agent/internal/jobs"
+	"github.com/kiyesi/kiyesi/agent/internal/render"
 	"github.com/kiyesi/kiyesi/agent/internal/scan"
 	"github.com/kiyesi/kiyesi/agent/internal/send"
 	"github.com/kiyesi/kiyesi/agent/internal/software"
@@ -119,7 +120,7 @@ func newAgent(io IO) *cobra.Command {
 				client: withHome(send.NewClient(conf.API, token), io.Err),
 				outbox: send.Outbox{Dir: outboxDir(), MaxBytes: outboxBytes},
 				scan: func(ctx context.Context) (scan.Report, error) {
-					r, _, err := runScan(ctx, configPath, slowChecksEvery)
+					r, _, err := runScan(ctx, configPath, slowChecksEvery, render.ByAgent)
 					return r, err
 				},
 				scanEvery: map[bool]time.Duration{true: 0, false: scanEvery}[noScan], beatEvery: minute,
@@ -323,8 +324,10 @@ func (a agentLoop) run(ctx context.Context) {
 				if collectOn {
 					batch = send.Minute(now, m, events, logs, extra...)
 				} else {
-					// The free plan stores no figures or logs: only what happened.
-					batch = send.Minute(now, nil, events, nil)
+					// The free plan stores no figures or logs: only what
+					// happened, with the job runs taken from the spool (they
+					// are gone from it now), the databases and the software.
+					batch = send.Minute(now, nil, events, nil, extra...)
 				}
 			}
 			if err := a.outbox.Put(batch, now); err != nil {

@@ -89,16 +89,24 @@ func newAlerts(io IO) *cobra.Command {
 				return err
 			}
 			channels, err := c.Channels(cmd.Context())
+			if notYours(err) {
+				return errTestIsForAdmins
+			}
 			if err != nil {
 				return apiErr(err)
 			}
-			failed := 0
+			failed, linked := 0, 0
 			for _, ch := range channels {
 				if !ch.Linked {
 					fmt.Fprintf(io.Out, "SKIP  %s %s: not linked yet\n", ch.Kind, ch.Name)
 					continue
 				}
-				if err := c.TestChannel(cmd.Context(), ch.ID); err != nil {
+				linked++
+				err := c.TestChannel(cmd.Context(), ch.ID)
+				if notYours(err) {
+					return errTestIsForAdmins
+				}
+				if err != nil {
 					failed++
 					fmt.Fprintf(io.Out, "FAIL  %s %s: %v\n", ch.Kind, ch.Name, err)
 					continue
@@ -107,6 +115,8 @@ func newAlerts(io IO) *cobra.Command {
 			}
 			if len(channels) == 0 {
 				fmt.Fprintln(io.Out, "No alert channels yet. Add one in the dashboard: Settings, Alerts.")
+			} else if linked == 0 {
+				return usageErr("No test sent: no channel is linked yet.")
 			}
 			if failed > 0 {
 				return &exitError{code: ExitFindings, msg: "Some test messages did not arrive. Check those channels in the dashboard."}
@@ -139,8 +149,13 @@ func newMute(io IO) *cobra.Command {
 				return usageErr("There is no server called %q that you can see. Run kiyesi servers for the list.", args[0])
 			}
 			if args[1] == "off" {
-				if err := c.Unmute(cmd.Context(), s.ID); err != nil {
+				ended, err := c.Unmute(cmd.Context(), s.ID)
+				if err != nil {
 					return apiErr(err)
+				}
+				if !ended {
+					fmt.Fprintf(io.Out, "Alerts for %s were not muted.\n", s.Name)
+					return nil
 				}
 				fmt.Fprintf(io.Out, "Alerts for %s are on again.\n", s.Name)
 				return nil
@@ -175,12 +190,16 @@ func newUptime(io IO) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			checks, err := c.Uptime(cmd.Context())
+			list, err := c.UptimeList(cmd.Context())
 			if err != nil {
 				return apiErr(err)
 			}
+			checks := list.Checks
 			if asJSON {
 				return render.JSON(io.Out, checks)
+			}
+			if list.Paused() {
+				fmt.Fprintln(io.Out, uptimePaused)
 			}
 			if len(checks) == 0 {
 				fmt.Fprintln(io.Out, "No uptime checks yet. Add one: kiyesi uptime add https://example.com")
@@ -199,7 +218,12 @@ func newUptime(io IO) *cobra.Command {
 						resp = *u.Last.Error
 					}
 				}
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", u.Name, strings.ToUpper(u.Status), resp, last, u.URL)
+				status := strings.ToUpper(u.Status)
+				if list.Paused() {
+					// The last state is from before the pause, not now.
+					status = "PAUSED"
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", u.Name, status, resp, last, u.URL)
 			}
 			return tw.Flush()
 		},
@@ -224,6 +248,10 @@ func newUptime(io IO) *cobra.Command {
 			if err != nil {
 				return apiErr(err)
 			}
+			if list, err := c.UptimeList(cmd.Context()); err == nil && list.Paused() {
+				fmt.Fprintf(io.Out, "Added %s. %s\n", args[0], uptimePaused)
+				return nil
+			}
 			fmt.Fprintf(io.Out, "Added. %s is checked from outside every minute; the first result arrives within a minute.\n", args[0])
 			return nil
 		},
@@ -232,6 +260,18 @@ func newUptime(io IO) *cobra.Command {
 	cmd.AddCommand(add, newUptimeEdit(io))
 	cmd.SetContext(context.Background())
 	return cmd
+}
+
+// uptimePaused is what the free plan means for uptime checks.
+const uptimePaused = "Paused on the free plan until the team adds credit."
+
+// errTestIsForAdmins: alert channels are set up, and tested, by owners and admins.
+var errTestIsForAdmins = &exitError{code: ExitNoAccess, msg: "Testing alert channels is for owners and admins."}
+
+// notYours is an answer that means the role may not do this: hidden, or not allowed.
+func notYours(err error) bool {
+	var p *api.Problem
+	return errors.Is(err, api.ErrNotFound) || (errors.As(err, &p) && p.Status == 403)
 }
 
 func plural(n int, one, many string) string {

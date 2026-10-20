@@ -56,7 +56,8 @@ func (f firewall) Plan(ctx context.Context, h Host, in Input) Plan {
 	}
 	var closing []string
 	for _, port := range in.Public {
-		if !slices.Contains(open, port) {
+		// docker-proxy listens for published ports, and ufw does not close them.
+		if !slices.Contains(open, port) && !slices.Contains(in.Docker, port) {
 			closing = append(closing, strconv.Itoa(port))
 		}
 	}
@@ -119,10 +120,6 @@ func installed(h Host, file string) bool {
 
 func (loginProtection) Plan(_ context.Context, h Host, in Input) Plan {
 	p := Plan{Done: "fail2ban on", Undoable: true}
-	if in.Planned["ssh-password"] {
-		p.Skip = "Not needed: with SSH password login off, there is no password to guess."
-		return p
-	}
 	if !h.Has("systemctl") || (!installed(h, fail2banClient) && !h.Has("apt-get")) {
 		p.Refuse = "Kiyesi installs fail2ban with apt and systemd, which this system does not have. Install fail2ban, or turn SSH password login off."
 		return p
@@ -131,6 +128,13 @@ func (loginProtection) Plan(_ context.Context, h Host, in Input) Plan {
 		p.Say = "Starts fail2ban, which is installed but not running. It blocks an address after repeated failed logins."
 	} else {
 		p.Say = "Installs fail2ban, which blocks an address after repeated failed logins."
+	}
+	// Decided after ssh-password runs: if it is declined or fails, the
+	// passwords stay, and so does the need for this.
+	if in.Planned["ssh-password"] {
+		p.Say += " Skipped if ssh-password turns password login off first."
+		p.Unless = "ssh-password"
+		p.UnlessSkip = "Not needed: with SSH password login off, there is no password to guess."
 	}
 	return p
 }
@@ -309,9 +313,11 @@ func (updates) Apply(ctx context.Context, h Host, _ Input, c *Changes) error {
 }
 
 // dockerCleanup gives back the disk Docker holds for nothing: images no
-// container uses and build cache, both a week old or more, so an image
-// just replaced can still be rolled back to. Containers and volumes are
-// never touched: a stopped container or an unused volume can hold data.
+// container uses that were created over a week ago, and build cache over a
+// week old. Docker's until filter reads when an image was built, not when
+// it stopped being used, so an old image replaced today goes too.
+// Containers and volumes are never touched: a stopped container or an
+// unused volume can hold data.
 type dockerCleanup struct{}
 
 func (dockerCleanup) Name() string      { return "docker-cleanup" }
@@ -326,17 +332,18 @@ func (dockerCleanup) Plan(_ context.Context, h Host, in Input) Plan {
 	size := ""
 	for _, f := range in.Findings {
 		if s := f.Vars["size"]; s != "" {
-			size = " (" + s + " now)"
+			size = " Of the " + s + " Docker keeps unused now, only that part goes, so less may be freed. An image you replaced today goes too if it was built over a week ago: to keep one for rolling back, tag it or start a container from it first."
 			break
 		}
 	}
-	p.Say = "Removes Docker images no container uses, and build cache, both a week old or more" + size +
-		". Containers and volumes are never touched. This one cannot be undone: a removed image is pulled or built again when it is needed."
+	p.Say = "Removes Docker images no container uses that were created over a week ago, and build cache over a week old." + size +
+		" Containers and volumes are never touched. This one cannot be undone: a removed image is pulled or built again when it is needed."
 	return p
 }
 
-// reclaimed reads "Total reclaimed space: 1.2GB" from docker's answer.
-var reclaimed = regexp.MustCompile(`Total reclaimed space:\s*(\S+)`)
+// reclaimed reads "Total reclaimed space: 1.2GB" (images) or "Total: 1.2GB"
+// (build cache, in newer Docker) from docker's answer.
+var reclaimed = regexp.MustCompile(`Total(?: reclaimed space)?:\s*(\S+)`)
 
 func (dockerCleanup) Apply(ctx context.Context, _ Host, _ Input, c *Changes) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
@@ -357,6 +364,8 @@ func (dockerCleanup) Apply(ctx context.Context, _ Host, _ Input, c *Changes) err
 	}
 	if len(freed) > 0 {
 		c.rec.Done += ": " + strings.Join(freed, " and ") + " freed"
+	} else {
+		c.rec.Done = "No unused image was created over a week ago and no build cache was over a week old, so nothing was removed"
 	}
 	return nil
 }

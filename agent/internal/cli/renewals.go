@@ -39,14 +39,8 @@ func newRenewals(io IO) *cobra.Command {
 			fmt.Fprintln(w, "WHEN\tWHAT\tKIND")
 			for _, x := range list {
 				when := "date not known: type it on Renewals"
-				switch {
-				case x.ExpiresAt == nil || x.DaysLeft == nil:
-				case *x.DaysLeft < 0:
-					when = fmt.Sprintf("%s (ran out %d days ago)", x.ExpiresAt.Format("2 Jan 2006"), -*x.DaysLeft)
-				case *x.DaysLeft == 0:
-					when = x.ExpiresAt.Format("2 Jan 2006") + " (today)"
-				default:
-					when = fmt.Sprintf("%s (in %d days)", x.ExpiresAt.Format("2 Jan 2006"), *x.DaysLeft)
+				if x.ExpiresAt != nil && x.DaysLeft != nil {
+					when = x.ExpiresAt.Format("2 Jan 2006") + " (" + daysWords(*x.DaysLeft, x.RanOut) + ")"
 				}
 				fmt.Fprintf(w, "%s\t%s\t%s\n", when, x.Name, expiryKind[x.Kind])
 			}
@@ -55,4 +49,23 @@ func newRenewals(io IO) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the list as JSON, for scripts")
 	return cmd
+}
+
+// daysWords says when something runs out, in calendar days from today:
+// "today", "tomorrow", "in 3 days", "ran out today", "ran out yesterday".
+// ranOut says it already has, even when that was earlier today.
+func daysWords(days int, ranOut bool) string {
+	switch {
+	case days < -1:
+		return fmt.Sprintf("ran out %d days ago", -days)
+	case days == -1:
+		return "ran out yesterday"
+	case days == 0 && ranOut:
+		return "ran out today"
+	case days == 0:
+		return "today"
+	case days == 1:
+		return "tomorrow"
+	}
+	return fmt.Sprintf("in %d days", days)
 }

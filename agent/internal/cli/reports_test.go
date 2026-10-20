@@ -67,6 +67,11 @@ func TestReportCardCountsLastWeek(t *testing.T) {
 	if code != ExitOK || !strings.Contains(out, "Week of 5 October") || !strings.Contains(out, "typical time to fix 38 minutes") {
 		t.Fatalf("card: %d %s %s", code, out, errOut)
 	}
+	// The help says when it is emailed, and that the free plan is not.
+	_, help, _ := runCLI(t, "report", "card", "--help")
+	if !strings.Contains(help, "08:00\nin their own time zone") || !strings.Contains(help, "free plan it is not emailed") {
+		t.Errorf("help:\n%s", help)
+	}
 }
 
 func TestDatamapReportSavesThePageWhenNoPDFCanBeMade(t *testing.T) {

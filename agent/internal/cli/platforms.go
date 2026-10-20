@@ -72,7 +72,12 @@ func newPlatforms(io IO) *cobra.Command {
 			if err := tw.Flush(); err != nil {
 				return err
 			}
-			fmt.Fprintln(io.Out, "\nServices that wait are added in Settings, Managed services.")
+			for _, l := range links {
+				if len(l.Waiting) > 0 {
+					fmt.Fprintln(io.Out, "\nServices that wait are added in Settings, Managed services.")
+					break
+				}
+			}
 			return nil
 		},
 	}

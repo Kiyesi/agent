@@ -61,7 +61,7 @@ func TestFindingsListsEachProblemWithItsFix(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
-	if code, out, _ := runCLI(t, "findings", "new-box"); code != ExitOK || !strings.Contains(out, "No findings") {
+	if code, out, _ := runCLI(t, "findings", "new-box"); code != ExitOK || !strings.Contains(out, "new-box has not sent a scan yet, so there are no findings yet.") {
 		t.Errorf("another server: %d %s", code, out)
 	}
 	if code, _, errOut := runCLI(t, "findings", "nope"); code != ExitUsage || !strings.Contains(errOut, "kiyesi servers") {
@@ -110,6 +110,19 @@ func TestOpenPrintsAndOpensTheMatchingPage(t *testing.T) {
 	}
 	if code, _, errOut := runCLI(t, "open", "nothing-here"); code != ExitUsage || !strings.Contains(errOut, "INC-12") {
 		t.Errorf("unknown: %d %q", code, errOut)
+	}
+	// With a team chosen, the address names it, so the dashboard shows that team.
+	if code, _, _ := runCLI(t, "team", "use", "Globex"); code != ExitOK {
+		t.Fatalf("team use: %d", code)
+	}
+	for args, want := range map[string]string{
+		"open INC-12": "https://app.example.test/incident/?id=INC-12&team=bbbbbbbbbbbbbbbbbbbbbbbb",
+		"open logs":   "https://app.example.test/logs/?team=bbbbbbbbbbbbbbbbbbbbbbbb",
+		"open":        "https://app.example.test/?team=bbbbbbbbbbbbbbbbbbbbbbbb",
+	} {
+		if code, out, _ := runCLI(t, strings.Fields(args)...); code != ExitOK || strings.TrimSpace(out) != want || opened != want {
+			t.Errorf("%s: %d %q opened %q", args, code, out, opened)
+		}
 	}
 }
 

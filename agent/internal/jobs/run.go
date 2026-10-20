@@ -92,7 +92,9 @@ func (t *tail) last() []string {
 // Execute runs the command as it would run without Kiyesi: the same input,
 // output and exit code, signals passed on. It records the start and the end
 // in the spool folder for the agent to send. Recording never fails or slows
-// the job: when the folder cannot be written, the run is simply not recorded.
+// the job: when the folder cannot be written, the run is not recorded, and
+// one line on stderr says so. An empty spool records nothing, silently: the
+// caller has said why.
 func Execute(spool, name string, args []string, stdin io.Reader, stdout, stderr io.Writer, newID func() string, now func() time.Time) int {
 	id := newID()
 	started := now()
@@ -101,7 +103,16 @@ func Execute(spool, name string, args []string, stdin io.Reader, stdout, stderr 
 		user = u
 	}
 	run := Run{Name: name, RunID: id, StartedAt: started.UTC().Format(time.RFC3339Nano), User: user}
-	write(spool, id+".start.json", run)
+	record := func(file string) {
+		if spool == "" {
+			return
+		}
+		if err := write(spool, file, run); err != nil {
+			_, _ = io.WriteString(stderr, "kiyesi run: this run is not recorded, so Kiyesi will not see it ("+err.Error()+"). Is the agent running? sudo systemctl status kiyesi\n")
+			spool = "" // said once is enough
+		}
+	}
+	record(id + ".start.json")
 
 	out := &tail{}
 	cmd := exec.Command(args[0], args[1:]...) // #nosec G204 -- the command is the user's own job, as they wrote it
@@ -143,30 +154,32 @@ func Execute(spool, name string, args []string, stdin io.Reader, stdout, stderr 
 	run.ExitCode = &code
 	run.DurationMs = &ms
 	run.LastLines = out.last()
-	write(spool, id+".end.json", run)
+	record(id + ".end.json")
 	return code
 }
 
 // write puts a record in the spool atomically: a hidden file, then renamed.
-func write(spool, file string, r Run) {
+func write(spool, file string, r Run) error {
 	data, err := json.Marshal(r)
 	if err != nil {
-		return
+		return err
 	}
 	tmp, err := os.CreateTemp(spool, ".run-*")
 	if err != nil {
-		return
+		return err
 	}
 	_, werr := tmp.Write(data)
 	cerr := tmp.Close()
 	// The file stays private to the job's user (0600): the agent reads it as root.
-	if werr != nil || cerr != nil {
+	if err := errors.Join(werr, cerr); err != nil {
 		_ = os.Remove(tmp.Name())
-		return
+		return err
 	}
-	if os.Rename(tmp.Name(), filepath.Join(spool, file)) != nil {
+	if err := os.Rename(tmp.Name(), filepath.Join(spool, file)); err != nil {
 		_ = os.Remove(tmp.Name())
+		return err
 	}
+	return nil
 }
 
 // PrepareSpool makes the folder kiyesi run writes to: anyone may add a file,

@@ -22,7 +22,7 @@ func TestErrorsListsGroupsWithFileAndLine(t *testing.T) {
 		t.Errorf("query = %v", q)
 	}
 	for _, want := range []string{
-		"Today: 214 errors in 1 group.",
+		"Last 24 hours: 214 errors in 1 group.",
 		"214      163     TypeError: Cannot read properties of undefined (reading 'amount')   src/components/CheckoutSummary.tsx:48",
 		"version 2.14.0",
 		"/assets/index-3f9a.js:1 (no source map)",

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kiyesi/kiyesi/agent/internal/collect"
+	"github.com/kiyesi/kiyesi/agent/internal/jobs"
 	"github.com/kiyesi/kiyesi/agent/internal/scan"
 	"github.com/kiyesi/kiyesi/agent/internal/send"
 )
@@ -222,7 +223,7 @@ func TestAgentLoopKeepsTheFreePlansSlowerPace(t *testing.T) {
 		turns++
 		return start.Add(time.Duration(turns) * time.Minute)
 	}
-	scanned := 0
+	scanned, taken := 0, 0
 	a := agentLoop{
 		client: send.NewClient(srv.URL, goodToken),
 		outbox: send.Outbox{Dir: t.TempDir(), MaxBytes: 1 << 20},
@@ -230,8 +231,14 @@ func TestAgentLoopKeepsTheFreePlansSlowerPace(t *testing.T) {
 			scanned++
 			return scan.Report{Schema: scan.Schema, StartedAt: time.Now()}, nil
 		},
+		// Each collect takes a job run from the spool, as kiyesi run left it.
 		collect: func(context.Context) (*collect.Metrics, []collect.Event, *collect.Logs, []send.Item) {
-			return &collect.Metrics{}, []collect.Event{{Kind: "restart", Subject: "api"}}, nil, nil
+			mu.Lock()
+			taken++
+			mu.Unlock()
+			code := 0
+			run := jobs.Run{Name: "nightly-backup", RunID: "r", StartedAt: "2026-10-18T04:00:00Z", ExitCode: &code}
+			return &collect.Metrics{}, []collect.Event{{Kind: "restart", Subject: "api"}}, nil, send.Jobs(time.Now(), []jobs.Run{run}, nil)
 		},
 		scanEvery: 15 * time.Minute,
 		// Small, so the loop turns quickly; the fake clock says a minute passed.
@@ -267,5 +274,12 @@ func TestAgentLoopKeepsTheFreePlansSlowerPace(t *testing.T) {
 	}
 	if api.count("event") < 10 {
 		t.Errorf("sent %d events", api.count("event"))
+	}
+	// A job run taken from the spool is sent on the free plan too, never dropped.
+	mu.Lock()
+	n := taken
+	mu.Unlock()
+	if got := api.count("job"); got != n || n < 10 {
+		t.Errorf("took %d job runs, sent %d", n, got)
 	}
 }

@@ -93,6 +93,14 @@ func TestTeamInviteAndActivity(t *testing.T) {
 	if code, _, errOut := runCLI(t, "team", "invite", "x@example.com", "--role", "boss"); code != ExitUsage || !strings.Contains(errOut, "--role") {
 		t.Errorf("bad role: %d %q", code, errOut)
 	}
+	// A role the team made is offered too, by its name.
+	serverCalls = nil
+	if code, out, errOut := runCLI(t, "team", "invite", "kemi@example.com", "--role", "frontend contractor"); code != ExitOK {
+		t.Errorf("custom role: %d %s %s", code, out, errOut)
+	}
+	if len(serverCalls) != 1 || serverCalls[0] != "invite kemi@example.com 6acc00000000000000000001 <nil>" {
+		t.Errorf("calls = %q", serverCalls)
+	}
 	code, out, _ = runCLI(t, "activity", "--limit", "10")
 	if code != ExitOK || !strings.Contains(out, "Ada Obi") || !strings.Contains(out, "Escalated INC-12 to Ifeoma Nwosu") || !strings.Contains(out, "Kiyesi") {
 		t.Fatalf("activity: %d\n%s", code, out)

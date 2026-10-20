@@ -153,12 +153,24 @@ func (m watchModel) open() tea.Cmd {
 					d.lines = append(d.lines, "  "+*i.Fix.Command)
 				}
 			}
-			d.lines = append(d.lines, "", fmt.Sprintf("kiyesi ack %s, then kiyesi resolve %s --note \"what fixed it\"", i.Ref, i.Ref))
+			for _, l := range whoMoved(i) {
+				d.lines = append(d.lines, l)
+			}
+			if h := nextSteps(i, mayDo(ctx, c, "incidents", "act")); h != "" {
+				d.lines = append(d.lines, "", h)
+			}
 			return d
 		}
 	}
 	s := m.data.servers[m.cursor-len(m.data.incidents)]
 	return func() tea.Msg {
+		// No findings means every check passed only when there was a scan.
+		switch {
+		case s.Kind == "managed":
+			return watchDetail{title: s.Name, lines: []string{"A managed service: Kiyesi does not scan it."}}
+		case s.LastScan == nil:
+			return watchDetail{title: s.Name, lines: []string{"Not scanned yet. The first scan arrives within a minute of it connecting."}}
+		}
 		list, err := c.Findings(ctx, "")
 		if err != nil {
 			return watchDetail{title: s.Name, err: err}
@@ -237,11 +249,13 @@ func (m watchModel) render() string {
 	if len(m.data.servers) > 0 {
 		fmt.Fprintf(&b, "  %-24s %-6s %-6s %-7s %-6s %-9s %s\n", "SERVER", "GRADE", "CPU", "MEMORY", "DISK", "CRITICAL", "SEEN")
 		for _, s := range m.data.servers {
-			cpu, mem, disk := usage(s)
+			cpu, mem, disk := usage(s, now)
 			fmt.Fprintf(&b, "%s%-24s %-6s %-6s %-7s %-6s %-9s %s\n", mark(), cut(s.Name, 24), grade(s), cpu, mem, disk, count(s, true), seen(s, now))
 		}
-	} else if !m.data.at.IsZero() {
+	} else if !m.data.at.IsZero() && m.data.now.CanAddServers {
 		fmt.Fprintln(&b, "No servers yet. Add one in Settings, Add a server.")
+	} else if !m.data.at.IsZero() && m.data.now.sees("servers") {
+		fmt.Fprintln(&b, "No servers that you can see.")
 	}
 	if m.data.err != nil {
 		fmt.Fprintf(&b, "\nCould not refresh: %s\n", m.data.err.Error())

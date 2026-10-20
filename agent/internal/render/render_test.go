@@ -21,6 +21,8 @@ var update = flag.Bool("update", false, "rewrite the golden files")
 // the design, so they are drawn as that version whatever the real one is.
 func TestMain(m *testing.M) {
 	version.Version, version.Commit = "0.1.0", ""
+	// A quarter of an hour after the design report's scan.
+	now = func() time.Time { return time.Date(2026, 10, 8, 11, 0, 0, 0, time.UTC) }
 	os.Exit(m.Run())
 }
 
@@ -205,7 +207,11 @@ func TestTerminalSaysWhatTheGradeIsBasedOn(t *testing.T) {
 // The docs site shows this file as its example report, so the example is
 // always the renderer's real output.
 func TestExampleForTheDocs(t *testing.T) {
-	golden(t, "terminal-example.txt", terminal(t, designReport(t), colorprofile.NoTTY))
+	r := designReport(t)
+	// The docs and website show this to everyone, so its home country is the
+	// demo's, not one Kiyesi might seem to be made for.
+	r.Home = scan.Home{Code: "DE", Name: "Germany"}
+	golden(t, "terminal-example.txt", terminal(t, r, colorprofile.NoTTY))
 }
 
 // Two of the design's findings (the certificate and SSH passwords) are
@@ -213,10 +219,10 @@ func TestExampleForTheDocs(t *testing.T) {
 // names the fix under each.
 func TestReportsOfferKiyesiFix(t *testing.T) {
 	r := designReport(t)
-	if got := terminal(t, r, colorprofile.NoTTY); !strings.Contains(got, "Kiyesi can fix 2 of these for you: sudo kiyesi fix\nIt says what it will change, and asks first.\n") {
+	if got := terminal(t, r, colorprofile.NoTTY); !strings.Contains(got, "Kiyesi can fix 2 things for you: sudo kiyesi fix\nIt says what it will change, and asks first.\n") {
 		t.Errorf("no kiyesi fix line in:\n%s", got)
 	}
-	file := File(r)
+	file := File(r, ByScan)
 	for _, want := range []string{"Or let Kiyesi do it: sudo kiyesi fix ssh-password", "Or let Kiyesi do it: sudo kiyesi fix certificates"} {
 		if !strings.Contains(file, want) {
 			t.Errorf("missing %q in the saved report", want)
@@ -226,7 +232,7 @@ func TestReportsOfferKiyesiFix(t *testing.T) {
 		t.Errorf("a finding kiyesi fix cannot make was offered:\n%s", file)
 	}
 	var b bytes.Buffer
-	if err := Stored(&colorprofile.Writer{Forward: &b, Profile: colorprofile.NoTTY}, r, "checkout-api-prod"); err != nil || !strings.Contains(b.String(), "Kiyesi can fix 2 of these on the server: sudo kiyesi fix") {
+	if err := Stored(&colorprofile.Writer{Forward: &b, Profile: colorprofile.NoTTY}, r, "checkout-api-prod"); err != nil || !strings.Contains(b.String(), "Kiyesi can fix 2 things on the server: sudo kiyesi fix") {
 		t.Errorf("laptop view: %v\n%s", err, b.String())
 	}
 	// None to offer, no line.
@@ -249,7 +255,7 @@ func TestTerminalMarksAnUntestedSystem(t *testing.T) {
 }
 
 func TestReportFileHasEveryFix(t *testing.T) {
-	got := File(designReport(t))
+	got := File(designReport(t), ByScan)
 	for _, want := range []string{"sudo certbot renew", "Why: When it expires", "PASSED", "DATA LOCATION (home country: Nigeria)", "Rule: On 15 June 2026", "It changed nothing and sent nothing."} {
 		if !strings.Contains(got, want) {
 			t.Errorf("report file is missing %q", want)
@@ -290,5 +296,104 @@ func TestFooterSaysHowToOpenARootOnlyReport(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "Full report with every fix command: sudo less /var/lib/kiyesi/report-2026-10-08.txt") {
 		t.Errorf("footer:\n%s", buf.String())
+	}
+}
+
+// At A 100 the only thing kiyesi fix could do is an optional clean-up: the
+// report does not offer it, so a perfect grade never reads as a problem.
+func TestAPerfectGradeOffersNoFix(t *testing.T) {
+	r := designReport(t)
+	r.Grade, r.Counts = scan.Grade{Score: 100, Letter: "A", BasedOn: 23, Total: 23}, scan.Counts{Passed: 23, Run: 23}
+	r.Checks = []scan.CheckResult{{ID: "leftovers", Name: "Leftovers", Status: "pass", Findings: []scan.Finding{
+		{Check: "leftovers", Severity: "info", AutoFix: "docker-cleanup", Sentence: "Docker keeps 2.4 GB that nothing uses: old images and build cache"},
+	}}}
+	if got := terminal(t, r, colorprofile.NoTTY); strings.Contains(got, "kiyesi fix") {
+		t.Errorf("offered kiyesi fix at A 100:\n%s", got)
+	}
+	var b bytes.Buffer
+	if err := Stored(&colorprofile.Writer{Forward: &b, Profile: colorprofile.NoTTY}, r, "kiyesi-server"); err != nil || strings.Contains(b.String(), "kiyesi fix") {
+		t.Errorf("laptop view offered kiyesi fix at A 100: %v\n%s", err, b.String())
+	}
+}
+
+// The saved report names every optional clean-up kiyesi fix may offer,
+// lists its check under PASSED as the grade line counts it, and never
+// mixes it with what affects the grade.
+func TestReportFileNamesOptionalCleanUps(t *testing.T) {
+	r := designReport(t)
+	r.Counts.Passed++
+	r.Checks = append(r.Checks, scan.CheckResult{ID: "leftovers", Name: "Leftovers", Status: "fail", Findings: []scan.Finding{
+		finding(t, "leftovers", "docker-waste", "", map[string]string{"size": "2.4 GB"}),
+	}})
+	got := File(r, ByScan)
+	at := strings.Index(got, "OPTIONAL (does not affect the grade)\n INFO  Docker keeps 2.4 GB that nothing uses")
+	if at < 0 || at < strings.Index(got, "WARNING") || at > strings.Index(got, "DATA LOCATION") {
+		t.Fatalf("no OPTIONAL section between WARNING and DATA LOCATION:\n%s", got)
+	}
+	if !strings.Contains(got[at:], "Or let Kiyesi do it: sudo kiyesi fix docker-cleanup") || !strings.Contains(got[at:], "Why: ") {
+		t.Errorf("the clean-up has no why or kiyesi fix line:\n%s", got[at:])
+	}
+	if !strings.Contains(got, " PASS  Leftovers: passed, with an optional clean-up above\n") {
+		t.Errorf("Leftovers is counted as passed but not listed:\n%s", got)
+	}
+	if n := strings.Count(got, " PASS  "); n != r.Counts.Passed-2 {
+		// The design's 17 passed include 2 checks only shown as locations.
+		t.Errorf("listed %d passed, counted %d", n, r.Counts.Passed)
+	}
+}
+
+// The last line says who wrote the report and what it did.
+func TestReportFileSaysWhoWroteIt(t *testing.T) {
+	for by, want := range map[By]string{
+		ByScan:  "Kiyesi only read this server. It changed nothing and sent nothing.\n",
+		ByAgent: "The Kiyesi agent wrote this report. It only read this server, and sent the results to the Kiyesi service.\n",
+		ByFix:   "Written after kiyesi fix changed this server: sudo kiyesi fix undo lists the changes. The check itself only read it.\n",
+		ByUndo:  "Written after kiyesi fix undo put a change back. The check itself only read this server.\n",
+	} {
+		got := File(designReport(t), by)
+		if !strings.HasSuffix(got, want) {
+			t.Errorf("by %d ends:\n%s", by, got[strings.LastIndex(strings.TrimSuffix(got, "\n"), "\n")+1:])
+		}
+		if by != ByScan && strings.Contains(got, "sent nothing") {
+			t.Errorf("by %d says it sent nothing", by)
+		}
+	}
+}
+
+// One fix for three secret files is one thing to fix, as kiyesi fix says.
+func TestReportsCountFixesNotFindings(t *testing.T) {
+	r := designReport(t)
+	var secrets []scan.Finding
+	for _, p := range []string{"/srv/a/.env", "/srv/b/.env", "/srv/c/.env"} {
+		secrets = append(secrets, finding(t, "secrets-in-files", "world-readable", "", map[string]string{"path": p}))
+	}
+	r.Checks = []scan.CheckResult{{ID: "secrets-in-files", Name: "Secrets", Status: "fail", Findings: secrets}}
+	if got := terminal(t, r, colorprofile.NoTTY); !strings.Contains(got, "Kiyesi can fix 1 thing for you: sudo kiyesi fix") {
+		t.Errorf("counted findings, not fixes:\n%s", got)
+	}
+}
+
+// The laptop view shows the agent's version and when it scanned, and a
+// scan over a day old offers no fix: it says how old it is instead.
+func TestLaptopViewShowsTheAgentsVersionAndTheScanTime(t *testing.T) {
+	r := designReport(t)
+	r.Version = "0.33.2"
+	var b bytes.Buffer
+	if err := Stored(&colorprofile.Writer{Forward: &b, Profile: colorprofile.NoTTY}, r, "checkout-api-prod"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "Kiyesi 0.33.2 · checkout-api-prod · scanned 15 minutes ago\n") {
+		t.Errorf("header:\n%s", b.String())
+	}
+	old := now
+	t.Cleanup(func() { now = old })
+	now = func() time.Time { return r.StartedAt.Add(3*24*time.Hour + time.Hour) }
+	b.Reset()
+	if err := Stored(&colorprofile.Writer{Forward: &b, Profile: colorprofile.NoTTY}, r, "checkout-api-prod"); err != nil {
+		t.Fatal(err)
+	}
+	got := b.String()
+	if strings.Contains(got, "sudo kiyesi fix") || !strings.Contains(got, "This scan is 3 days old, so it may no longer be true.") || !strings.Contains(got, "scanned 3 days ago") {
+		t.Errorf("a 3-day-old scan:\n%s", got)
 	}
 }

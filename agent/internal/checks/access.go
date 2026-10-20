@@ -2,6 +2,7 @@ package checks
 
 import (
 	"context"
+	"strconv"
 	"strings"
 )
 
@@ -39,7 +40,16 @@ func (firewallCheck) Run(ctx context.Context, env *Env) Result {
 	case !fw.Known:
 		return NeedsRoot()
 	default:
-		return Fail(Found("off", nil))
+		// The fix opens the SSH port(s) sshd really uses before the
+		// firewall starts, so it never locks the reader out.
+		var ports []string
+		for _, p := range env.SSH(ctx).Ports {
+			ports = append(ports, strconv.Itoa(p))
+		}
+		if len(ports) == 0 {
+			ports = []string{"22"}
+		}
+		return Fail(Found("off", map[string]string{"ssh_port": strings.Join(ports, ",")}))
 	}
 }
 

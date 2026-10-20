@@ -59,6 +59,29 @@ func TestTeamAccessSetsRoleProjectsLeftOutAndEnd(t *testing.T) {
 	}
 }
 
+func TestTeamAccessKeepsWhereItAppliesWhenOnlyTheDayChanges(t *testing.T) {
+	signInForTest(t)
+	serverCalls = nil
+	code, out, errOut := runCLI(t, "team", "access", "Amaka", "--until", "2026-12-31", "--code", "123456")
+	if code != ExitOK {
+		t.Fatalf("access: %d %s %s", code, out, errOut)
+	}
+	// Amaka sees one project in production only: that stays, never every project.
+	want := `access {"endsAt":"2026-12-31","role":"member","scope":{"all":false,"projects":[{"environments":["production"],"projectId":"p2"}]},"twoStepCode":"123456"}`
+	if len(serverCalls) != 1 || serverCalls[0] != want {
+		t.Errorf("calls = %v", serverCalls)
+	}
+	if strings.Contains(out, "Where it applies changed") {
+		t.Errorf("the scope did not change:\n%s", out)
+	}
+	// Naming projects changes it, and says so.
+	serverCalls = nil
+	code, out, _ = runCLI(t, "team", "access", "Amaka", "--projects", "Storefront", "--code", "123456")
+	if code != ExitOK || !strings.Contains(out, "Where it applies changed too: only in Storefront.") {
+		t.Errorf("projects: %d\n%s", code, out)
+	}
+}
+
 func TestTeamUseChoosesWhichTeamCommandsAreFor(t *testing.T) {
 	signInForTest(t)
 	code, out, _ := runCLI(t, "team", "use")

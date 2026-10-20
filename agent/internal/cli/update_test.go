@@ -86,3 +86,39 @@ func TestUpdateLeavesAHomebrewInstallToHomebrew(t *testing.T) {
 		t.Errorf("Homebrew's copy was replaced")
 	}
 }
+
+// A running agent restarts on the new version; one stopped with
+// systemctl disable --now stays stopped.
+func TestUpdateRestartsOnlyARunningAgent(t *testing.T) {
+	for _, running := range []bool{true, false} {
+		useReleases(t, fakeReleases{latest: "99.0.0", bin: []byte("new")})
+		unitPath = filepath.Join(t.TempDir(), "kiyesi.service")
+		_ = os.WriteFile(unitPath, []byte("[Unit]\n"), 0o644)
+		var calls []string
+		oldRun, oldHas := runSystemctl, hasSystemctl
+		t.Cleanup(func() { runSystemctl, hasSystemctl = oldRun, oldHas })
+		hasSystemctl = func() bool { return true }
+		runSystemctl = func(args ...string) error {
+			calls = append(calls, strings.Join(args, " "))
+			if args[0] == "is-active" && !running {
+				return errors.New("exit status 3")
+			}
+			return nil
+		}
+		code, out, errOut := runCLI(t, "update")
+		if code != ExitOK {
+			t.Fatalf("exit %d: %s %s", code, out, errOut)
+		}
+		for _, c := range calls {
+			if c == "restart kiyesi" || c == "start kiyesi" || (!running && c == "try-restart kiyesi") {
+				t.Errorf("running=%v: ran systemctl %s", running, c)
+			}
+		}
+		if running && !strings.Contains(out, "The agent restarted on the new version.") {
+			t.Errorf("running agent: %s", out)
+		}
+		if !running && (strings.Contains(out, "restarted") || !strings.Contains(out, "The agent is stopped, so it stays stopped.")) {
+			t.Errorf("stopped agent: %s", out)
+		}
+	}
+}

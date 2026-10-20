@@ -94,8 +94,15 @@ func newLogs(io IO) *cobra.Command {
 			}
 			showServer := server == ""
 			rawLines = raw
-			if page.Notice != nil && *page.Notice == "over_allowance" {
+			// On the free plan no lines are kept: say so, rather than that
+			// nothing matched or that the team is over an allowance.
+			free := (len(page.Lines) == 0 || page.Notice != nil) && onFreePlan(cmd.Context(), c)
+			if page.Notice != nil && *page.Notice == "over_allowance" && !free {
 				fmt.Fprintln(io.Err, "Your team is over today's log allowance: new lines are counted, not kept, until tomorrow (UTC).")
+			}
+			if len(page.Lines) == 0 && free {
+				fmt.Fprintln(io.Out, freePlanNote)
+				return nil
 			}
 			if !follow {
 				if len(page.Lines) == 0 {
@@ -151,6 +158,11 @@ func exportLogs(ctx context.Context, io IO, c *api.Client, q api.LogQuery, path 
 	info, _ := tmp.Stat()
 	if err := tmp.Close(); err != nil {
 		return err
+	}
+	// An empty file on the free plan is not a result: no lines are kept.
+	if info.Size() == 0 && onFreePlan(ctx, c) {
+		fmt.Fprintln(io.Out, freePlanNote)
+		return nil
 	}
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return err

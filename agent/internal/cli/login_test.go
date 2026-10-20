@@ -42,6 +42,12 @@ func lastLogs() url.Values {
 
 const personToken = "session-token-for-tests"
 
+// creditBody, when set, is what the fake API answers for /v1/credit.
+var creditBody string
+
+// signOuts is the token of each sign-out the fake API was asked for.
+var signOuts []string
+
 // noKeychain makes the token go to the file, as on a server.
 type noKeychain struct{}
 
@@ -99,6 +105,14 @@ func fakeAPI(t *testing.T, pendingPolls int32) *httptest.Server {
 			}
 			_, _ = w.Write([]byte(`{"access_token":"` + personToken + `","token_type":"Bearer"}`))
 			return
+		case "/api/auth/sign-out":
+			signOuts = append(signOuts, strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+			if r.Header.Get("Authorization") == "Bearer broken-token" {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			_, _ = w.Write([]byte(`{"success":true}`))
+			return
 		}
 		if r.URL.Path == "/v1/preflight" && (r.Header.Get("Authorization") == "Bearer "+personToken || r.Header.Get("Authorization") == "Bearer kdp_preflight") {
 			setLastLogsQuery(r.URL.Query())
@@ -106,7 +120,7 @@ func fakeAPI(t *testing.T, pendingPolls int32) *httptest.Server {
 				_, _ = w.Write([]byte(`{"server":{"id":"s3","name":"calm-box","project":null,"environment":null},"answer":"go","checks":[{"id":"memory","label":"Memory","status":"pass","sentence":"41% used."}],"doFirst":[]}`))
 				return
 			}
-			_, _ = w.Write([]byte(`{"server":{"id":"s1","name":"checkout-api-prod","project":{"name":"Checkout"},"environment":"production"},"answer":"wait","checks":[{"id":"memory","label":"Memory","status":"wait","sentence":"93% used. The app was killed at 10:41 today."},{"id":"disk","label":"Disk","status":"pass","sentence":"64% used."},{"id":"backup","label":"Backup","status":"wait","sentence":"Newest backup is 31 hours old."},{"id":"certificate","label":"Certificate","status":"pass","sentence":"Valid for 9 more days."},{"id":"incident","label":"Open incident","status":"wait","sentence":"INC-12 Checkout API returning 502 errors."},{"id":"deploy","label":"Last deploy","status":"pass","sentence":"checkout-api 3.8.1 was healthy."}],"doFirst":["Add swap or move up a size, then mark the incident it caused fixed","Find out why the backup did not run, and run it","Fix INC-12 first, or deploy the fix it needs"]}`))
+			_, _ = w.Write([]byte(`{"server":{"id":"s1","name":"checkout-api-prod","project":{"name":"Checkout"},"environment":"production"},"answer":"wait","checks":[{"id":"memory","label":"Memory","status":"wait","sentence":"93% used. The app was killed at 10:41 today."},{"id":"disk","label":"Disk","status":"pass","sentence":"64% used."},{"id":"backup","label":"Backup","status":"wait","sentence":"Newest backup is 31 hours old."},{"id":"certificate","label":"Certificate","status":"pass","sentence":"Valid for 9 more days."},{"id":"incident","label":"Open incident","status":"wait","sentence":"INC-12 Checkout API returning 502 errors."},{"id":"deploy","label":"Last deploy","status":"pass","sentence":"checkout-api 3.8.1 was healthy."}],"doFirst":["Add swap or move up a size, then mark the incident it caused fixed","Find out why the backup did not run, and run it","Fix INC-12 first, or deploy the fix it needs"],"scannedAt":"2026-10-13T10:00:00Z"}`))
 			return
 		}
 		if r.Header.Get("Authorization") != "Bearer "+personToken {
@@ -132,7 +146,12 @@ func fakeAPI(t *testing.T, pendingPolls int32) *httptest.Server {
 			_, _ = w.Write([]byte("%PDF-1.7 passport"))
 		case "/v1/servers/s1/badge":
 			if r.Method == http.MethodDelete {
-				w.WriteHeader(http.StatusNoContent)
+				// In Globex the badge was never on.
+				if r.Header.Get("X-Kiyesi-Team") == "bbbbbbbbbbbbbbbbbbbbbbbb" {
+					_, _ = w.Write([]byte(`{"wasOn":false}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"wasOn":true}`))
 				return
 			}
 			_, _ = w.Write([]byte(`{"badge":{"url":"https://api.kiyesi.dev/v1/public/badge/AAAAAAAAAAAAAAAAAAAAAAAA.svg","markdown":"[![Kiyesi grade](https://api.kiyesi.dev/v1/public/badge/AAAAAAAAAAAAAAAAAAAAAAAA.svg)](https://kiyesi.dev)"}}`))
@@ -366,7 +385,7 @@ func fakeAPI(t *testing.T, pendingPolls int32) *httptest.Server {
 			serverCalls = append(serverCalls, fmt.Sprintf("%s %v %v %v", r.URL.Path, in["key"], in["to"], in["note"]))
 			w.WriteHeader(http.StatusNoContent)
 		case "/v1/team":
-			_, _ = w.Write([]byte(`{"people":[{"id":"u1","name":"Ada Obi","email":"ada@example.com","you":true,"role":{"id":"owner","name":"Owner"},"canSee":"Everything","endsAt":null,"area":"devops","alertsGoTo":"Telegram: Ada","twoStep":true},{"id":"u3","name":"Amaka Obi","email":"amaka@example.com","you":false,"role":{"id":"member","name":"Member"},"canSee":"Checkout","endsAt":null,"area":"backend","alertsGoTo":"Email","twoStep":true}],"invites":[{"id":"i1","email":"seun@example.com","role":{"name":"Viewer"},"expired":false,"expiresAt":"2026-10-18T00:00:00Z"}]}`))
+			_, _ = w.Write([]byte(`{"people":[{"id":"u1","name":"Ada Obi","email":"ada@example.com","you":true,"role":{"id":"owner","name":"Owner"},"canSee":"Everything","endsAt":null,"area":"devops","alertsGoTo":"Telegram: Ada","twoStep":true},{"id":"u3","name":"Amaka Obi","email":"amaka@example.com","you":false,"role":{"id":"member","name":"Member"},"canSee":"Checkout","endsAt":null,"area":"backend","alertsGoTo":"Email","twoStep":true,"scope":{"all":false,"projects":[{"projectId":"p2","environments":["production"]}]}}],"invites":[{"id":"i1","email":"seun@example.com","role":{"name":"Viewer"},"expired":false,"expiresAt":"2026-10-18T00:00:00Z"}]}`))
 		case "/v1/team/invites":
 			var in map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&in)
@@ -375,6 +394,12 @@ func fakeAPI(t *testing.T, pendingPolls int32) *httptest.Server {
 			_, _ = w.Write([]byte(`{"id":"i2","emailed":false,"link":"https://app.kiyesi.dev/join/?invite=abc"}`))
 		case "/v1/projects/p1", "/v1/projects/p2":
 			id := strings.TrimPrefix(r.URL.Path, "/v1/projects/")
+			// In Globex the person is a viewer: settings changes are hidden.
+			if r.Header.Get("X-Kiyesi-Team") == "bbbbbbbbbbbbbbbbbbbbbbbb" {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":"not_found","message":"Not found."}`))
+				return
+			}
 			if r.Method == http.MethodPatch {
 				var in map[string]string
 				_ = json.NewDecoder(r.Body).Decode(&in)
@@ -407,15 +432,23 @@ func fakeAPI(t *testing.T, pendingPolls int32) *httptest.Server {
 			w.WriteHeader(http.StatusNoContent)
 		case "/v1/me/sessions/end-others":
 			serverCalls = append(serverCalls, "end others")
+			if r.Header.Get("X-Kiyesi-Team") == "bbbbbbbbbbbbbbbbbbbbbbbb" {
+				_, _ = w.Write([]byte(`{"ended":0}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"ended":1}`))
 		case "/v1/credit":
-			_, _ = w.Write([]byte(`{"live":true,"balance":120,"daysLeft":20,"usedLastWeek":42,"runsOutOn":"2026-11-02T00:00:00Z","state":{"storing":true,"readOnly":false,"eraseOn":null},"bundles":[{"credits":100,"usd":15,"perServerMonth":4.5}],"lines":[{"at":"2026-10-13T00:20:00Z","amount":-6,"reason":"6 servers on 12 October 2026"}]}`))
+			if creditBody != "" {
+				_, _ = w.Write([]byte(creditBody))
+				return
+			}
+			_, _ = w.Write([]byte(`{"live":true,"selling":true,"canBuy":true,"balance":120,"daysLeft":20,"usedLastWeek":42,"runsOutOn":"2026-11-02T00:00:00Z","state":{"storing":true,"readOnly":false,"eraseOn":null},"bundles":[{"credits":100,"usd":15,"perServerMonth":4.5}],"lines":[{"at":"2026-10-13T00:20:00Z","amount":-6,"reason":"6 servers on 12 October 2026"}]}`))
 		case "/v1/projects":
 			_, _ = w.Write([]byte(`{"projects":[{"id":"p1","name":"Storefront"},{"id":"p2","name":"Demo client"}]}`))
 		case "/v1/me/access":
 			_, _ = w.Write([]byte(`{"role":{"id":"6acc00000000000000000001","name":"Frontend contractor"},"levels":{"servers":"act","logs":"hidden","incidents":"act","browser_errors":"act","metrics":"view"},"switches":{"export":false},"canSee":"Storefront, production only, except web-2","endsAt":"2026-11-30T23:59:59Z","team":"Acme"}`))
 		case "/v1/roles":
-			_, _ = w.Write([]byte(`{"roles":[{"id":"owner","name":"Owner","builtIn":true,"levels":{"servers":"manage"},"copiedFrom":null,"people":[{"name":"Ada"}]},{"id":"client","name":"Client","builtIn":true,"levels":{"uptime":"view","servers":"hidden"},"copiedFrom":null,"people":[]},{"id":"6acc00000000000000000001","name":"Frontend contractor","builtIn":false,"levels":{"servers":"act","logs":"hidden"},"copiedFrom":"Member","people":[{"name":"Kemi"}]}]}`))
+			_, _ = w.Write([]byte(`{"roles":[{"id":"owner","name":"Owner","builtIn":true,"levels":{"servers":"manage"},"copiedFrom":null,"people":[{"name":"Ada"}]},{"id":"viewer","name":"Viewer","builtIn":true,"levels":{"servers":"view"},"copiedFrom":null,"people":[]},{"id":"client","name":"Client","builtIn":true,"levels":{"uptime":"view","servers":"hidden"},"copiedFrom":null,"people":[]},{"id":"6acc00000000000000000001","name":"Frontend contractor","builtIn":false,"levels":{"servers":"act","logs":"hidden"},"copiedFrom":"Member","people":[{"name":"Kemi"}]}]}`))
 		case "/v1/team/members/u3/access":
 			var in map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&in)
@@ -452,7 +485,7 @@ func signInForTest(t *testing.T) *httptest.Server {
 	if code != ExitOK {
 		t.Fatalf("login: exit %d: %s %s", code, out, errOut)
 	}
-	for _, want := range []string{"ABCD-EFGH", "Signed in as Ada (ada@example.com), owner in Acme."} {
+	for _, want := range []string{"ABCD-EFGH", "Signed in as Ada (ada@example.com), Owner in Acme."} {
 		if !strings.Contains(out, want) {
 			t.Errorf("login output is missing %q:\n%s", want, out)
 		}
@@ -501,7 +534,7 @@ func TestServerShowsTheStoredReport(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit %d: %s", code, errOut)
 	}
-	for _, want := range []string{"latest scan sent by the agent", "CRITICAL", "Fix:"} {
+	for _, want := range []string{"Kiyesi 0.1.0 · checkout-api-prod · scanned ", "CRITICAL", "Fix:"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("server output is missing %q:\n%s", want, out)
 		}
@@ -533,5 +566,56 @@ func TestLogoutForgetsTheToken(t *testing.T) {
 	}
 	if code, _, _ := runCLI(t, "servers"); code != ExitNoAccess {
 		t.Errorf("after logout: exit %d, want %d", code, ExitNoAccess)
+	}
+	// Signing out twice: say so, do not claim to sign out again.
+	if code, out, _ := runCLI(t, "logout"); code != ExitOK || !strings.Contains(out, "You were not signed in.") || strings.Contains(out, "Signed out") {
+		t.Errorf("second logout: exit %d: %s", code, out)
+	}
+}
+
+func TestLogoutSaysWhenTheServiceSessionStaysLive(t *testing.T) {
+	srv := signInForTest(t)
+	path, _ := loginPath()
+	if err := os.WriteFile(path, []byte("api: "+srv.URL+"\ntoken: broken-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := runCLI(t, "logout")
+	if code != ExitOK || !strings.Contains(out, "Signed out here; the session on the service could not be ended: end it with kiyesi sessions or the dashboard.") {
+		t.Errorf("exit %d: %s", code, out)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("the token must still be forgotten here")
+	}
+}
+
+func TestLoginAgainKeepsTheTeamAndEndsTheOldSession(t *testing.T) {
+	srv := signInForTest(t)
+	path, _ := loginPath()
+	if err := os.WriteFile(path, []byte("api: "+srv.URL+"\ntoken: old-token\nteam: bbbbbbbbbbbbbbbbbbbbbbbb\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	signOuts = nil
+	code, out, errOut := runCLI(t, "login", "--api", srv.URL)
+	if code != ExitOK {
+		t.Fatalf("exit %d: %s %s", code, out, errOut)
+	}
+	if !strings.Contains(out, "Signed in as Ada (ada@example.com), Viewer in Globex.") {
+		t.Errorf("want the kept team and its role name: %s", out)
+	}
+	if l, err := loadLogin(); err != nil || l.Team != "bbbbbbbbbbbbbbbbbbbbbbbb" || l.Token != personToken {
+		t.Errorf("login.yaml = %+v, %v", l, err)
+	}
+	if len(signOuts) != 1 || signOuts[0] != "old-token" {
+		t.Errorf("the old session must be ended: %v", signOuts)
+	}
+	// A team the person is not in is not kept.
+	if err := os.WriteFile(path, []byte("api: "+srv.URL+"\ntoken: old-token\nteam: cccccccccccccccccccccccc\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, out, _ := runCLI(t, "login", "--api", srv.URL); code != ExitOK || !strings.Contains(out, "Owner in Acme.") {
+		t.Errorf("exit %d: %s", code, out)
+	}
+	if l, _ := loadLogin(); l.Team != "" {
+		t.Errorf("team = %q, want none", l.Team)
 	}
 }

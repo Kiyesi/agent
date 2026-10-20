@@ -148,7 +148,10 @@ func newMine(io IO) *cobra.Command {
 					}
 				}
 			}
-			fmt.Fprintln(io.Out, "\nkiyesi assign <ref> <teammate>, kiyesi ack <ref>, kiyesi resolve <ref> --note \"what fixed it\"")
+			// The commands only for someone whose role acts on work.
+			if mayDo(cmd.Context(), c, "incidents", "act") {
+				fmt.Fprintln(io.Out, "\nkiyesi assign <ref> <teammate>, kiyesi ack <ref>, kiyesi resolve <ref> --note \"what fixed it\"")
+			}
 			return nil
 		},
 	}
@@ -199,6 +202,7 @@ func newAssign(io IO) *cobra.Command {
 			}
 			want := strings.ToLower(strings.TrimSpace(args[1]))
 			var to, name string
+			var toYou bool
 			for _, p := range s.Candidates {
 				full := strings.ToLower(p.Name)
 				first := strings.Fields(full)
@@ -206,8 +210,11 @@ func newAssign(io IO) *cobra.Command {
 					if to != "" && to != p.ID {
 						return usageErr("More than one person is called %s. Give the full name.", args[1])
 					}
-					to, name = p.ID, p.Name
+					to, name, toYou = p.ID, p.Name, p.You
 				}
+			}
+			if to == "" && want == "me" {
+				return &exitError{code: ExitNoAccess, msg: "You cannot take this: your role does not act on it."}
 			}
 			if to == "" {
 				names := make([]string, 0, len(s.Candidates))
@@ -219,7 +226,8 @@ func newAssign(io IO) *cobra.Command {
 			if err := c.Assign(cmd.Context(), row.Key, to, note); err != nil {
 				return workErr(err)
 			}
-			if want == "me" {
+			// Kiyesi does not tell you about work you gave yourself.
+			if toYou {
 				fmt.Fprintf(io.Out, "%s is yours.\n", workRef(row))
 			} else {
 				fmt.Fprintf(io.Out, "Gave %s to %s. They are told on their own alert channel.\n", workRef(row), name)
@@ -296,10 +304,6 @@ func newTeamInvite(io IO) *cobra.Command {
 		Example: "  kiyesi team invite seun@example.com --role member --area backend",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			roles := map[string]bool{"owner": true, "admin": true, "member": true, "viewer": true, "billing": true, "client": true}
-			if !roles[role] {
-				return usageErr("--role must be owner, admin, member, viewer, billing or client, not %q", role)
-			}
 			if area != "" && area != "frontend" && area != "backend" && area != "database" && area != "devops" {
 				return usageErr("--area must be frontend, backend, database or devops, not %q", area)
 			}
@@ -307,7 +311,12 @@ func newTeamInvite(io IO) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			out, err := c.InvitePerson(cmd.Context(), args[0], role, area)
+			// Any of the team's roles, built in or made by the team, by name or id.
+			roleID, err := teamRoleID(cmd.Context(), c, role)
+			if err != nil {
+				return err
+			}
+			out, err := c.InvitePerson(cmd.Context(), args[0], roleID, area)
 			if errors.Is(err, api.ErrNotFound) {
 				return &exitError{code: ExitUsage, msg: "Inviting people is for owners and admins."}
 			}
@@ -322,7 +331,7 @@ func newTeamInvite(io IO) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&role, "role", "member", "owner, admin, member, viewer, billing or client")
+	cmd.Flags().StringVar(&role, "role", "member", "the role's name, such as member or \"Frontend contractor\"; kiyesi team roles lists them")
 	cmd.Flags().StringVar(&area, "area", "", "what they work on: frontend, backend, database or devops")
 	cmd.SetContext(context.Background())
 	return cmd

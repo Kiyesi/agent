@@ -202,7 +202,7 @@ func mcpTools() []mcpTool {
 		{"alerts", "Open alerts", "Alerts open now: what is wrong, where, and since when.", schema(map[string]any{}), ro},
 		{"logs", "Search logs", "Log lines, newest first, with passwords and tokens already masked.", schema(map[string]any{
 			"search": prop("Words to find."), "server": server,
-			"level": prop("Only this level or worse.", "error", "warning", "info"),
+			"level": prop("Only this level or worse: error, or warning (warnings and errors).", "error", "warning"),
 			"range": prop("How far back. Default: 1h.", "15m", "1h", "24h", "7d"),
 		}), ro},
 		{"metrics", "Metrics", "One server's CPU, memory, disk and requests over a range, summed up as lowest, average, highest and latest.", schema(map[string]any{
@@ -287,7 +287,7 @@ func callTool(ctx context.Context, c *api.Client, name string, args map[string]a
 			return "", err
 		}
 		if lv := argString(args, "level", ""); lv != "" {
-			if q.Level, err = oneOf(lv, "error", "warning", "info"); err != nil {
+			if q.Level, err = oneOf(lv, "error", "warning"); err != nil {
 				return "", err
 			}
 			if q.Level == "warning" {

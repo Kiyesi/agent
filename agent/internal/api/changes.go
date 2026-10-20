@@ -88,7 +88,10 @@ func (c *Client) EndOtherSessions(ctx context.Context) (int, error) {
 
 // Credit is a team's prepaid credit: one credit is one server-day.
 type Credit struct {
-	Live         bool       `json:"live"`
+	Live bool `json:"live"`
+	// Selling is whether top-ups are open; CanBuy whether this person may buy.
+	Selling      bool       `json:"selling"`
+	CanBuy       bool       `json:"canBuy"`
 	Balance      int        `json:"balance"`
 	DaysLeft     *int       `json:"daysLeft"`
 	UsedLastWeek int        `json:"usedLastWeek"`

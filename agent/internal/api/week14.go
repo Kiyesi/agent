@@ -84,6 +84,30 @@ type Advisory struct {
 	ServerName  string    `json:"serverName"`
 }
 
+// AdvisoryReport is the advisories, when they were checked, and the
+// servers whose last check failed.
+type AdvisoryReport struct {
+	Advisories []Advisory `json:"advisories"`
+	CheckedAt  *time.Time `json:"checkedAt"`
+	Errors     []struct {
+		ServerID   string `json:"serverId"`
+		ServerName string `json:"serverName"`
+		Message    string `json:"message"`
+	} `json:"errors"`
+}
+
+// AdvisoryReport reads the advisories with the servers that could not be
+// checked, for one server when serverID is set.
+func (c *Client) AdvisoryReport(ctx context.Context, serverID string) (AdvisoryReport, error) {
+	var out AdvisoryReport
+	path := "/v1/advisories"
+	if serverID != "" {
+		path += "?server=" + url.QueryEscape(serverID)
+	}
+	err := c.do(ctx, http.MethodGet, path, nil, &out)
+	return out, err
+}
+
 // Advisories lists the advisories, for one server when serverID is set.
 func (c *Client) Advisories(ctx context.Context, serverID string) ([]Advisory, *time.Time, error) {
 	var out struct {
