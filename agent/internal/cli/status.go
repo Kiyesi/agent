@@ -88,8 +88,14 @@ func newStatusPost(io IO) *cobra.Command {
 				return err
 			}
 			pages, err := c.StatusPages(cmd.Context())
+			if errors.Is(err, api.ErrNotFound) {
+				return &exitError{code: ExitNoAccess, msg: "Your role cannot see status pages."}
+			}
 			if err != nil {
 				return apiErr(err)
+			}
+			if len(pages) == 0 {
+				return usageErr("No status page yet. Make one on the Uptime screen.")
 			}
 			var target *api.StatusPage
 			for i := range pages {
@@ -125,7 +131,12 @@ func newStatusPost(io IO) *cobra.Command {
 			if err := c.PostStatus(cmd.Context(), target.ID, body); err != nil {
 				return apiErr(err)
 			}
-			fmt.Fprintf(io.Out, "Posted on %s: %s (%s). Subscribers are emailed.\n", target.URL, title, state)
+			// The service emails subscribers only while the page is public.
+			if target.On {
+				fmt.Fprintf(io.Out, "Posted on %s: %s (%s). Subscribers are emailed.\n", target.URL, title, state)
+			} else {
+				fmt.Fprintf(io.Out, "Saved on %s: %s (%s). The page is not public, so nobody was emailed.\n", target.Title, title, state)
+			}
 			return nil
 		},
 	}

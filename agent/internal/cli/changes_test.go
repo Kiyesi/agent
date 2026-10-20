@@ -28,6 +28,51 @@ func TestProjectsRenameAndDeleteOnlyWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestProjectsRenameSaysWhatItNeedsWithoutSettings(t *testing.T) {
+	signInForTest(t)
+	if code, _, _ := runCLI(t, "team", "use", "Globex"); code != ExitOK {
+		t.Fatal("team use")
+	}
+	for _, args := range [][]string{{"projects", "rename", "Storefront", "Shop"}, {"projects", "delete", "Demo client"}} {
+		code, _, errOut := runCLI(t, args...)
+		if code != ExitNoAccess || !strings.Contains(errOut, "Renaming or deleting projects needs Manage on settings") || strings.Contains(errOut, "Not found") {
+			t.Errorf("%v: %d %q", args, code, errOut)
+		}
+	}
+}
+
+func TestTeamLeaveNamesTheTeamAndForgetsIt(t *testing.T) {
+	signInForTest(t)
+	if code, _, _ := runCLI(t, "team", "use", "Globex"); code != ExitOK {
+		t.Fatal("team use")
+	}
+	code, out, errOut := runCLIInput(t, "no\n", "team", "leave")
+	if code != ExitUsage || !strings.Contains(out+errOut, "Leave Globex?") {
+		t.Errorf("ask: %d %q %q", code, out, errOut)
+	}
+	if code, out, _ := runCLI(t, "team", "leave", "--yes"); code != ExitOK || !strings.Contains(out, "You left Globex.") {
+		t.Errorf("leave: %d %s", code, out)
+	}
+	if l, err := loadLogin(); err != nil || l.Team != "" {
+		t.Errorf("the left team must be forgotten here: %+v %v", l, err)
+	}
+}
+
+func TestSessionsSayWhatTheyKnow(t *testing.T) {
+	signInForTest(t)
+	// The date is when the session was last refreshed, not its last use.
+	if code, out, _ := runCLI(t, "sessions"); code != ExitOK || !strings.Contains(out, "LAST REFRESHED") || strings.Contains(out, "LAST USED") {
+		t.Errorf("sessions: %d\n%s", code, out)
+	}
+	if code, _, _ := runCLI(t, "team", "use", "Globex"); code != ExitOK {
+		t.Fatal("team use")
+	}
+	// Nothing else to end: say so, never "0 sessions".
+	if code, out, _ := runCLI(t, "sessions", "end", "--others"); code != ExitOK || strings.TrimSpace(out) != "No other sessions." {
+		t.Errorf("end others: %d %q", code, out)
+	}
+}
+
 func TestUptimeEditServersRenameAndDeploysRemove(t *testing.T) {
 	signInForTest(t)
 	serverCalls = nil
@@ -62,7 +107,7 @@ func TestUptimeEditServersRenameAndDeploysRemove(t *testing.T) {
 func TestTeamLeaveAndSessions(t *testing.T) {
 	signInForTest(t)
 	serverCalls = nil
-	if code, out, _ := runCLI(t, "team", "leave", "--yes"); code != ExitOK || !strings.Contains(out, "You left the team.") {
+	if code, out, _ := runCLI(t, "team", "leave", "--yes"); code != ExitOK || !strings.Contains(out, "You left Acme.") {
 		t.Errorf("leave: %d %s", code, out)
 	}
 	code, out, _ := runCLI(t, "sessions")

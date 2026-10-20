@@ -71,6 +71,10 @@ func newTraces(io IO) *cobra.Command {
 				return render.JSON(io.Out, rows)
 			}
 			if len(rows) == 0 {
+				if onFreePlan(cmd.Context(), c) {
+					fmt.Fprintln(io.Out, freePlanNote)
+					return nil
+				}
 				if all {
 					fmt.Fprintln(io.Out, "No requests with an ID in that time.")
 				} else {
@@ -136,7 +140,7 @@ func newTrace(io IO) *cobra.Command {
 			}
 			t, err := c.Trace(cmd.Context(), args[0])
 			if err != nil {
-				if errors.Is(err, api.ErrNotFound) {
+				if errors.Is(err, api.ErrNotFound) && !hiddenArea(err) {
 					return &exitError{code: ExitUsage, msg: "No request with that ID that you can see in the last 7 days."}
 				}
 				return apiErr(err)

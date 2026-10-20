@@ -41,7 +41,7 @@ func newDatamap(io IO) *cobra.Command {
 			if report {
 				r, err := c.MakeDataMapReport(cmd.Context())
 				if errors.Is(err, api.ErrNotFound) {
-					return &exitError{code: ExitUsage, msg: "Your role cannot see the data map."}
+					return &exitError{code: ExitNoAccess, msg: "Your role cannot see the data map."}
 				}
 				if err != nil {
 					return apiErr(err)
@@ -54,7 +54,7 @@ func newDatamap(io IO) *cobra.Command {
 			}
 			m, err := c.DataMap(cmd.Context())
 			if errors.Is(err, api.ErrNotFound) {
-				return &exitError{code: ExitUsage, msg: "Your role cannot see the data map."}
+				return &exitError{code: ExitNoAccess, msg: "Your role cannot see the data map."}
 			}
 			if err != nil {
 				return apiErr(err)
@@ -62,11 +62,18 @@ func newDatamap(io IO) *cobra.Command {
 			if asJSON {
 				return render.JSON(io.Out, m)
 			}
-			home := "not chosen"
-			if m.Home != nil {
-				home = m.Home.Name
+			if len(m.Rows) == 0 {
+				fmt.Fprintln(io.Out, "Nothing is mapped yet. Each connected server's next scan adds its rows.")
+				return nil
 			}
-			fmt.Fprintf(io.Out, "Home country: %s. %d mapped, %d outside, %d payment data outside.\n\n", home, m.Counts.Mapped, m.Counts.Outside, m.Counts.MustMove)
+			switch {
+			case m.Home == nil:
+				fmt.Fprintf(io.Out, "No home country chosen. Choose a home country in the dashboard, Data map, to compare against. %d mapped.\n\n", m.Counts.Mapped)
+			case !m.Home.Chosen:
+				fmt.Fprintf(io.Out, "Home country: %s (from the agents' settings). %d mapped, %d outside, %d payment data outside.\n\n", m.Home.Name, m.Counts.Mapped, m.Counts.Outside, m.Counts.MustMove)
+			default:
+				fmt.Fprintf(io.Out, "Home country: %s. %d mapped, %d outside, %d payment data outside.\n\n", m.Home.Name, m.Counts.Mapped, m.Counts.Outside, m.Counts.MustMove)
+			}
 			tw := tabwriter.NewWriter(io.Out, 0, 0, 3, ' ', 0)
 			fmt.Fprintln(tw, "ITEM\tTYPE\tSERVER\tPROVIDER\tLOCATION\tHOW SURE\tRESULT")
 			shown := 0
@@ -142,7 +149,7 @@ func newTips(io IO) *cobra.Command {
 			}
 			tips, err := c.Tips(cmd.Context(), id)
 			if errors.Is(err, api.ErrNotFound) {
-				return &exitError{code: ExitUsage, msg: "Your role cannot see tips."}
+				return &exitError{code: ExitNoAccess, msg: "Your role cannot see tips."}
 			}
 			if err != nil {
 				return apiErr(err)
@@ -183,22 +190,44 @@ func newAdvisories(io IO) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			list, checked, err := c.Advisories(cmd.Context(), id)
+			rep, err := c.AdvisoryReport(cmd.Context(), id)
 			if errors.Is(err, api.ErrNotFound) {
-				return &exitError{code: ExitUsage, msg: "Your role cannot see advisories."}
+				return &exitError{code: ExitNoAccess, msg: "Your role cannot see advisories."}
 			}
 			if err != nil {
 				return apiErr(err)
 			}
+			list := rep.Advisories
 			if asJSON {
+				if list == nil {
+					list = []api.Advisory{}
+				}
 				return render.JSON(io.Out, list)
 			}
-			if checked == nil {
-				fmt.Fprintln(io.Out, "Not checked yet: the agent (0.17.0 or newer) sends what is installed with its next scan.")
+			// A server whose check failed is not "patched": say so, and
+			// say all is well only when every server was checked.
+			for _, e := range rep.Errors {
+				name := e.ServerName
+				if name == "" {
+					name = "a server"
+				}
+				fmt.Fprintf(io.Out, "Not checked on %s: %s\n", name, e.Message)
+			}
+			if len(rep.Errors) > 0 {
+				fmt.Fprintln(io.Out)
+			}
+			if rep.CheckedAt == nil {
+				if len(rep.Errors) == 0 {
+					fmt.Fprintln(io.Out, "Not checked yet: the agent (0.17.0 or newer) sends what is installed with its next scan.")
+				}
 				return nil
 			}
 			if len(list) == 0 {
-				fmt.Fprintln(io.Out, "Nothing to report: everything is supported and patched.")
+				if len(rep.Errors) == 0 {
+					fmt.Fprintln(io.Out, "Nothing to report: everything is supported and patched.")
+				} else {
+					fmt.Fprintln(io.Out, "Nothing to report on the servers that were checked.")
+				}
 				return nil
 			}
 			for _, a := range list {

@@ -22,6 +22,9 @@ func TestPreflightSaysWaitWithReasonsAndExitsOne(t *testing.T) {
 		"ANSWER  WAIT  3 reasons",
 		"DO FIRST\n 1. Add swap or move up a size",
 		"exits with 0 for GO and 1 for WAIT",
+		// How old the scan behind the answer is.
+		"Last scan: ",
+		"13 October 2026 10:00 UTC.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -34,6 +37,10 @@ func TestPreflightGoExitsZero(t *testing.T) {
 	code, out, _ := runCLI(t, "preflight", "calm-box")
 	if code != ExitOK || !strings.Contains(out, "ANSWER  GO") {
 		t.Errorf("%d:\n%s", code, out)
+	}
+	// No scan behind the answer: say so.
+	if !strings.Contains(out, "No scan yet.") {
+		t.Errorf("missing No scan yet:\n%s", out)
 	}
 }
 

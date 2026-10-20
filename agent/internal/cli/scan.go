@@ -59,7 +59,7 @@ func newScan(io IO) *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			r, saveErr, err := runScan(ctx, configPath, 0)
+			r, saveErr, err := runScan(ctx, configPath, 0, render.ByScan)
 			if err != nil {
 				return err
 			}
@@ -82,14 +82,15 @@ func newScan(io IO) *cobra.Command {
 
 // runScan runs every check, saves the full report, and returns the report.
 // The error is for problems the user must fix; saveErr only means the
-// report file could not be written.
-func runScan(ctx context.Context, configPath string, reuseSlowFor time.Duration) (r scan.Report, saveErr, err error) {
-	r, _, saveErr, err = scanWithEnv(ctx, configPath, reuseSlowFor)
+// report file could not be written. by is who asked, for the report's
+// last line.
+func runScan(ctx context.Context, configPath string, reuseSlowFor time.Duration, by render.By) (r scan.Report, saveErr, err error) {
+	r, _, saveErr, err = scanWithEnv(ctx, configPath, reuseSlowFor, by)
 	return r, saveErr, err
 }
 
 // scanWithEnv is runScan that also returns what the checks read, for kiyesi fix.
-func scanWithEnv(ctx context.Context, configPath string, reuseSlowFor time.Duration) (r scan.Report, env *checks.Env, saveErr, err error) {
+func scanWithEnv(ctx context.Context, configPath string, reuseSlowFor time.Duration, by render.By) (r scan.Report, env *checks.Env, saveErr, err error) {
 	cfg, err := config.Load(configPath)
 	// The server's own setting wins; else the team's choice, as the
 	// service last said it; else none.
@@ -110,7 +111,15 @@ func scanWithEnv(ctx context.Context, configPath string, reuseSlowFor time.Durat
 	env = checks.NewEnv(sys, cfg)
 	env.ReuseSlowFor = reuseSlowFor
 	r = scan.Run(ctx, env, checks.Default(), pack)
-	path, saveErr := report.Save(dir, sys.Now(), render.File(r))
+	if !fixWorksHere(cfg, sys.OS.ID) {
+		// kiyesi fix would refuse here, so no report offers it.
+		for i := range r.Checks {
+			for j := range r.Checks[i].Findings {
+				r.Checks[i].Findings[j].AutoFix = ""
+			}
+		}
+	}
+	path, saveErr := report.Save(dir, sys.Now(), render.File(r, by))
 	if saveErr == nil {
 		r.ReportFile = path
 	}

@@ -146,25 +146,39 @@ func Run(ctx context.Context, env *checks.Env, reg *checks.Registry, pack *packs
 	}
 	wg.Wait()
 
+	ids := make([]string, len(all))
+	byID := map[string]checks.Result{}
+	for i, c := range all {
+		ids[i] = c.ID()
+		byID[c.ID()] = results[i]
+	}
+	host := Host{
+		Name:   env.Sys.Hostname,
+		OS:     env.Sys.OS.Name,
+		Tested: env.Sys.OS.Tested,
+		Root:   env.Sys.Root,
+	}
+	return Build(pack, host, start, env.Sys.Now().Sub(start).Seconds(), env.Cfg.HomeCountry, ids, byID)
+}
+
+// Build turns the checks' results, in the order of ids, into a report with
+// the pack's words and the grade. Run uses it; so does the tool that makes
+// the demo's sample scans, so those read exactly as real ones do.
+func Build(pack *packs.Pack, host Host, start time.Time, seconds float64, homeCode string, ids []string, results map[string]checks.Result) Report {
 	r := Report{
 		Schema:    Schema,
 		Version:   version.Version,
 		StartedAt: start.UTC(),
-		Host: Host{
-			Name:   env.Sys.Hostname,
-			OS:     env.Sys.OS.Name,
-			Tested: env.Sys.OS.Tested,
-			Root:   env.Sys.Root,
-		},
+		Host:      host,
+		Seconds:   seconds,
 	}
 	r.raw = map[string]checks.Result{}
-	for i, c := range all {
-		r.Checks = append(r.Checks, describe(pack, c.ID(), results[i]))
-		r.raw[c.ID()] = results[i]
+	for _, id := range ids {
+		r.Checks = append(r.Checks, describe(pack, id, results[id]))
+		r.raw[id] = results[id]
 	}
 	r.Counts, r.Grade = grade(r.Checks, pack.TotalChecks)
-	r.Home = home(env.Cfg.HomeCountry)
-	r.Seconds = env.Sys.Now().Sub(start).Seconds()
+	r.Home = home(homeCode)
 	return r
 }
 

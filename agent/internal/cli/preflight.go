@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
@@ -33,7 +34,8 @@ func newPreflight(io IO) *cobra.Command {
 		Long: "Six checks on what Kiyesi already holds for the server: memory, disk, backup\n" +
 			"age, certificate, open incidents on it, and the last deploy's verdict. It\n" +
 			"exits with 0 for go and 1 for wait, so a deploy pipeline can use it. It only\n" +
-			"advises and never stops a deploy by itself. In CI, set KIYESI_DEPLOY_TOKEN.",
+			"advises and never stops a deploy by itself. In CI, set KIYESI_DEPLOY_TOKEN.\n" +
+			"A server that sent no figures in the last 5 minutes is a reason to wait.",
 		Example: "  kiyesi preflight checkout-api-prod\n  kiyesi preflight              on a connected server: this one\n  kiyesi preflight checkout-api-prod --json",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -92,7 +94,13 @@ func printPreflight(io IO, p api.Preflight) {
 	if p.Server.Environment != nil {
 		place += " · " + strings.ToUpper((*p.Server.Environment)[:1]) + (*p.Server.Environment)[1:]
 	}
-	fmt.Fprintf(w, "Kiyesi %s · safe to deploy? · %d checks\n%s\n\n", version.Version, len(p.Checks), place)
+	fmt.Fprintf(w, "Kiyesi %s · safe to deploy? · %d checks\n%s\n", version.Version, len(p.Checks), place)
+	// How old the scan behind the backup and certificate checks is.
+	if p.ScannedAt != nil {
+		fmt.Fprintf(w, "Last scan: %s ago, %s.\n\n", ago(time.Since(*p.ScannedAt)), p.ScannedAt.UTC().Format("2 January 2006 15:04 UTC"))
+	} else {
+		fmt.Fprint(w, "No scan yet.\n\n")
+	}
 	words := map[string]string{"pass": "PASS", "wait": "WAIT", "unknown": "  ? "}
 	colour := map[string]string{"pass": "\x1b[32m", "wait": "\x1b[1;33m", "unknown": "\x1b[2m"}
 	// Reasons to wait first, then what is not known, then what passed.

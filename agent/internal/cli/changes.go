@@ -23,6 +23,19 @@ func usageOr(err error) error {
 	return apiErr(err)
 }
 
+// projectErr explains a refused project change: without Manage on settings
+// the service hides the route (not found) or refuses it, so say what it needs.
+func projectErr(ctx context.Context, c *api.Client, err error) error {
+	var p *api.Problem
+	refused := errors.Is(err, api.ErrNotFound) || (errors.As(err, &p) && p.Status == 403 && p.Code == "not_allowed")
+	if refused {
+		if a, werr := c.WhoAmI(ctx); werr == nil && a.Levels["settings"] != "manage" {
+			return &exitError{code: ExitNoAccess, msg: "Renaming or deleting projects needs Manage on settings. Ask an owner or admin."}
+		}
+	}
+	return usageOr(err)
+}
+
 func findProject(ctx context.Context, c *api.Client, name string) (api.Project, error) {
 	list, err := c.Projects(ctx)
 	if err != nil {
@@ -56,7 +69,11 @@ func newProjects(io IO) *cobra.Command {
 				return jsonOut(io.Out, list)
 			}
 			if len(list) == 0 {
-				fmt.Fprintln(io.Out, "No projects yet. Add one in Settings, Projects.")
+				fmt.Fprint(io.Out, "No projects yet.")
+				if a, err := c.WhoAmI(cmd.Context()); err == nil && a.Levels["settings"] == "manage" {
+					fmt.Fprint(io.Out, " Add one in Settings, Projects.")
+				}
+				fmt.Fprintln(io.Out)
 				return nil
 			}
 			for _, p := range list {
@@ -80,7 +97,7 @@ func newProjects(io IO) *cobra.Command {
 				return err
 			}
 			if err := c.RenameProject(cmd.Context(), p.ID, args[1]); err != nil {
-				return usageOr(err)
+				return projectErr(cmd.Context(), c, err)
 			}
 			fmt.Fprintf(io.Out, "Renamed %s to %s.\n", p.Name, strings.TrimSpace(args[1]))
 			return nil
@@ -104,7 +121,7 @@ func newProjects(io IO) *cobra.Command {
 			}
 			uses, err := c.ProjectUses(cmd.Context(), p.ID)
 			if err != nil {
-				return apiErr(err)
+				return projectErr(cmd.Context(), c, err)
 			}
 			if len(uses) > 0 {
 				fmt.Fprintf(io.Out, "%s still has:\n", p.Name)
@@ -118,7 +135,7 @@ func newProjects(io IO) *cobra.Command {
 				return usageErr("move or remove them first; nothing was deleted")
 			}
 			if err := c.DeleteProject(cmd.Context(), p.ID); err != nil {
-				return usageOr(err)
+				return projectErr(cmd.Context(), c, err)
 			}
 			fmt.Fprintf(io.Out, "Deleted the project %s.\n", p.Name)
 			return nil
@@ -208,6 +225,10 @@ func newServersRename(io IO) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if strings.TrimSpace(args[1]) == s.Name {
+				fmt.Fprintf(io.Out, "%s is already called that.\n", s.Name)
+				return nil
+			}
 			if err := c.RenameServer(cmd.Context(), s.ID, args[1]); err != nil {
 				return usageOr(err)
 			}
@@ -262,7 +283,16 @@ func newTeamLeave(io IO) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if !yes && !strings.EqualFold(strings.TrimSpace(ask(io, "Leave this team? Type yes: ")), "yes") {
+			// Name the team first: someone in several may not know which this is.
+			me, err := c.Me(cmd.Context())
+			if err != nil {
+				return apiErr(err)
+			}
+			team := me.Team.Name
+			if team == "" {
+				team = "this team"
+			}
+			if !yes && !strings.EqualFold(strings.TrimSpace(ask(io, "Leave "+team+"? Type yes: ")), "yes") {
 				return usageErr("nothing changed")
 			}
 			if err := c.LeaveTeam(cmd.Context()); err != nil {
@@ -272,7 +302,11 @@ func newTeamLeave(io IO) *cobra.Command {
 				}
 				return apiErr(err)
 			}
-			fmt.Fprintln(io.Out, "You left the team. Your open work went back to Unassigned.")
+			// The team chosen here is gone: commands go back to the oldest team.
+			if c.TeamID != "" && c.TeamID == me.Team.ID {
+				_ = saveTeam("")
+			}
+			fmt.Fprintf(io.Out, "You left %s. Your open work went back to Unassigned.\n", team)
 			return nil
 		},
 	}
@@ -300,7 +334,9 @@ func newSessions(io IO) *cobra.Command {
 				return jsonOut(io.Out, list)
 			}
 			tw := tabwriter.NewWriter(io.Out, 0, 0, 3, ' ', 0)
-			fmt.Fprintln(tw, "#\tDEVICE\tLAST USED\tFROM")
+			// The service refreshes a session about once a day of use, so
+			// this is when it was last refreshed, not the last request.
+			fmt.Fprintln(tw, "#\tDEVICE\tLAST REFRESHED\tFROM")
 			for i, s := range list {
 				device := s.Device
 				if s.Current {
@@ -330,6 +366,10 @@ func newSessions(io IO) *cobra.Command {
 				n, err := c.EndOtherSessions(cmd.Context())
 				if err != nil {
 					return apiErr(err)
+				}
+				if n == 0 {
+					fmt.Fprintln(io.Out, "No other sessions.")
+					return nil
 				}
 				fmt.Fprintf(io.Out, "Signed out everywhere else: %s.\n", plural(n, "session", "sessions"))
 				return nil

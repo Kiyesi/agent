@@ -72,6 +72,10 @@ func newServersDisconnect(io IO) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if s.State == "disconnected" {
+				fmt.Fprintf(io.Out, "%s is already disconnected. To connect it again: kiyesi servers reconnect %s\n", s.Name, s.Name)
+				return nil
+			}
 			if err := c.DisconnectServer(cmd.Context(), s.ID); err != nil {
 				return apiErr(err)
 			}

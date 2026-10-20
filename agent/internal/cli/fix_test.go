@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"io/fs"
 	"os"
@@ -14,6 +15,9 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/kiyesi/kiyesi/agent/internal/fix"
+	"github.com/kiyesi/kiyesi/agent/internal/render"
+	"github.com/kiyesi/kiyesi/agent/internal/scan"
 	"github.com/kiyesi/kiyesi/agent/internal/send"
 	"github.com/kiyesi/kiyesi/agent/internal/system"
 )
@@ -24,6 +28,8 @@ type cliHost struct {
 	files map[string][]byte
 	modes map[string]fs.FileMode
 	ran   []string
+	// chmodErr, when set, makes the next change of mode fail.
+	chmodErr error
 }
 
 type cliInfo struct{ mode fs.FileMode }
@@ -53,6 +59,10 @@ func (h *cliHost) WriteFile(p string, d []byte, m fs.FileMode) error {
 }
 func (h *cliHost) Remove(p string) error { delete(h.files, p); return nil }
 func (h *cliHost) Chmod(p string, m fs.FileMode) error {
+	if err := h.chmodErr; err != nil {
+		h.chmodErr = nil
+		return err
+	}
 	h.modes[p] = m
 	return nil
 }
@@ -63,7 +73,7 @@ func (h *cliHost) Run(_ context.Context, name string, args ...string) ([]byte, e
 	cmd := strings.Join(append([]string{name}, args...), " ")
 	h.ran = append(h.ran, cmd)
 	switch cmd {
-	case "systemctl is-active ssh":
+	case "systemctl is-active ssh", "systemctl is-active fail2ban":
 		return []byte("active\n"), nil
 	case "sshd -T":
 		if _, ok := h.files["/etc/ssh/sshd_config.d/00-kiyesi-no-password.conf"]; ok {
@@ -123,11 +133,12 @@ func TestFixListsAsksFixesAndShowsTheGradeMove(t *testing.T) {
 		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
 	}
 	for _, want := range []string{
-		"Kiyesi can fix 2 things for you:",
+		"Kiyesi can fix 3 things for you:",
 		"1. SSH allows password login (ssh-password)",
 		"Turns SSH password login off. ada has an SSH key here, so you stay in.",
+		"Skipped if ssh-password turns password login off first.",
 		// Not needed once passwords are off.
-		"Not needed: with SSH password login off, there is no password to guess.",
+		"– login-protection: Not needed: with SSH password login off, there is no password to guess.",
 		"/srv/app/.env holds secrets and every user on this server can read it (secret-files)",
 		"✓ SSH password login off  (undo: sudo kiyesi fix undo ",
 		"✓ Secret files closed to other users  (undo: sudo kiyesi fix undo ",
@@ -137,7 +148,7 @@ func TestFixListsAsksFixesAndShowsTheGradeMove(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(errOut, "Fix all 2? [y/N/choose]") {
+	if !strings.Contains(errOut, "Fix all 3? [y/N/choose]") {
 		t.Errorf("not asked: %q", errOut)
 	}
 	// The grade moved up, seen by the scan after the fix.
@@ -180,8 +191,8 @@ func TestFixNoMeansNothingChanges(t *testing.T) {
 
 func TestFixChooseOneByOne(t *testing.T) {
 	h := fixServer(t)
-	code, out, _ := runFixCLI(t, "choose\nn\ny\n", "fix")
-	if code != ExitOK || strings.Contains(out, "✓ SSH password login off") || !strings.Contains(out, "✓ Secret files closed") {
+	code, out, _ := runFixCLI(t, "choose\nn\nn\ny\n", "fix")
+	if code != ExitOK || strings.Contains(out, "✓ SSH password login off") || strings.Contains(out, "fail2ban on") || !strings.Contains(out, "✓ Secret files closed") {
 		t.Fatalf("%d\n%s", code, out)
 	}
 	if _, ok := h.files["/etc/ssh/sshd_config.d/00-kiyesi-no-password.conf"]; ok {
@@ -338,23 +349,124 @@ func TestFixUndoListsAndPutsBack(t *testing.T) {
 func TestScanUsesTheTeamsHomeCountry(t *testing.T) {
 	testSystem(t)
 	t.Setenv("KIYESI_STATE", t.TempDir())
-	r, _, err := runScan(context.Background(), configFlag, 0)
+	r, _, err := runScan(context.Background(), configFlag, 0, render.ByScan)
 	if err != nil || r.Home.Code != "" {
 		t.Fatalf("no country anywhere: %q %v", r.Home.Code, err)
 	}
 	if err := saveTeamHome("DE"); err != nil {
 		t.Fatal(err)
 	}
-	if r, _, _ := runScan(context.Background(), configFlag, 0); r.Home.Code != "DE" || r.Home.Name != "Germany" {
+	if r, _, _ := runScan(context.Background(), configFlag, 0, render.ByScan); r.Home.Code != "DE" || r.Home.Name != "Germany" {
 		t.Fatalf("team's choice: %+v", r.Home)
 	}
 	if err := os.WriteFile(configFlag, []byte("home_country: ng\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if r, _, _ := runScan(context.Background(), configFlag, 0); r.Home.Code != "NG" {
+	if r, _, _ := runScan(context.Background(), configFlag, 0, render.ByScan); r.Home.Code != "NG" {
 		t.Fatalf("the server's own setting: %+v", r.Home)
 	}
 	if err := saveTeamHome(""); err != nil || teamHome() != "" {
 		t.Fatalf("cleared: %q %v", teamHome(), err)
+	}
+}
+
+// After a failed fix the line says "Nothing was changed" only when that is
+// true: the fix was put back, or never started.
+func TestAFailedFixSaysWhatMayHaveChanged(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"ssh-password", &fix.Failed{Err: errors.New("x")}, "Nothing was changed."},
+		{"updates", &fix.Failed{Err: errors.New("x")}, "Nothing was changed."},
+		{"updates", &fix.Failed{Err: errors.New("x"), Changed: true}, "Some updates may have installed before it stopped."},
+		{"certificates", &fix.Failed{Err: errors.New("x"), Changed: true}, "Some certificates may have been renewed before it stopped."},
+		{"docker-cleanup", &fix.Failed{Err: errors.New("x"), Changed: true}, "Some unused images or build cache may have been removed before it stopped."},
+		{"firewall", &fix.Failed{Err: errors.New("x; putting it back also failed"), Changed: true}, "Part of it may still be changed."},
+	} {
+		if got := afterFailure(c.name, c.err); got != c.want {
+			t.Errorf("%s %v: %q, want %q", c.name, c.err, got, c.want)
+		}
+	}
+}
+
+// A fix that fails is put back, and says so.
+func TestAFixPutBackSaysNothingChanged(t *testing.T) {
+	h := fixServer(t)
+	h.chmodErr = errors.New("read-only file system")
+	code, out, _ := runFixCLI(t, "", "fix", "secret-files", "--yes")
+	if code != ExitFindings || !strings.Contains(out, "✗ secret-files: read-only file system. Nothing was changed.") {
+		t.Fatalf("%d\n%s", code, out)
+	}
+}
+
+// The scan offers kiyesi fix only where it would run: not with fix: off,
+// and not on a system it does not know. The saved report says the same.
+func TestScanOffersKiyesiFixOnlyWhereItRuns(t *testing.T) {
+	fixServer(t)
+	report := func(out string) string {
+		_, path, ok := strings.Cut(out, "Full report with every fix command: ")
+		if !ok {
+			t.Fatalf("no report path in:\n%s", out)
+		}
+		data, err := os.ReadFile(strings.TrimSpace(strings.SplitN(path, "\n", 2)[0]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	_, out, _ := runCLI(t, "scan")
+	// ssh-password, login-protection and secret-files.
+	if !strings.Contains(out, "Kiyesi can fix 3 things for you: sudo kiyesi fix") || !strings.Contains(report(out), "Or let Kiyesi do it: sudo kiyesi fix secret-files") {
+		t.Fatalf("fix allowed, not offered:\n%s", out)
+	}
+	if err := os.WriteFile(configFlag, []byte("fix: off\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, out, _ = runCLI(t, "scan")
+	if strings.Contains(out, "kiyesi fix") || strings.Contains(report(out), "kiyesi fix") {
+		t.Errorf("fix: off, still offered:\n%s\n%s", out, report(out))
+	}
+	if err := os.WriteFile(configFlag, []byte("fix: on\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	base := newSystem
+	newSystem = func(root bool, dir string) *system.System {
+		s := base(root, dir)
+		s.OS = system.OSInfo{ID: "rocky", Name: "Rocky Linux 9"}
+		return s
+	}
+	_, out, _ = runCLI(t, "scan")
+	if strings.Contains(out, "kiyesi fix") || strings.Contains(report(out), "kiyesi fix") {
+		t.Errorf("another system, still offered:\n%s\n%s", out, report(out))
+	}
+}
+
+// Saying no to ssh-password keeps the passwords, so login-protection, planned
+// as not needed, runs after all.
+func TestLoginProtectionRunsWhenPasswordsStayOn(t *testing.T) {
+	fixServer(t)
+	code, out, _ := runFixCLI(t, "choose\nn\ny\nn\n", "fix")
+	if code != ExitOK || strings.Contains(out, "✓ SSH password login off") || !strings.Contains(out, "✓ fail2ban on") || strings.Contains(out, "Not needed") {
+		t.Fatalf("%d\n%s", code, out)
+	}
+}
+
+// A grade that does not move after a real fix is not called a clean-up:
+// the line names what is still there.
+func TestAGradeThatDidNotMoveSaysWhy(t *testing.T) {
+	ssh := &planned{findings: []scan.Finding{{Severity: "warning", Sentence: "SSH allows password login"}}}
+	clean := &planned{findings: []scan.Finding{{Severity: "info", Sentence: "Docker keeps 2 GB"}}}
+	before := scan.Report{Checks: []scan.CheckResult{{Findings: []scan.Finding{{Severity: "warning", Sentence: "SSH allows password login"}}}}}
+	after := scan.Report{Checks: []scan.CheckResult{{Findings: []scan.Finding{
+		{Severity: "warning", Sentence: "SSH allows password login"},
+		{Severity: "warning", Sentence: "Port 8080 is open on a public address"},
+	}}}}
+	if onlyCleanUps([]*planned{ssh, clean}) || !onlyCleanUps([]*planned{clean}) {
+		t.Error("onlyCleanUps")
+	}
+	if got := notBetter(before, after, []*planned{ssh}); got != "Still there: SSH allows password login. New: Port 8080 is open on a public address." {
+		t.Errorf("got %q", got)
 	}
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -23,6 +24,8 @@ type Teammate struct {
 	Area       *string    `json:"area"`
 	AlertsGoTo string     `json:"alertsGoTo"`
 	TwoStep    bool       `json:"twoStep"`
+	// Scope is where their access applies now; nil from an older service.
+	Scope *AccessScope `json:"scope"`
 }
 
 // Invite is an invite not yet accepted.
@@ -232,6 +235,24 @@ type AccessScope struct {
 	All      bool            `json:"all"`
 	Projects []ProjectAccess `json:"projects,omitempty"`
 	LeftOut  []string        `json:"leftOut,omitempty"`
+}
+
+// MarshalJSON always sends the projects of a limited scope, even none: the
+// service requires the list, and an empty one means no project at all.
+func (s AccessScope) MarshalJSON() ([]byte, error) {
+	type plain AccessScope
+	if s.All {
+		return json.Marshal(plain(s))
+	}
+	projects := s.Projects
+	if projects == nil {
+		projects = []ProjectAccess{}
+	}
+	return json.Marshal(struct {
+		All      bool            `json:"all"`
+		Projects []ProjectAccess `json:"projects"`
+		LeftOut  []string        `json:"leftOut,omitempty"`
+	}{false, projects, s.LeftOut})
 }
 
 // ProjectAccess is one project, in all environments (nil) or some.

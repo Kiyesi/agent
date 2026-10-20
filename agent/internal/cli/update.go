@@ -84,7 +84,13 @@ func newUpdate(io IO) *cobra.Command {
 			}
 			fmt.Fprintf(io.Out, "Updated kiyesi %s to %s, signature checked.\n", version.Version, rel.Version)
 			if _, err := os.Stat(unitPath); err == nil && hasSystemctl() {
-				if err := runSystemctl("restart", "kiyesi"); err != nil {
+				// An agent someone stopped stays stopped: only a running
+				// one is restarted.
+				if runSystemctl("is-active", "--quiet", "kiyesi") != nil {
+					fmt.Fprintln(io.Out, "The agent is stopped, so it stays stopped. It runs the new version when you start it: sudo systemctl start kiyesi")
+					return nil
+				}
+				if err := runSystemctl("try-restart", "kiyesi"); err != nil {
 					return &exitError{code: ExitNoAccess, msg: "The agent could not restart: run sudo systemctl restart kiyesi"}
 				}
 				fmt.Fprintln(io.Out, "The agent restarted on the new version.")

@@ -11,6 +11,8 @@ import (
 	_ "embed"
 	"fmt"
 	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 
 	"go.yaml.in/yaml/v3"
@@ -117,15 +119,53 @@ func Parse(data []byte) (*Pack, error) {
 // Check returns the wording for one check, or nil.
 func (p *Pack) Check(id string) *Check { return p.byID[id] }
 
-var placeholder = regexp.MustCompile(`\{([a-z_]+)\}`)
+var placeholder = regexp.MustCompile(`\{([a-z_]+)((?:\|[^{}|]*)*)\}`)
 
 // Fill replaces each {name} in s with vars[name]. A placeholder with no
 // value is left as it is, so a missing value is visible rather than blank.
+//
+// A count can carry its words, so they agree with it:
+//
+//	{count|update has|updates have}           1 update has, 3 updates have
+//	{count|no containers|container|containers} no containers, 1 container, 2 containers
+//	{days|in}                                  today, tomorrow, in 9 days
+//	{days|ago}                                 today, yesterday, 3 days ago
 func Fill(s string, vars map[string]string) string {
 	return placeholder.ReplaceAllStringFunc(s, func(m string) string {
-		if v, ok := vars[m[1:len(m)-1]]; ok {
+		parts := placeholder.FindStringSubmatch(m)
+		v, ok := vars[parts[1]]
+		if !ok {
+			return m
+		}
+		if parts[2] == "" {
 			return v
 		}
-		return m
+		forms := strings.Split(parts[2][1:], "|")
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return v + " " + forms[len(forms)-1]
+		}
+		switch {
+		case len(forms) == 1 && forms[0] == "in":
+			return map[int]string{0: "today", 1: "tomorrow"}[n] + inDays(n, "in %d days")
+		case len(forms) == 1 && forms[0] == "ago":
+			return map[int]string{0: "today", 1: "yesterday"}[n] + inDays(n, "%d days ago")
+		case len(forms) < 2:
+			return v
+		case len(forms) == 3 && n == 0:
+			return forms[0]
+		case n == 1:
+			return v + " " + forms[len(forms)-2]
+		default:
+			return v + " " + forms[len(forms)-1]
+		}
 	})
+}
+
+// inDays is the words for more than a day; empty for today or a day away.
+func inDays(n int, format string) string {
+	if n == 0 || n == 1 {
+		return ""
+	}
+	return fmt.Sprintf(format, n)
 }

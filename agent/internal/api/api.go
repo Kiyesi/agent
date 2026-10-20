@@ -133,13 +133,14 @@ func (c *Client) send(ctx context.Context, method, path string, in any) ([]byte,
 			Error       string `json:"error"`
 			Message     string `json:"message"`
 			Description string `json:"error_description"`
+			Area        string `json:"area"`
 		}
 		_ = json.Unmarshal(data, &p)
 		switch {
 		case resp.StatusCode == http.StatusUnauthorized && p.Error != "authorization_pending":
 			return nil, ErrSignedOut
 		case resp.StatusCode == http.StatusNotFound:
-			return nil, &NotFoundError{Message: p.Message}
+			return nil, &NotFoundError{Message: p.Message, Area: p.Area}
 		}
 		msg := p.Message
 		if msg == "" {
@@ -261,8 +262,10 @@ type Summary struct {
 
 // Server is one row of the servers list.
 type Server struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Kind is "server" (with the agent) or "managed" (a platform's service).
+	Kind    string `json:"kind"`
 	Project *struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
@@ -284,10 +287,14 @@ type Server struct {
 		Days int `json:"days"`
 	} `json:"calm"`
 	LastMetrics *struct {
-		CPU    *float64 `json:"cpu"`
-		Memory *float64 `json:"memory"`
-		Disk   *float64 `json:"disk"`
+		At     time.Time `json:"at"`
+		CPU    *float64  `json:"cpu"`
+		Memory *float64  `json:"memory"`
+		Disk   *float64  `json:"disk"`
 	} `json:"lastMetrics"`
+	// MetricsFresh: the service's word on whether LastMetrics is current
+	// usage. Absent from older services.
+	MetricsFresh *bool `json:"metricsFresh"`
 }
 
 // Servers lists the servers the person may see, worst first.
@@ -412,9 +419,16 @@ func (c *Client) Mute(ctx context.Context, serverID, duration string) (time.Time
 	return out.Until, err
 }
 
-// Unmute ends a mute early.
-func (c *Client) Unmute(ctx context.Context, serverID string) error {
-	return c.do(ctx, http.MethodDelete, "/v1/servers/"+serverID+"/mute", nil, nil)
+// Unmute ends a mute early. ended is false when nothing was muted; an older
+// service that does not say is taken as ended.
+func (c *Client) Unmute(ctx context.Context, serverID string) (ended bool, err error) {
+	out := struct {
+		Ended *bool `json:"ended"`
+	}{}
+	if err := c.do(ctx, http.MethodDelete, "/v1/servers/"+serverID+"/mute", nil, &out); err != nil {
+		return false, err
+	}
+	return out.Ended == nil || *out.Ended, nil
 }
 
 // UptimeCheck is one address checked from outside.
@@ -440,6 +454,24 @@ func (c *Client) Uptime(ctx context.Context) ([]UptimeCheck, error) {
 	}
 	err := c.do(ctx, http.MethodGet, "/v1/uptime", nil, &out)
 	return out.Checks, err
+}
+
+// UptimeChecks is the uptime list and whether checks run: on the free plan
+// they are paused until the team adds credit.
+type UptimeChecks struct {
+	Checks []UptimeCheck `json:"checks"`
+	// Running is absent from older services, which always ran checks.
+	Running *bool `json:"running"`
+}
+
+// Paused says the checks are not running, so their last states are old.
+func (u UptimeChecks) Paused() bool { return u.Running != nil && !*u.Running }
+
+// UptimeList lists the uptime checks, and whether they are running.
+func (c *Client) UptimeList(ctx context.Context) (UptimeChecks, error) {
+	var out UptimeChecks
+	err := c.do(ctx, http.MethodGet, "/v1/uptime", nil, &out)
+	return out, err
 }
 
 // AddUptime adds an address to check.
@@ -548,13 +580,14 @@ func (c *Client) ExportLogs(ctx context.Context, q LogQuery, format string, w io
 		var p struct {
 			Error   string `json:"error"`
 			Message string `json:"message"`
+			Area    string `json:"area"`
 		}
 		_ = json.Unmarshal(data, &p)
 		switch resp.StatusCode {
 		case http.StatusUnauthorized:
 			return ErrSignedOut
 		case http.StatusNotFound:
-			return ErrNotFound
+			return &NotFoundError{Message: p.Message, Area: p.Area}
 		}
 		return &Problem{Status: resp.StatusCode, Code: p.Error, Message: p.Message}
 	}
@@ -642,6 +675,10 @@ func (c *Client) UploadSourcemap(ctx context.Context, frontend, appVersion, path
 	}
 	req.Header.Set("Content-Type", "application/gzip")
 	req.Header.Set("Authorization", "Bearer "+c.Token)
+	// A person signed in to several teams uploads to the one chosen here.
+	if c.TeamID != "" {
+		req.Header.Set("X-Kiyesi-Team", c.TeamID)
+	}
 	req.Header.Set("User-Agent", "kiyesi-cli/"+version.Version)
 	long := *c.HTTP
 	long.Timeout = 2 * time.Minute
@@ -799,6 +836,18 @@ type Incident struct {
 		Note string  `json:"note"`
 		By   *string `json:"by"`
 	} `json:"teamNote"`
+	// Acked is who acknowledged it, and when.
+	Acked *struct {
+		At time.Time `json:"at"`
+		By *string   `json:"by"`
+	} `json:"acked,omitempty"`
+	// Fixed is who marked it fixed, when, and what fixed it; By is nil when
+	// it closed by itself.
+	Fixed *struct {
+		At   time.Time `json:"at"`
+		By   *string   `json:"by"`
+		Note *string   `json:"note"`
+	} `json:"fixed,omitempty"`
 }
 
 // IncidentList is the Incidents screen: the counts and the incidents.
@@ -923,6 +972,7 @@ type Database struct {
 	Error          *string    `json:"error"`
 	Status         string     `json:"status"`
 	Problems       []struct {
+		Kind     string `json:"kind"`
 		Sentence string `json:"sentence"`
 	} `json:"problems"`
 }
@@ -1001,7 +1051,9 @@ func (c *Client) CostList(ctx context.Context, currency string) (Costs, error) {
 
 // NotFoundError is a 404, with the service's own words when it gave any,
 // such as which project does not exist. errors.Is(err, ErrNotFound) holds.
-type NotFoundError struct{ Message string }
+// Area is set when the whole area is hidden from the person's role, such as
+// "metrics": the thing may well exist.
+type NotFoundError struct{ Message, Area string }
 
 func (e *NotFoundError) Error() string {
 	if e.Message != "" {
@@ -1019,14 +1071,16 @@ type Finding struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"server"`
-	Check      string    `json:"check"`
-	CheckName  string    `json:"checkName"`
-	Severity   string    `json:"severity"`
-	Confidence *string   `json:"confidence"`
-	Sentence   string    `json:"sentence"`
-	Why        string    `json:"why"`
-	Fix        string    `json:"fix"`
-	ScannedAt  time.Time `json:"scannedAt"`
+	Check      string  `json:"check"`
+	CheckName  string  `json:"checkName"`
+	Severity   string  `json:"severity"`
+	Confidence *string `json:"confidence"`
+	Sentence   string  `json:"sentence"`
+	Why        string  `json:"why"`
+	Fix        string  `json:"fix"`
+	// AutoFix is the kiyesi fix that makes this change, when one can.
+	AutoFix   *string   `json:"autoFix"`
+	ScannedAt time.Time `json:"scannedAt"`
 }
 
 // Findings lists every finding on the servers the person can see, worst
@@ -1050,9 +1104,11 @@ type Expiry struct {
 	Name      string     `json:"name"`
 	ExpiresAt *time.Time `json:"expiresAt"`
 	DaysLeft  *int       `json:"daysLeft"`
-	Source    string     `json:"source"`
-	Detail    *string    `json:"detail"`
-	NeedsDate bool       `json:"needsDate"`
+	// RanOut: it already ran out, even when that was earlier today.
+	RanOut    bool    `json:"ranOut"`
+	Source    string  `json:"source"`
+	Detail    *string `json:"detail"`
+	NeedsDate bool    `json:"needsDate"`
 }
 
 // Expiries lists the expiry calendar, soonest first.

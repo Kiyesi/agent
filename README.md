@@ -9,7 +9,7 @@ published so you can read what it does before you install it.
   the server. [What it reads and sends](https://docs.kiyesi.dev/reference/agent-reads-and-sends/).
 - `snippet/`: the browser snippet that reports errors from your website's visitors.
 
-Version 0.34.0, from commit 8595b26 of Kiyesi's own repository. Each release is
+Version 0.35.0, from commit 4135731 of Kiyesi's own repository. Each release is
 copied here whole, as one commit with its tag.
 
 ## Install

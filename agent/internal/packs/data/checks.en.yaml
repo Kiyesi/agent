@@ -102,7 +102,7 @@ checks:
     root:
       needed: sometimes
       why: The Docker socket can be read only by root and the docker group.
-    passed: "{count} containers running, none failing"
+    passed: "{count|No containers|container|containers} running, none failing"
     passed-none: "No containers on this server"
     findings:
       exited:
@@ -117,7 +117,7 @@ checks:
         fix: "docker inspect --format '{{json .State.Health.Log}}' {name}"
       restarts:
         severity: warning
-        sentence: "Container {name} restarted {count} times in the last hour"
+        sentence: "Container {name} restarted {count|time|times} in the last hour"
         why: A container that keeps restarting is crashing, and users see errors each time.
         fix: "docker logs --tail 100 {name}"
 
@@ -159,13 +159,13 @@ checks:
     root:
       needed: sometimes
       why: Certificate folders such as /etc/letsencrypt/live can be read only by root.
-    passed: "{count} certificates, none expiring within {limit} days"
+    passed: "{count|certificate|certificates}, none expiring within {limit} days"
     passed-none: "No certificates found on this server"
     findings:
       expiring:
         severity: warning
         auto: certificates
-        sentence: "SSL certificate for {host} expires in {days} days"
+        sentence: "SSL certificate for {host} expires {days|in}"
         why: When it expires, browsers and apps will refuse to connect.
         fix: "sudo certbot renew"
         fix-variants:
@@ -174,7 +174,7 @@ checks:
       expired:
         severity: critical
         auto: certificates
-        sentence: "SSL certificate for {host} expired {days} days ago"
+        sentence: "SSL certificate for {host} expired {days|ago}"
         why: Browsers and apps are refusing to connect to {host} now.
         fix: "sudo certbot renew --force-renewal"
         fix-variants:
@@ -240,7 +240,7 @@ checks:
       waiting:
         severity: warning
         auto: updates
-        sentence: "{count} security updates have waited more than {limit} days"
+        sentence: "{count|security update has|security updates have} waited more than {limit} days"
         why: Security updates fix flaws that attackers already know about.
         fix: "sudo apt-get update && sudo apt-get upgrade"
 
@@ -347,7 +347,7 @@ checks:
         auto: firewall
         sentence: No firewall is on
         why: Without a firewall, every port a program opens can be reached from the internet.
-        fix: "sudo ufw allow OpenSSH && sudo ufw enable"
+        fix: "sudo ufw allow {ssh_port}/tcp && sudo ufw enable"
 
   - id: login-protection
     area: security
@@ -375,7 +375,7 @@ checks:
     root:
       needed: sometimes
       why: Other users' files and /root can be read only by root.
-    passed: "No exposed secrets in {count} files checked"
+    passed: "No exposed secrets in {count|file|files} checked"
     findings:
       world-readable:
         severity: warning
@@ -441,12 +441,12 @@ checks:
       system:
         severity: warning
         auto: updates
-        sentence: "{count} critical vulnerabilities with a fix available in this server's packages"
+        sentence: "{count|critical vulnerability|critical vulnerabilities} with a fix available in this server's packages"
         why: These flaws are public and already fixed. Installing the updates closes them; a new kernel needs a restart afterwards.
         fix: "sudo apt-get update && sudo apt-get upgrade --with-new-pkgs && sudo apt-get autoremove --purge"
       image:
         severity: warning
-        sentence: "{count} critical vulnerabilities with a fix available in image {image}"
+        sentence: "{count|critical vulnerability|critical vulnerabilities} with a fix available in image {image}"
         why: These flaws are public and already fixed in newer packages for this image.
         fix: "Update the base image of {image}, rebuild it, and restart its containers"
 
@@ -559,8 +559,8 @@ checks:
     root:
       needed: sometimes
       why: Other users' files and /root can be read only by root.
-    passed: "{count} database hosts checked, none outside {home}"
-    passed-no-home: "{count} database hosts placed. Choose a home country to compare them with"
+    passed: "{count|database host|database hosts} checked, none outside {home}"
+    passed-no-home: "{count|database host|database hosts} placed. Choose a home country to compare them with"
     passed-none: "No database connection settings found"
     findings:
       outside:
@@ -581,8 +581,8 @@ checks:
     root:
       needed: sometimes
       why: rclone settings and cron jobs in /root and other users' folders can be read only by root.
-    passed: "{count} backup destinations checked, none outside {home}"
-    passed-no-home: "{count} backup destinations placed. Choose a home country to compare them with"
+    passed: "{count|backup destination|backup destinations} checked, none outside {home}"
+    passed-no-home: "{count|backup destination|backup destinations} placed. Choose a home country to compare them with"
     passed-none: "No backup destination found in the settings Kiyesi reads"
     findings:
       outside:
@@ -602,7 +602,7 @@ checks:
     root:
       needed: sometimes
       why: Other users' files and /root can be read only by root.
-    passed: "{count} outside services listed for review"
+    passed: "{count|outside service|outside services} listed for review"
     passed-none: "No outside log, monitoring, email or SMS service found"
     findings: {}
 
@@ -612,8 +612,8 @@ checks:
     reads: The databases listed under payment_data in /etc/kiyesi/config.yaml.
     root:
       needed: never
-    passed: "{count} databases marked as holding payment data, all inside {home}"
-    passed-no-home: "{count} databases marked as holding payment data. Choose a home country to compare them with"
+    passed: "{count|database|databases} marked as holding payment data, all inside {home}"
+    passed-no-home: "{count|database|databases} marked as holding payment data. Choose a home country to compare them with"
     passed-none: "No database is marked as holding payment data. List them under payment_data in /etc/kiyesi/config.yaml"
     findings:
       outside:

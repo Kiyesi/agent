@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -54,6 +56,28 @@ func TestDeployWithATokenSaysWhoShippedIt(t *testing.T) {
 	}
 	if code, _, errOut := runCLIEnv(t, []string{"KIYESI_DEPLOY_TOKEN=ksv_x"}, "deploy", "--app", "a", "--version", "1"); code != ExitUsage || !strings.Contains(errOut, "not a deploy token") {
 		t.Errorf("wrong token kind: %d %s", code, errOut)
+	}
+}
+
+// On a connected server without sudo, the token cannot be read: the
+// answer is sudo, not a deploy token or signing in.
+func TestDeployOnAConnectedServerWithoutSudo(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every file")
+	}
+	etc := t.TempDir()
+	t.Setenv("KIYESI_ETC", etc)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if err := os.WriteFile(filepath.Join(etc, "agent.yaml"), []byte("api: https://api.kiyesi.dev\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(etc, "token"), []byte("ksv_x\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	code, _, errOut := runCLIEnv(t, nil, "deploy", "--app", "a", "--version", "1")
+	if code != ExitNoAccess || !strings.Contains(errOut, "Run it with sudo: sudo kiyesi deploy") || strings.Contains(errOut, "KIYESI_DEPLOY_TOKEN") {
+		t.Errorf("%d %s", code, errOut)
 	}
 }
 

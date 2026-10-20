@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io/fs"
 	"path"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/kiyesi/kiyesi/agent/internal/system"
@@ -17,6 +19,8 @@ type SSH struct {
 	Present       bool
 	PasswordLogin bool
 	RootLogin     bool
+	// Ports are the ports sshd listens on; 22 when the settings name none.
+	Ports []int
 }
 
 func readSSH(ctx context.Context, sys *system.System) SSH {
@@ -38,7 +42,23 @@ func readSSH(ctx context.Context, sys *system.System) SSH {
 		Present:       true,
 		PasswordLogin: passwordLogin(settings),
 		RootLogin:     rootLogin(sys.FS, settings["permitrootlogin"]),
+		Ports:         sshPorts(settings["port"]),
 	}
+}
+
+// sshPorts reads the port values, kept space-separated as sshd allows
+// more than one.
+func sshPorts(v string) []int {
+	var out []int
+	for _, f := range strings.Fields(v) {
+		if p, err := strconv.Atoi(f); err == nil && p > 0 && p < 65536 && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return []int{22}
+	}
+	return out
 }
 
 func value(m map[string]string, key, def string) string {
@@ -84,9 +104,15 @@ func parseSSHDT(out []byte) map[string]string {
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	for sc.Scan() {
 		k, v, ok := strings.Cut(strings.TrimSpace(sc.Text()), " ")
-		if ok {
-			m[strings.ToLower(k)] = strings.TrimSpace(v)
+		if !ok {
+			continue
 		}
+		k = strings.ToLower(k)
+		if k == "port" && m[k] != "" {
+			m[k] += " " + strings.TrimSpace(v)
+			continue
+		}
+		m[k] = strings.TrimSpace(v)
 	}
 	return m
 }
@@ -136,6 +162,9 @@ func readSSHFile(fsys fs.FS, name string, m map[string]string, depth int) bool {
 					}
 				}
 			}
+		case "port":
+			// Every Port line counts: sshd listens on each.
+			m[key] = strings.TrimSpace(m[key] + " " + f[1])
 		default:
 			if _, set := m[key]; !set {
 				m[key] = f[1]

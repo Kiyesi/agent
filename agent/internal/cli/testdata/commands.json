@@ -126,7 +126,7 @@
     "path": "kiyesi connect",
     "use": "kiyesi connect --token <token> [flags]",
     "short": "Link this server to the service and start sending results",
-    "long": "Checks the token with the service, saves it where only root can read it, and\ninstalls and starts the kiyesi system service. The service runs a scan now and\nevery 15 minutes, and says it is alive every minute. It only reads, opens no\nport, and masks secrets before anything is sent.",
+    "long": "Checks the token with the service, saves it where only root can read it, and\ninstalls and starts the kiyesi system service. The service runs a scan now and\nevery 15 minutes, and says it is alive every minute. On the free plan it\nreports every 10 minutes and scans every 6 hours, as the service asks. It\nonly reads, opens no port, and masks secrets before anything is sent.",
     "example": "  sudo kiyesi connect --token ksv_...",
     "flags": [
       {
@@ -149,11 +149,11 @@
     "use": "kiyesi costs [flags]",
     "short": "Monthly cost against use, with a suggestion for each server",
     "long": "What each server costs a month, how much of it is used at its busiest, and\nwhether it is too small, larger than needed or the right size. Prices are\ntyped once in the dashboard, in the currency your provider bills in, and\nshown in your team's currency too, at a public rate fetched once a day.",
-    "example": "  kiyesi costs\n  kiyesi costs --currency NGN",
+    "example": "  kiyesi costs\n  kiyesi costs --currency EUR",
     "flags": [
       {
         "name": "currency",
-        "usage": "show the costs in this currency, such as NGN"
+        "usage": "show the costs in this currency, such as EUR or GBP"
       },
       {
         "name": "json",
@@ -360,7 +360,7 @@
     "path": "kiyesi findings",
     "use": "kiyesi findings [server] [flags]",
     "short": "Every finding on your servers, worst first, with the command that fixes it",
-    "long": "The problems the latest scans found, each in one sentence with why it\nmatters and the fix. Kiyesi never runs a fix: copy it and run it yourself.",
+    "long": "The problems the latest scans found, each in one sentence with why it\nmatters and the fix. The agent never runs a fix by itself: run sudo kiyesi fix\non the server where one is offered, or run the command yourself.",
     "example": "  kiyesi findings\n  kiyesi findings checkout-api-prod --severity critical",
     "flags": [
       {
@@ -377,7 +377,7 @@
     "path": "kiyesi fix",
     "use": "kiyesi fix [name...] [flags]",
     "short": "Fix what Kiyesi can fix on this server, after you say yes (needs sudo)",
-    "long": "Lists the findings Kiyesi can fix for you, says in plain words what each fix\nchanges, and asks. After you say yes it makes the changes, checks the server\nagain and shows the new grade. Every change that can be undone is kept:\nkiyesi fix undo lists them. Before a fix changes a file it saves it, and a fix\nthat fails halfway is put back at once.\n\nOnly you run this, at this server's terminal. The agent's service never runs\nit, and the dashboard cannot ask for it. To forbid it on a server, set\nfix: off in /etc/kiyesi/config.yaml. Names: certificates, docker-cleanup, firewall, login-protection, secret-files, ssh-password, ssh-root, updates.",
+    "long": "Lists the findings Kiyesi can fix for you, says in plain words what each fix\nchanges, and asks. After you say yes it makes the changes, checks the server\nagain and shows the new grade. Every change that can be undone is kept:\nkiyesi fix undo lists them. Before a fix changes a file it saves it, and a fix\nthat fails halfway is put back at once. Three cannot be undone: installing\nupdates (updates), renewing certificates (certificates) and removing unused\nDocker images and build cache (docker-cleanup).\n\nOnly you run this, at this server's terminal. The agent's service never runs\nit, and the dashboard cannot ask for it. To forbid it on a server, set\nfix: off in /etc/kiyesi/config.yaml. Names: certificates, docker-cleanup, firewall, login-protection, secret-files, ssh-password, ssh-root, updates.",
     "example": "  sudo kiyesi fix                 the list, then asks\n  sudo kiyesi fix ssh-password    one fix\n  sudo kiyesi fix --dry-run       only show what it would change\n  sudo kiyesi fix undo            what can be undone",
     "flags": [
       {
@@ -404,7 +404,7 @@
     "path": "kiyesi fix undo",
     "use": "kiyesi fix undo [id] [flags]",
     "short": "List what kiyesi fix changed, or put one change back (needs sudo)",
-    "long": "Alone, lists every change kiyesi fix made on this server, newest first, with\nits id. With an id, puts that change back as it was: the files it changed are\nrestored and the service it touched is reloaded. Installing updates cannot\nbe undone.",
+    "long": "Alone, lists every change kiyesi fix made on this server, newest first, with\nits id. With an id, puts that change back as it was: the files it changed are\nrestored and the service it touched is reloaded. Three fixes cannot be\nundone: installing updates (updates), renewing certificates (certificates)\nand removing unused Docker images and build cache (docker-cleanup).",
     "example": "  sudo kiyesi fix undo\n  sudo kiyesi fix undo 7f3a",
     "flags": [
       {
@@ -655,7 +655,7 @@
     "path": "kiyesi preflight",
     "use": "kiyesi preflight [server] [flags]",
     "short": "Safe to deploy? Go or wait, with the reasons and what to do first",
-    "long": "Six checks on what Kiyesi already holds for the server: memory, disk, backup\nage, certificate, open incidents on it, and the last deploy's verdict. It\nexits with 0 for go and 1 for wait, so a deploy pipeline can use it. It only\nadvises and never stops a deploy by itself. In CI, set KIYESI_DEPLOY_TOKEN.",
+    "long": "Six checks on what Kiyesi already holds for the server: memory, disk, backup\nage, certificate, open incidents on it, and the last deploy's verdict. It\nexits with 0 for go and 1 for wait, so a deploy pipeline can use it. It only\nadvises and never stops a deploy by itself. In CI, set KIYESI_DEPLOY_TOKEN.\nA server that sent no figures in the last 5 minutes is a reason to wait.",
     "example": "  kiyesi preflight checkout-api-prod\n  kiyesi preflight              on a connected server: this one\n  kiyesi preflight checkout-api-prod --json",
     "flags": [
       {
@@ -737,7 +737,7 @@
     "path": "kiyesi report card",
     "use": "kiyesi report card [flags]",
     "short": "The Monday report card: what was caught last week, what was fixed, and how fast",
-    "long": "Counts the incidents and critical problems caught last week in what you can see,\nhow many were fixed and the typical time to fix. It never names who caused a\nproblem. Owners and admins get it by email on Monday mornings.",
+    "long": "Counts the incidents and critical problems caught last week in what you can see,\nhow many were fixed and the typical time to fix. It never names who caused a\nproblem. With credit, owners and admins get it by email each Monday at 08:00\nin their own time zone; on the free plan it is not emailed, only shown here.",
     "example": "  kiyesi report card\n  kiyesi report card --this-week",
     "flags": [
       {
@@ -1007,7 +1007,7 @@
       },
       {
         "name": "projects",
-        "usage": "projects it applies in, separated by commas; all when left out"
+        "usage": "projects it applies in, separated by commas; kept as they are when left out"
       },
       {
         "name": "role",
@@ -1032,7 +1032,7 @@
       },
       {
         "name": "role",
-        "usage": "owner, admin, member, viewer, billing or client",
+        "usage": "the role's name, such as member or \"Frontend contractor\"; kiyesi team roles lists them",
         "default": "member"
       }
     ]
@@ -1124,7 +1124,7 @@
     "path": "kiyesi uninstall",
     "use": "kiyesi uninstall [flags]",
     "short": "Remove the agent and its files from this server",
-    "long": "Stops and removes the kiyesi service, the server token and settings in\n/etc/kiyesi, the results waiting in /var/lib/kiyesi, and the kiyesi program.\nWhat the server already sent stays in the dashboard: there, disconnect the\nserver to keep it until it expires, or delete it to erase it.",
+    "long": "Stops and removes the kiyesi service, the server token and settings in\n/etc/kiyesi, the results waiting in /var/lib/kiyesi, and the kiyesi program.\nWhat the server already sent stays in the dashboard: there, disconnect the\nserver to keep it until it expires, or delete it to erase it.\n\nChanges made by kiyesi fix stay on the server, but their undo records go\nwith /var/lib/kiyesi, so kiyesi can no longer put them back. To put one back\nfirst: sudo kiyesi fix undo",
     "example": "  sudo kiyesi uninstall",
     "flags": [
       {

@@ -34,6 +34,10 @@ func deployClient(apiURL string, environ []string) (*api.Client, string, error) 
 	}
 	c, err := signedIn()
 	if err != nil {
+		// A connected server whose token only root can read.
+		if _, serr := os.Stat(agentConfPath()); serr == nil && os.Geteuid() != 0 {
+			return nil, "", &exitError{code: ExitNoAccess, msg: "This server is connected, but only root can read its token. Run it with sudo: sudo kiyesi deploy"}
+		}
 		return nil, "", &exitError{code: ExitNoAccess, msg: "Set KIYESI_DEPLOY_TOKEN (Settings, Deploy tokens), run this on a connected server, or sign in with kiyesi login."}
 	}
 	return c, "you", nil
@@ -300,6 +304,10 @@ func newMetrics(io IO) *cobra.Command {
 			if asJSON {
 				return render.JSON(io.Out, ch)
 			}
+			if chartsEmpty(ch) && onFreePlan(cmd.Context(), c) {
+				fmt.Fprintf(io.Out, "\n%s, last %s\n\n%s\n\n", s.Name, r, freePlanNote)
+				return nil
+			}
 			drawCharts(io.Out, s.Name, r, ch)
 			return nil
 		},
@@ -343,6 +351,19 @@ func stats(points [][2]float64) (now, peak float64) {
 		now = points[len(points)-1][1]
 	}
 	return now, peak
+}
+
+// chartsEmpty says no figure at all came back for the range.
+func chartsEmpty(ch api.Charts) bool {
+	if len(ch.CPU) > 0 || len(ch.Memory) > 0 || len(ch.Requests) > 0 {
+		return false
+	}
+	for _, d := range ch.Disk {
+		if len(d) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func drawCharts(w io.Writer, name, r string, ch api.Charts) {

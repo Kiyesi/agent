@@ -27,8 +27,31 @@ type nowResult struct {
 	Items   []nowItem `json:"items"`
 	Next    string    `json:"next"`
 	Servers int       `json:"servers"`
+	// Reporting is how many servers are connected and have reported.
+	Reporting int `json:"reporting"`
+	// Hidden names the lists the person's role does not see: nothing is
+	// claimed about them, such as "no open incidents".
+	Hidden []string `json:"hidden,omitempty"`
+	// CanAddServers says the person may add a server, so it is worth suggesting.
+	CanAddServers bool `json:"canAddServers"`
 	// The team's calm streak: its shortest server streak, in days.
 	CalmDays *int `json:"calmDays,omitempty"`
+}
+
+// sees says whether the person's role shows that list.
+func (r nowResult) sees(list string) bool { return !contains(r.Hidden, list) }
+
+// levelRank orders what a role allows in an area.
+var levelRank = map[string]int{"hidden": 0, "view": 1, "act": 2, "manage": 3}
+
+// mayDo says whether the person's role allows at least level in an area.
+// When their access cannot be read it says no: a hint is left out, never wrong.
+func mayDo(ctx context.Context, c *api.Client, area, level string) bool {
+	a, err := c.WhoAmI(ctx)
+	if err != nil {
+		return false
+	}
+	return levelRank[a.Levels[area]] >= levelRank[level]
 }
 
 func runNow(io IO, asJSON bool, ctx context.Context) error {
@@ -82,8 +105,17 @@ func needsYou(ctx context.Context, c *api.Client, now time.Time) (nowResult, now
 		r.Items = append(r.Items, nowItem{Kind: kind, Sentence: sentence, Command: command})
 	}
 
+	// A list the role does not see is noted, so nothing is said about it.
+	gone := func(list string, err error) error {
+		if err != nil && hidden(err) {
+			r.Hidden = append(r.Hidden, list)
+			return nil
+		}
+		return err
+	}
+
 	incidents, err := c.Incidents(ctx, "open")
-	if err != nil && !hidden(err) {
+	if err := gone("incidents", err); err != nil {
 		return r, lists, err
 	}
 	lists.incidents = incidents.Incidents
@@ -105,7 +137,7 @@ func needsYou(ctx context.Context, c *api.Client, now time.Time) (nowResult, now
 	}
 
 	work, err := c.Work(ctx, "mine")
-	if err != nil && !hidden(err) {
+	if err := gone("work", err); err != nil {
 		return r, lists, err
 	}
 	for _, p := range work.People {
@@ -125,22 +157,27 @@ func needsYou(ctx context.Context, c *api.Client, now time.Time) (nowResult, now
 		}
 	}
 
-	checks, err := c.Uptime(ctx)
-	if err != nil && !hidden(err) {
+	uptime, err := c.UptimeList(ctx)
+	if err := gone("uptime", err); err != nil {
 		return r, lists, err
 	}
-	for _, u := range checks {
-		if u.Status == "down" {
+	for _, u := range uptime.Checks {
+		// Paused checks keep their last state, which is old news.
+		if u.Status == "down" && !uptime.Paused() {
 			add("site", "site:"+u.ID, fmt.Sprintf("%s is not answering.", u.Name), "kiyesi uptime")
 		}
 	}
 
 	servers, err := c.Servers(ctx)
-	if err != nil && !hidden(err) {
+	if err := gone("servers", err); err != nil {
 		return r, lists, err
 	}
 	lists.servers = servers
 	r.Servers = len(servers)
+	// Only someone who may add a server is told to add one.
+	if r.Servers == 0 && r.sees("servers") {
+		r.CanAddServers = mayDo(ctx, c, "servers", "manage")
+	}
 	for _, s := range servers {
 		if s.Calm != nil && (r.CalmDays == nil || s.Calm.Days < *r.CalmDays) {
 			d := s.Calm.Days
@@ -162,12 +199,30 @@ func needsYou(ctx context.Context, c *api.Client, now time.Time) (nowResult, now
 			add("critical", "critical:"+s.ID, fmt.Sprintf("%s has %s.", s.Name, what), "kiyesi findings "+quoteArg(s.Name))
 		}
 	}
+	// Reporting means connected and heard from: a server that never sent
+	// anything is not counted, and is named instead.
+	for _, s := range servers {
+		switch {
+		case s.State == "disconnected":
+			// Disconnected on purpose: not reporting, and nothing to do.
+		case s.Connected && s.LastSeenAt != nil:
+			if !s.Silent {
+				r.Reporting++
+			}
+		case s.Connected:
+			add("waiting", "waiting:"+s.ID, fmt.Sprintf("%s has never reported.", s.Name), "kiyesi server "+quoteArg(s.Name))
+		default:
+			add("waiting", "waiting:"+s.ID, fmt.Sprintf("%s is waiting to connect.", s.Name), "kiyesi server "+quoteArg(s.Name))
+		}
+	}
 
 	switch {
 	case len(r.Items) > 0:
 		r.Next = r.Items[0].Command
-	case r.Servers == 0:
+	case r.CanAddServers:
 		r.Next = "kiyesi open settings"
+	case !r.sees("servers"):
+		r.Next = "kiyesi whoami"
 	default:
 		r.Next = "kiyesi servers"
 	}
@@ -176,10 +231,10 @@ func needsYou(ctx context.Context, c *api.Client, now time.Time) (nowResult, now
 
 func printNow(w io.Writer, r nowResult) {
 	switch {
-	case len(r.Items) == 0 && r.Servers == 0:
+	case len(r.Items) == 0 && r.Servers == 0 && r.CanAddServers:
 		fmt.Fprintln(w, "No servers yet. Add one in Settings, Add a server: it shows the two commands to run on it.")
 	case len(r.Items) == 0:
-		fmt.Fprintf(w, "Nothing needs you now: %s, all reporting, no critical findings, no open incidents.\n", plural(r.Servers, "server", "servers"))
+		fmt.Fprintln(w, nothingNow(r))
 	default:
 		fmt.Fprintln(w, "NEEDS YOU NOW")
 		for _, i := range r.Items {
@@ -190,6 +245,29 @@ func printNow(w io.Writer, r nowResult) {
 		fmt.Fprintf(w, "Calm streak: %s without a critical finding on any server.\n", plural(*r.CalmDays, "day", "days"))
 	}
 	fmt.Fprintf(w, "\nNext: %s\n", r.Next)
+}
+
+// nothingNow says nothing needs you, and only what is true of the lists the
+// person sees: a Client is never told there are no servers or incidents.
+func nothingNow(r nowResult) string {
+	var parts []string
+	if r.sees("servers") {
+		switch {
+		case r.Servers == 0:
+			parts = append(parts, "no servers that you can see")
+		case r.Reporting == r.Servers:
+			parts = append(parts, plural(r.Servers, "server", "servers")+", all reporting", "no critical findings")
+		default:
+			parts = append(parts, fmt.Sprintf("%d of %s reporting", r.Reporting, plural(r.Servers, "server", "servers")), "no critical findings")
+		}
+	}
+	if r.sees("incidents") {
+		parts = append(parts, "no open incidents")
+	}
+	if len(parts) == 0 {
+		return "Nothing needs you now."
+	}
+	return "Nothing needs you now: " + strings.Join(parts, ", ") + "."
 }
 
 // quoteArg quotes a name with spaces, so the suggested command can be pasted.

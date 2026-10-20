@@ -30,6 +30,8 @@ type Input struct {
 	SSH checks.SSH
 	// Public are the ports open on a public address, from the scan.
 	Public []int
+	// Docker are the ports Docker publishes: ufw does not close them.
+	Docker []int
 	// Planned names the other fixes chosen in this run, so one can step
 	// aside when another makes it unneeded.
 	Planned map[string]bool
@@ -50,6 +52,9 @@ type Plan struct {
 	Undoable bool
 	// Skip, when set, means this fix is not needed in this run, and why.
 	Skip string
+	// Unless names another fix in this run that makes this one unneeded
+	// once it has worked; UnlessSkip says why, when that happens.
+	Unless, UnlessSkip string
 	// Done is the past tense for the result line: "SSH password login off".
 	Done string
 }
@@ -115,23 +120,49 @@ func For(check string, f checks.Finding) Fixer {
 // ErrNotForThisSystem is a fix asked for on a system it does not know.
 var ErrNotForThisSystem = errors.New("not for this system yet")
 
+// Failed is a fix that did not finish, with how much of the server it may
+// have left changed.
+type Failed struct {
+	Err error
+	// Changed is true when the server may not be as it was: a fix that
+	// cannot be undone stopped partway (some updates installed), or
+	// putting a fix back failed too.
+	Changed bool
+}
+
+func (e *Failed) Error() string { return e.Err.Error() }
+func (e *Failed) Unwrap() error { return e.Err }
+
+// NotKept is a fix that worked whose undo record could not be saved: the
+// change is made, but kiyesi fix undo cannot put it back.
+type NotKept struct{ Err error }
+
+func (e *NotKept) Error() string {
+	return "its undo record could not be saved, so kiyesi fix undo cannot put it back: " + e.Err.Error()
+}
+func (e *NotKept) Unwrap() error { return e.Err }
+
 // Run applies one fix with a record of what it changed. If the fix fails,
-// everything it changed is put back before the error is returned.
+// everything it changed is put back before the error, a *Failed, is
+// returned. When the fix worked but its record could not be saved, the
+// record comes back with a *NotKept.
 func Run(ctx context.Context, h Host, s *Store, f Fixer, in Input, p Plan) (*Record, error) {
 	rec, err := s.Begin(f.Name(), p.Done, in.User, p.Undoable)
 	if err != nil {
-		return nil, fmt.Errorf("cannot keep a record for undo: %w", err)
+		return nil, &Failed{Err: fmt.Errorf("cannot keep a record for undo, so it did not start: %w", err)}
 	}
 	c := &Changes{h: h, s: s, rec: rec}
 	if err := f.Apply(ctx, h, in, c); err != nil {
 		if uerr := undo(ctx, h, s, rec); uerr != nil {
-			return nil, fmt.Errorf("%v; putting it back also failed: %v. What was saved is in %s", err, uerr, s.dirOf(rec.ID))
+			return nil, &Failed{Err: fmt.Errorf("%v; putting it back also failed: %v. What was saved is in %s", err, uerr, s.dirOf(rec.ID)), Changed: true}
 		}
 		s.forget(rec.ID)
-		return nil, err
+		// A fix that cannot be undone (updates, certificates, a Docker
+		// clean-up) may have done part of its work before it stopped.
+		return nil, &Failed{Err: err, Changed: !p.Undoable}
 	}
 	if err := s.save(rec); err != nil {
-		return rec, fmt.Errorf("the fix worked, but its undo record could not be saved: %w", err)
+		return rec, &NotKept{Err: err}
 	}
 	return rec, nil
 }

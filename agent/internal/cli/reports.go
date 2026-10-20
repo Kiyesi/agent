@@ -175,7 +175,8 @@ func newReportCard(io IO) *cobra.Command {
 		Short: "The Monday report card: what was caught last week, what was fixed, and how fast",
 		Long: "Counts the incidents and critical problems caught last week in what you can see,\n" +
 			"how many were fixed and the typical time to fix. It never names who caused a\n" +
-			"problem. Owners and admins get it by email on Monday mornings.",
+			"problem. With credit, owners and admins get it by email each Monday at 08:00\n" +
+			"in their own time zone; on the free plan it is not emailed, only shown here.",
 		Example: "  kiyesi report card\n  kiyesi report card --this-week",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

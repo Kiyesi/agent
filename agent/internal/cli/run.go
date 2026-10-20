@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -23,9 +24,6 @@ func newRun(io IO) *cobra.Command {
 			"crontab or systemd timer; Kiyesi reads the schedule from there.",
 		Example: "  0 4 * * * kiyesi run --name nightly-backup -- /opt/scripts/backup.sh",
 		Args: func(cmd *cobra.Command, args []string) error {
-			if !jobs.NamePattern.MatchString(name) {
-				return usageErr("Give the job a name with --name: letters, digits, dots, dashes and underscores, such as nightly-backup.")
-			}
 			if cmd.ArgsLenAtDash() < 0 || len(args) == 0 {
 				return usageErr("Put the command after --, such as: kiyesi run --name nightly-backup -- /opt/scripts/backup.sh")
 			}
@@ -36,7 +34,14 @@ func newRun(io IO) *cobra.Command {
 			if in == nil {
 				in = os.Stdin
 			}
-			code := jobs.Execute(filepath.Join(stateDir(), "runs"), name, args, in, io.Out, io.Err, send.NewID, time.Now)
+			spool := filepath.Join(stateDir(), "runs")
+			// A bad name never stops the job: a backup in cron still runs,
+			// only unrecorded, and stderr (cron's mail) says why.
+			if !jobs.NamePattern.MatchString(name) {
+				fmt.Fprintln(io.Err, "kiyesi run: this run is not recorded: give the job a name with --name, using letters, digits, dots, dashes and underscores, such as nightly-backup.")
+				spool = ""
+			}
+			code := jobs.Execute(spool, name, args, in, io.Out, io.Err, send.NewID, time.Now)
 			if code != 0 {
 				return &exitError{code: code}
 			}

@@ -43,6 +43,19 @@ func openPage(io IO, address string) {
 	openBrowser(address)
 }
 
+// withTeam adds the chosen team to a dashboard page's address; the
+// dashboard switches to it only when the person is in that team.
+func withTeam(page, team string) string {
+	if team == "" {
+		return page
+	}
+	sep := "?"
+	if strings.Contains(page, "?") {
+		sep = "&"
+	}
+	return page + sep + "team=" + url.QueryEscape(team)
+}
+
 func newOpen(io IO) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "open [incident, server or screen]",
@@ -57,13 +70,18 @@ func newOpen(io IO) *cobra.Command {
 				return err
 			}
 			base := dashboardURL(l.API)
+			// The team chosen with kiyesi team use goes with the address, so
+			// the dashboard shows that team's page, not the one it last showed.
+			open := func(page string) {
+				openPage(io, base+withTeam(page, l.Team))
+			}
 			if len(args) == 0 {
-				openPage(io, base+"/")
+				open("/")
 				return nil
 			}
 			what := args[0]
 			if p, ok := openPages[strings.ToLower(what)]; ok {
-				openPage(io, base+p)
+				open(p)
 				return nil
 			}
 			if incidentRef.MatchString(what) {
@@ -71,7 +89,7 @@ func newOpen(io IO) *cobra.Command {
 				if !strings.HasPrefix(ref, "INC-") {
 					ref = "INC-" + ref
 				}
-				openPage(io, base+"/incident/?id="+url.QueryEscape(ref))
+				open("/incident/?id=" + url.QueryEscape(ref))
 				return nil
 			}
 			c, err := signedIn()
@@ -83,7 +101,7 @@ func newOpen(io IO) *cobra.Command {
 				return apiErr(err)
 			}
 			if s, ok := find(servers, what); ok {
-				openPage(io, base+"/server/?id="+url.QueryEscape(s.ID))
+				open("/server/?id=" + url.QueryEscape(s.ID))
 				return nil
 			}
 			return usageErr("Nothing called %q: give an incident number such as INC-12, a server's name, or a screen such as logs, incidents or credit.", what)

@@ -122,6 +122,20 @@ func TestFirewall(t *testing.T) {
 	wantStatus(t, run(t, firewallCheck{}, newTestEnv().file("etc/ufw/ufw.conf", "ENABLED=yes\n")), StatusPass)
 	off := newTestEnv().file("etc/ufw/ufw.conf", "ENABLED=no\n").command("iptables -S INPUT", "-P INPUT ACCEPT\n")
 	wantStatus(t, run(t, firewallCheck{}, off), StatusFail, "off")
+	if r := run(t, firewallCheck{}, off); r.Findings[0].Vars["ssh_port"] != "22" {
+		t.Errorf("no SSH settings: want port 22, got %+v", r.Findings[0].Vars)
+	}
+	// The printed fix opens the port sshd really listens on, so it never locks anyone out.
+	moved := newTestEnv().file("etc/ufw/ufw.conf", "ENABLED=no\n").command("iptables -S INPUT", "-P INPUT ACCEPT\n").
+		command("sshd -T", "port 2222\nport 22\npasswordauthentication no\n")
+	if r := run(t, firewallCheck{}, moved); r.Status != StatusFail || r.Findings[0].Vars["ssh_port"] != "2222,22" {
+		t.Errorf("sshd on 2222 and 22: %+v", r)
+	}
+	unrooted := newTestEnv().file("etc/ufw/ufw.conf", "ENABLED=no\n").command("iptables -S INPUT", "-P INPUT ACCEPT\n").
+		file("etc/ssh/sshd_config", "Port 2200\nPasswordAuthentication no\n")
+	if r := run(t, firewallCheck{}, unrooted); r.Status != StatusFail || r.Findings[0].Vars["ssh_port"] != "2200" {
+		t.Errorf("sshd_config with Port 2200: %+v", r)
+	}
 	nft := newTestEnv().command("nft list ruleset", "table inet filter {\n\tchain input {\n\t\ttype filter hook input priority filter; policy drop;\n\t}\n}\n")
 	if r := run(t, firewallCheck{}, nft); r.Status != StatusPass || r.Vars["firewall"] != "nftables" {
 		t.Errorf("nftables: %+v", r)

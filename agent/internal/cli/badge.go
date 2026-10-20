@@ -35,8 +35,13 @@ func newBadge(io IO) *cobra.Command {
 				return usageErr("There is no server called %q that you can see. Run kiyesi servers for the list.", args[0])
 			}
 			if off {
-				if err := c.BadgeOff(cmd.Context(), s.ID); err != nil {
+				wasOn, err := c.TurnBadgeOff(cmd.Context(), s.ID)
+				if err != nil {
 					return badgeErr(err)
+				}
+				if !wasOn {
+					fmt.Fprintf(io.Out, "The grade badge of %s is off. It was already off.\n", s.Name)
+					return nil
 				}
 				fmt.Fprintf(io.Out, "The grade badge of %s is off: its image stops answering now.\n", s.Name)
 				return nil

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -315,6 +316,16 @@ func TestFirewallKeepsSSHOpenAndSaysWhatCloses(t *testing.T) {
 	if !p.Confirm || !strings.Contains(p.Warn[0], "will be closed: 6379") {
 		t.Fatalf("warn = %+v", p)
 	}
+	// A port Docker publishes is not closed by ufw, so it is not listed as closing.
+	withDocker := in
+	withDocker.Public, withDocker.Docker = []int{80, 443, 2222, 6379, 8080}, []int{8080}
+	if dp := f.Plan(context.Background(), h, withDocker); !strings.Contains(dp.Warn[0], "will be closed: 6379.") {
+		t.Fatalf("docker's port listed as closing: %+v", dp.Warn)
+	}
+	withDocker.Public = []int{80, 443, 2222, 8080}
+	if dp := f.Plan(context.Background(), h, withDocker); dp.Confirm || strings.Contains(strings.Join(dp.Warn, " "), "will be closed") {
+		t.Fatalf("only docker's port, still closing: %+v", dp)
+	}
 	s := store(t)
 	rec, err := Run(context.Background(), h, s, f, in, p)
 	if err != nil {
@@ -380,7 +391,8 @@ func TestLoginProtection(t *testing.T) {
 	h := newHost()
 	in := input("ada")
 	in.Planned["ssh-password"] = true
-	if p := (loginProtection{}).Plan(context.Background(), h, in); !strings.Contains(p.Skip, "Not needed") {
+	// Planned with ssh-password, it waits to see whether that one works.
+	if p := (loginProtection{}).Plan(context.Background(), h, in); p.Skip != "" || p.Unless != "ssh-password" || !strings.Contains(p.UnlessSkip, "Not needed") || !strings.Contains(p.Say, "Skipped if ssh-password turns password login off first.") {
 		t.Fatalf("plan = %+v", p)
 	}
 	h.answer = func(cmd string) (string, error) {
@@ -603,12 +615,13 @@ func TestDockerCleanupNeverTouchesContainersOrVolumes(t *testing.T) {
 		if strings.HasPrefix(cmd, "docker image prune") {
 			return "Deleted Images:\nuntagged: shop:1.3\n\nTotal reclaimed space: 3.1GB\n", nil
 		}
-		return "Total reclaimed space: 0B\n", nil
+		// Newer Docker says only "Total:" for build cache.
+		return "ID\tRECLAIMABLE\tSIZE\nab12\ttrue\t1.1GB\nTotal:\t1.1GB\n", nil
 	}
 	in := input("ada")
 	in.Findings = []checks.Finding{checks.Found("docker-waste", map[string]string{"size": "4.2 GB"})}
 	p := dockerCleanup{}.Plan(context.Background(), h, in)
-	if p.Undoable || !strings.Contains(p.Say, "(4.2 GB now)") || !strings.Contains(p.Say, "cannot be undone") {
+	if p.Undoable || !strings.Contains(p.Say, "Removes Docker images no container uses that were created over a week ago, and build cache over a week old. Of the 4.2 GB Docker keeps unused now, only that part goes") || strings.Contains(p.Say, "newer stays") || !strings.Contains(p.Say, "cannot be undone") {
 		t.Fatalf("plan = %+v", p)
 	}
 	rec, err := Run(context.Background(), h, store(t), dockerCleanup{}, in, p)
@@ -623,11 +636,83 @@ func TestDockerCleanupNeverTouchesContainersOrVolumes(t *testing.T) {
 			t.Fatalf("ran %q", c)
 		}
 	}
-	if rec.Done != "Unused Docker images and build cache removed: 3.1GB of images freed" {
+	if rec.Done != "Unused Docker images and build cache removed: 3.1GB of images and 1.1GB of build cache freed" {
 		t.Fatalf("done = %q", rec.Done)
+	}
+	// Nothing old enough: it says so, rather than promising space it did not free.
+	h.answer = func(string) (string, error) { return "Total reclaimed space: 0B\n", nil }
+	if rec, err := Run(context.Background(), h, store(t), dockerCleanup{}, in, p); err != nil || rec.Done != "No unused image was created over a week ago and no build cache was over a week old, so nothing was removed" {
+		t.Fatalf("done = %q, %v", rec.Done, err)
 	}
 	delete(h.programs, "docker")
 	if p := (dockerCleanup{}).Plan(context.Background(), h, in); p.Refuse == "" {
 		t.Fatal("planned without docker")
+	}
+}
+
+// testFix is a fix whose Apply does what the test says.
+type testFix struct{ apply func(c *Changes) error }
+
+func (testFix) Name() string                                                 { return "test" }
+func (testFix) Targets() []Target                                            { return nil }
+func (testFix) Plan(context.Context, Host, Input) Plan                       { return Plan{} }
+func (f testFix) Apply(_ context.Context, _ Host, _ Input, c *Changes) error { return f.apply(c) }
+
+// A failed fix says whether the server may still be changed: not when it
+// was put back, but a fix that cannot be undone may have done part of its
+// work, and a fix whose putting back failed may be half done.
+func TestFailedSaysWhetherAnythingChanged(t *testing.T) {
+	boom := testFix{apply: func(*Changes) error { return errors.New("boom") }}
+	var f *Failed
+	_, err := Run(context.Background(), newHost(), store(t), boom, input("ada"), Plan{Done: "x", Undoable: true})
+	if !errors.As(err, &f) || f.Changed {
+		t.Errorf("undoable, put back: %#v", err)
+	}
+	_, err = Run(context.Background(), newHost(), store(t), boom, input("ada"), Plan{Done: "x"})
+	if !errors.As(err, &f) || !f.Changed {
+		t.Errorf("cannot be undone, stopped partway: %#v", err)
+	}
+	h := newHost()
+	h.answer = func(cmd string) (string, error) {
+		if cmd == "systemctl reload ssh" {
+			return "", errors.New("reload failed")
+		}
+		return "", nil
+	}
+	half := testFix{apply: func(c *Changes) error {
+		if err := c.Write("/etc/ssh/sshd_config.d/x.conf", []byte("x"), 0o644); err != nil {
+			return err
+		}
+		if err := c.Then("systemctl", "reload", "ssh"); err != nil {
+			return err
+		}
+		return errors.New("boom")
+	}}
+	_, err = Run(context.Background(), h, store(t), half, input("ada"), Plan{Done: "x", Undoable: true})
+	if !errors.As(err, &f) || !f.Changed || !strings.Contains(err.Error(), "putting it back also failed") {
+		t.Errorf("putting back failed: %#v", err)
+	}
+}
+
+// A fix that worked but whose undo record could not be saved is done: the
+// record comes back with a NotKept, not a failure.
+func TestFixDoneButRecordNotSaved(t *testing.T) {
+	s := store(t)
+	gone := testFix{apply: func(c *Changes) error {
+		// The record's folder becomes a file, so the record cannot be written.
+		dir := s.dirOf(c.rec.ID)
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+		return os.WriteFile(dir, []byte("x"), 0o600)
+	}}
+	rec, err := Run(context.Background(), newHost(), s, gone, input("ada"), Plan{Done: "Done it", Undoable: true})
+	var nk *NotKept
+	var f *Failed
+	if rec == nil || rec.Done != "Done it" || !errors.As(err, &nk) || errors.As(err, &f) {
+		t.Fatalf("rec %+v, err %#v", rec, err)
+	}
+	if !strings.Contains(err.Error(), "kiyesi fix undo cannot put it back") {
+		t.Errorf("err = %v", err)
 	}
 }

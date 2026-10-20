@@ -36,8 +36,9 @@ func newConnect(io IO) *cobra.Command {
 		Short: "Link this server to the service and start sending results",
 		Long: "Checks the token with the service, saves it where only root can read it, and\n" +
 			"installs and starts the kiyesi system service. The service runs a scan now and\n" +
-			"every 15 minutes, and says it is alive every minute. It only reads, opens no\n" +
-			"port, and masks secrets before anything is sent.",
+			"every 15 minutes, and says it is alive every minute. On the free plan it\n" +
+			"reports every 10 minutes and scans every 6 hours, as the service asks. It\n" +
+			"only reads, opens no port, and masks secrets before anything is sent.",
 		Example: "  sudo kiyesi connect --token ksv_...",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

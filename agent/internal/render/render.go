@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
@@ -51,7 +52,7 @@ func Terminal(w io.Writer, r scan.Report, saveErr error, viaSudo bool) error {
 	line(grey.Render(fmt.Sprintf("Kiyesi %s · read-only scan · nothing leaves this server", version.Short())))
 	body(&b, r)
 	if n := fixable(r); n > 0 {
-		line(bold.Render(fmt.Sprintf("Kiyesi can fix %d of these for you:", n)) + " sudo kiyesi fix")
+		line(bold.Render("Kiyesi can fix "+plural(n, "thing", "things")+" for you:") + " sudo kiyesi fix")
 		line(grey.Render("It says what it will change, and asks first."))
 		line("")
 	}
@@ -70,13 +71,31 @@ func Terminal(w io.Writer, r scan.Report, saveErr error, viaSudo bool) error {
 }
 
 // Stored prints a server's latest report as the service keeps it, for
-// kiyesi server <name> on a laptop.
+// kiyesi server <name> on a laptop. The header is the agent's version and
+// when it scanned, not this laptop's; a scan over a day old offers no fix,
+// as it may no longer be true.
 func Stored(w io.Writer, r scan.Report, name string) error {
 	var b strings.Builder
-	b.WriteString("\n" + grey.Render(fmt.Sprintf("Kiyesi %s · %s · latest scan sent by the agent", version.Short(), name)) + "\n")
+	head := "Kiyesi " + r.Version + " · " + name
+	if r.Version == "" {
+		head = name
+	}
+	age := now().Sub(r.StartedAt)
+	if !r.StartedAt.IsZero() {
+		if age < time.Minute {
+			head += " · scanned just now"
+		} else {
+			head += " · scanned " + howLong(age) + " ago"
+		}
+	}
+	b.WriteString("\n" + grey.Render(head) + "\n")
 	body(&b, r)
-	if n := fixable(r); n > 0 {
-		b.WriteString(bold.Render(fmt.Sprintf("Kiyesi can fix %d of these on the server:", n)) + " sudo kiyesi fix\n\n")
+	switch n := fixable(r); {
+	case !r.StartedAt.IsZero() && age > 24*time.Hour:
+		b.WriteString(amber.Render("This scan is "+howLong(age)+" old, so it may no longer be true.") +
+			" Is the agent running? sudo systemctl status kiyesi\n\n")
+	case n > 0:
+		b.WriteString(bold.Render("Kiyesi can fix "+plural(n, "thing", "things")+" on the server:") + " sudo kiyesi fix\n\n")
 	}
 	b.WriteString(grey.Render("Every fix command: kiyesi server "+name+" --json, or the dashboard.") + "\n\n")
 	_, err := io.WriteString(w, b.String())
@@ -126,17 +145,35 @@ func body(b *strings.Builder, r scan.Report) {
 	}
 }
 
-// fixable counts the findings kiyesi fix can make for you.
+// now is the clock for a stored scan's age; tests replace it.
+var now = time.Now
+
+// howLong says a duration in the largest whole unit: "5 minutes", "3 days".
+func howLong(d time.Duration) string {
+	switch {
+	case d >= 48*time.Hour:
+		return plural(int(d/(24*time.Hour)), "day", "days")
+	case d >= time.Hour:
+		return plural(int(d/time.Hour), "hour", "hours")
+	default:
+		return plural(max(int(d/time.Minute), 1), "minute", "minutes")
+	}
+}
+
+// fixable counts the fixes kiyesi fix would offer for the findings that
+// count against the grade: one fix for three secret files is one. Optional
+// clean-ups (info) are not offered here: at A 100 the report says nothing
+// about fixing, so nobody is left wondering what is wrong.
 func fixable(r scan.Report) int {
-	n := 0
+	names := map[string]bool{}
 	for _, c := range r.Checks {
 		for _, f := range c.Findings {
-			if f.AutoFix != "" {
-				n++
+			if f.AutoFix != "" && f.Severity != "info" {
+				names[f.AutoFix] = true
 			}
 		}
 	}
-	return n
+	return len(names)
 }
 
 func hostLine(r scan.Report) string {

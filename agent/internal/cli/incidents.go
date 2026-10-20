@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -45,6 +46,59 @@ func sourceLine(i api.Incident) string {
 	}
 	return name + ", " + certaintyWords[*i.Certainty]
 }
+
+// whoMoved is who acknowledged an incident and who fixed it, when, and the note.
+func whoMoved(i api.Incident) []string {
+	var out []string
+	at := func(t time.Time) string { return t.Local().Format("Mon 2 Jan 15:04") }
+	if i.Acked != nil {
+		out = append(out, fmt.Sprintf("Acknowledged by %s, %s.", nameOr(i.Acked.By), at(i.Acked.At)))
+	}
+	if i.Fixed != nil {
+		if i.Fixed.By == nil {
+			out = append(out, fmt.Sprintf("Closed by itself, %s.", at(i.Fixed.At)))
+		} else {
+			out = append(out, fmt.Sprintf("Fixed by %s, %s.", *i.Fixed.By, at(i.Fixed.At)))
+		}
+		if i.Fixed.Note != nil && *i.Fixed.Note != "" {
+			out = append(out, "What fixed it: "+*i.Fixed.Note)
+		}
+	}
+	return out
+}
+
+func nameOr(by *string) string {
+	if by == nil || *by == "" {
+		return "a former teammate"
+	}
+	return *by
+}
+
+// nextSteps is the commands that apply to an incident now: Acknowledge only
+// while nobody has, and nothing for a role that does not act on incidents.
+func nextSteps(i api.Incident, mayAct bool) string {
+	switch {
+	case !mayAct || i.Limited || i.Status == "fixed":
+		return ""
+	case i.Status == "open":
+		return fmt.Sprintf("kiyesi ack %s, then kiyesi resolve %s --note \"what fixed it\"", i.Ref, i.Ref)
+	default:
+		return fmt.Sprintf("kiyesi resolve %s --note \"what fixed it\"", i.Ref)
+	}
+}
+
+// already is the service saying an Acknowledge or Mark fixed changed
+// nothing, because it was done before: its words name who and when.
+func already(err error) (string, bool) {
+	var p *api.Problem
+	if errors.As(err, &p) && p.Status == 409 && strings.HasPrefix(p.Code, "already_") && p.Message != "" {
+		return p.Message, true
+	}
+	return "", false
+}
+
+// maxNote is the longest fix note the service keeps.
+const maxNote = 500
 
 func newIncidents(io IO) *cobra.Command {
 	var status string
@@ -123,7 +177,11 @@ func newIncident(io IO) *cobra.Command {
 			if asJSON {
 				return render.JSON(io.Out, i)
 			}
-			fmt.Fprintf(io.Out, "%s  %s\n%s, %s, started %s\n\n", i.Ref, i.Title, i.Severity, i.Status, i.StartedAt.Local().Format("Mon 2 Jan 15:04"))
+			fmt.Fprintf(io.Out, "%s  %s\n%s, %s, started %s\n", i.Ref, i.Title, i.Severity, i.Status, i.StartedAt.Local().Format("Mon 2 Jan 15:04"))
+			for _, l := range whoMoved(i) {
+				fmt.Fprintln(io.Out, l)
+			}
+			fmt.Fprintln(io.Out)
 			if i.Limited {
 				fmt.Fprintln(io.Out, "You can see that this incident happened and its status. The evidence is for your team.")
 				return nil
@@ -160,8 +218,8 @@ func newIncident(io IO) *cobra.Command {
 					fmt.Fprintf(io.Out, "\n  %s\n", *i.Fix.Command)
 				}
 			}
-			if i.Status != "fixed" {
-				fmt.Fprintf(io.Out, "\nkiyesi ack %s, then kiyesi resolve %s --note \"what fixed it\"\n", i.Ref, i.Ref)
+			if h := nextSteps(i, mayDo(cmd.Context(), c, "incidents", "act")); h != "" {
+				fmt.Fprintf(io.Out, "\n%s\n", h)
 			}
 			return nil
 		},
@@ -189,12 +247,18 @@ func newAck(io IO) *cobra.Command {
 					return err
 				}
 				if err := c.AckWork(cmd.Context(), row.Key); err != nil {
+					if msg, ok := already(err); ok {
+						return usageErr("%s %s", args[0], strings.TrimPrefix(msg, "It "))
+					}
 					return workErr(err)
 				}
 				fmt.Fprintf(io.Out, "Acknowledged %s. Your team can see someone is on it.\n", args[0])
 				return nil
 			}
 			if err := c.AckIncident(cmd.Context(), args[0]); err != nil {
+				if msg, ok := already(err); ok {
+					return usageErr("%s", msg)
+				}
 				return incidentErr(err)
 			}
 			fmt.Fprintf(io.Out, "Acknowledged %s. Your team can see someone is on it.\n", strings.ToUpper(args[0]))
@@ -217,6 +281,9 @@ func newResolve(io IO) *cobra.Command {
 			if len(strings.TrimSpace(note)) < 3 {
 				return usageErr("Say what fixed it with --note. It shows first the next time this happens.")
 			}
+			if n := len([]rune(strings.TrimSpace(note))); n > maxNote {
+				return usageErr("The note is %d characters: keep it to %d, a line on what fixed it.", n, maxNote)
+			}
 			c, err := signedIn()
 			if err != nil {
 				return err
@@ -227,12 +294,18 @@ func newResolve(io IO) *cobra.Command {
 					return err
 				}
 				if err := c.FixWork(cmd.Context(), row.Key, note); err != nil {
+					if msg, ok := already(err); ok {
+						return usageErr("%s", msg)
+					}
 					return workErr(err)
 				}
 				fmt.Fprintf(io.Out, "Marked %s fixed. Your note shows first the next time this happens.\n", args[0])
 				return nil
 			}
 			if err := c.ResolveIncident(cmd.Context(), args[0], note); err != nil {
+				if msg, ok := already(err); ok {
+					return usageErr("%s", msg)
+				}
 				return incidentErr(err)
 			}
 			fmt.Fprintf(io.Out, "Marked %s fixed. Your note shows first the next time this happens.\n", strings.ToUpper(args[0]))
@@ -267,7 +340,7 @@ func newExplain(io IO) *cobra.Command {
 			}
 			if i.Explain == nil {
 				if i.Limited {
-					return usageErr("The paragraph is for your team: your role sees only that this incident happened.")
+					return &exitError{code: ExitNoAccess, msg: "The paragraph is for your team: your role sees only that this incident happened."}
 				}
 				return usageErr("%s is still being looked at. The paragraph is ready within a minute of it opening.", i.Ref)
 			}

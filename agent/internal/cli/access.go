@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -178,36 +179,33 @@ func newTeamAccess(io IO) *cobra.Command {
 			}
 			roleID := who.Role.ID
 			if role != "" {
-				roles, err := c.Roles(ctx)
-				if err != nil {
-					return apiErr(err)
-				}
-				roleID = ""
-				names := make([]string, 0, len(roles))
-				for _, r := range roles {
-					names = append(names, r.Name)
-					if strings.EqualFold(r.Name, role) || r.ID == role {
-						roleID = r.ID
-					}
-				}
-				if roleID == "" {
-					sort.Strings(names)
-					return usageErr("There is no role called %q. Roles: %s.", role, strings.Join(names, ", "))
+				if roleID, err = teamRoleID(ctx, c, role); err != nil {
+					return err
 				}
 			}
+			// Where it applies stays as it is unless --projects or
+			// --leave-out says otherwise, so changing only the role or the
+			// end day never widens a limited person to every project.
 			scope := api.AccessScope{All: true}
+			if who.Scope != nil {
+				scope = *who.Scope
+			}
+			before := scope
+			var where []string
 			if projects != "" {
 				list, err := c.Projects(ctx)
 				if err != nil {
 					return apiErr(err)
 				}
-				scope = api.AccessScope{All: false}
+				scope.All, scope.Projects = false, nil
+				var names []string
 				for _, name := range strings.Split(projects, ",") {
 					name = strings.TrimSpace(name)
 					found := false
 					for _, p := range list {
 						if strings.EqualFold(p.Name, name) {
 							scope.Projects = append(scope.Projects, api.ProjectAccess{ProjectID: p.ID})
+							names = append(names, p.Name)
 							found = true
 						}
 					}
@@ -215,19 +213,24 @@ func newTeamAccess(io IO) *cobra.Command {
 						return usageErr("There is no project called %q that you can see.", name)
 					}
 				}
+				where = append(where, "only in "+strings.Join(names, ", "))
 			}
 			if leaveOut != "" {
 				servers, err := c.Servers(ctx)
 				if err != nil {
 					return apiErr(err)
 				}
+				scope.LeftOut = nil
+				var names []string
 				for _, name := range strings.Split(leaveOut, ",") {
 					s, ok := find(servers, strings.TrimSpace(name))
 					if !ok {
 						return usageErr("There is no server called %q that you can see.", name)
 					}
 					scope.LeftOut = append(scope.LeftOut, s.ID)
+					names = append(names, s.Name)
 				}
+				where = append(where, "leaving out "+strings.Join(names, ", "))
 			}
 			end := until
 			if until == "" && !forGood && who.EndsAt != nil {
@@ -237,17 +240,48 @@ func newTeamAccess(io IO) *cobra.Command {
 				return apiErr(err)
 			}
 			fmt.Fprintf(io.Out, "%s's access changed. It applies on their next click.\n", who.Name)
+			if len(where) > 0 && !sameScope(before, scope) {
+				fmt.Fprintf(io.Out, "Where it applies changed too: %s.\n", strings.Join(where, ", "))
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&role, "role", "", "the role's name, such as member or \"Frontend contractor\"")
-	cmd.Flags().StringVar(&projects, "projects", "", "projects it applies in, separated by commas; all when left out")
+	cmd.Flags().StringVar(&projects, "projects", "", "projects it applies in, separated by commas; kept as they are when left out")
 	cmd.Flags().StringVar(&leaveOut, "leave-out", "", "servers to leave out, separated by commas")
 	cmd.Flags().StringVar(&until, "until", "", "the day access ends, such as 2026-11-30")
 	cmd.Flags().BoolVar(&forGood, "for-good", false, "access with no end date")
 	cmd.Flags().StringVar(&code, "code", "", "the code from your authenticator app, instead of typing it when asked")
 	cmd.SetContext(context.Background())
 	return cmd
+}
+
+// teamRoleID finds one of the team's roles, built in or made by the team,
+// by its name (any case) or id.
+func teamRoleID(ctx context.Context, c *api.Client, role string) (string, error) {
+	roles, err := c.Roles(ctx)
+	if errors.Is(err, api.ErrNotFound) {
+		return "", &exitError{code: ExitUsage, msg: "Roles are for owners and admins."}
+	}
+	if err != nil {
+		return "", apiErr(err)
+	}
+	names := make([]string, 0, len(roles))
+	for _, r := range roles {
+		names = append(names, r.Name)
+		if strings.EqualFold(r.Name, strings.TrimSpace(role)) || r.ID == role {
+			return r.ID, nil
+		}
+	}
+	sort.Strings(names)
+	return "", usageErr("There is no role called %q. Roles: %s. Choose one with --role.", role, strings.Join(names, ", "))
+}
+
+// sameScope says whether two scopes give the same access.
+func sameScope(a, b api.AccessScope) bool {
+	a2, _ := json.Marshal(a)
+	b2, _ := json.Marshal(b)
+	return string(a2) == string(b2)
 }
 
 func newTeamUse(io IO) *cobra.Command {

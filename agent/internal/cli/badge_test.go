@@ -29,4 +29,11 @@ func TestBadgePrintsTheLineToPasteAndTurnsOff(t *testing.T) {
 	if code, _, errOut := runCLI(t, "badge", "nope"); code != ExitUsage || !strings.Contains(errOut, "kiyesi servers") {
 		t.Errorf("unknown server: %d %q", code, errOut)
 	}
+	// Already off: say so, not that it stops now.
+	if code, _, _ := runCLI(t, "team", "use", "Globex"); code != ExitOK {
+		t.Fatal("team use")
+	}
+	if code, out, _ := runCLI(t, "badge", "checkout-api-prod", "--off"); code != ExitOK || !strings.Contains(out, "It was already off.") || strings.Contains(out, "stops answering now") {
+		t.Errorf("already off: %d %s", code, out)
+	}
 }
