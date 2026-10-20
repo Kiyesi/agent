@@ -394,7 +394,7 @@ func drawCharts(w io.Writer, name, r string, ch api.Charts) {
 		_, peakP95 := stats(ch.P95)
 		row("Slowest", ch.P95, peakP95, " ms")
 	} else {
-		fmt.Fprintln(w, "Requests  none read yet: Kiyesi reads nginx's access log, or an nginx or Caddy container's output")
+		fmt.Fprintln(w, "Requests  none read yet: Kiyesi reads nginx's access logs in /var/log/nginx, or an nginx or Caddy container's output")
 	}
 	if len(ch.Deploys) > 0 {
 		fmt.Fprintln(w, "\nDeploys")

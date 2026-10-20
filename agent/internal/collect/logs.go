@@ -16,7 +16,8 @@ import (
 type LogLine struct {
 	At time.Time `json:"at"`
 	// Source names where it came from: a container, "nginx", "nginx error",
-	// a systemd service, "kernel" or "docker".
+	// a site's own nginx log ("nginx shop.example.com", "nginx
+	// shop.example.com error"), a systemd service, "kernel" or "docker".
 	Source string `json:"source"`
 	// Kind is container, file, journal or event.
 	Kind string `json:"kind"`

@@ -206,7 +206,9 @@ func TestBatchGoldenForTheAPI(t *testing.T) {
 		Disks:      []collect.Disk{{Mount: "/", UsedBytes: 20000000000, TotalBytes: 50000000000}},
 		Net:        &collect.Net{RxBytesPerSec: 1200, TxBytesPerSec: 3400},
 		Containers: []collect.Container{{Name: "checkout-api", CPUPercent: &cpu, MemBytes: &used, MemLimitBytes: &limit}},
-		HTTP:       []collect.EndpointStats{{Endpoint: "GET /api/users/:id", Requests: 120, Errors: 2, AvgMs: &avg, P95Ms: &p95}},
+		// One request figure for a named site, one for no site in particular.
+		HTTP: []collect.EndpointStats{{Endpoint: "GET /api/users/:id", Site: "shop.example.com", Requests: 120, Errors: 2, AvgMs: &avg, P95Ms: &p95},
+			{Endpoint: "GET /health", Requests: 60, Errors: 0, AvgMs: nil, P95Ms: nil}},
 		HTTPSource: "caddy (container)",
 	}
 	events := []collect.Event{
@@ -217,6 +219,7 @@ func TestBatchGoldenForTheAPI(t *testing.T) {
 		{At: at.Add(-50 * time.Second), Source: "checkout-api", Kind: "container", Level: "info", Text: "Connecting to redis://default:" + "hunter2-not-real" + "@redis:6379"},
 		{At: at.Add(-40 * time.Second), Source: "checkout-api", Kind: "container", Level: "error", Text: "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory"},
 		{At: at.Add(-30 * time.Second), Source: "nginx", Kind: "file", Level: "error", Text: `203.0.113.9 - - [09/Oct/2026:10:00:05 +0000] "POST /api/orders HTTP/1.1" 502 157 "-" "curl/8.5.0"`},
+		{At: at.Add(-25 * time.Second), Source: "nginx shop.example.com", Kind: "file", Level: "info", Text: `203.0.113.9 - - [09/Oct/2026:10:00:10 +0000] "GET /api/users/7 HTTP/1.1" 200 512 "-" "curl/8.5.0"`},
 		{At: at.Add(-20 * time.Second), Source: "kernel", Kind: "journal", Level: "error", Text: "Out of memory: Killed process 21877 (node)"},
 	}, Dropped: 0}
 	// A server with no timed jobs: an empty list, which JSON leaves out.
@@ -247,6 +250,52 @@ func TestBatchGoldenForTheAPI(t *testing.T) {
 
 // Each reply may name the team's home country; the agent keeps it for the
 // next scan. Anything that is not a two-letter code is ignored.
+// Each request figure names its site, and leaves the field out when the
+// site is unknown, so an API from before sites reads it as before.
+func TestMinuteNamesTheSiteOfRequests(t *testing.T) {
+	at := time.Date(2026, 10, 9, 10, 0, 5, 0, time.UTC)
+	m := &collect.Metrics{HTTP: []collect.EndpointStats{
+		{Endpoint: "GET /health", Site: "shop.example.com", Requests: 3},
+		{Endpoint: "GET /health", Site: "blog.example.com", Requests: 1},
+		{Endpoint: "GET /health", Requests: 2},
+	}}
+	body, err := Encode(Minute(at, m, nil, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	zr, _ := gzip.NewReader(bytes.NewReader(body))
+	raw, _ := io.ReadAll(zr)
+	var b struct {
+		Items []struct {
+			Metrics *struct {
+				HTTP []map[string]any `json:"http"`
+			} `json:"metrics"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(raw, &b); err != nil {
+		t.Fatal(err)
+	}
+	var http []map[string]any
+	for _, it := range b.Items {
+		if it.Metrics != nil {
+			http = it.Metrics.HTTP
+		}
+	}
+	if len(http) != 3 || http[0]["site"] != "shop.example.com" || http[1]["site"] != "blog.example.com" || http[0]["endpoint"] != "GET /health" {
+		t.Fatalf("http = %v", http)
+	}
+	if _, ok := http[2]["site"]; ok {
+		t.Errorf("an unknown site must be left out: %v", http[2])
+	}
+	for _, e := range http {
+		for _, k := range []string{"endpoint", "requests", "errors", "avg_ms", "p95_ms"} {
+			if _, ok := e[k]; !ok {
+				t.Errorf("%v has no %s", e, k)
+			}
+		}
+	}
+}
+
 func TestRepliesNameTheTeamsHomeCountry(t *testing.T) {
 	for _, tc := range []struct {
 		reply string

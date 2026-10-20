@@ -2,6 +2,8 @@ package collect
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -121,6 +123,132 @@ func TestCollectWorksOutRatesFromTwoMinutes(t *testing.T) {
 	m, _ = c.Collect(context.Background())
 	if len(m.HTTP) != 0 {
 		t.Errorf("counted again: %+v", m.HTTP)
+	}
+}
+
+func TestNginxLogsListsEveryLogButOldOnes(t *testing.T) {
+	fsys := fstest.MapFS{}
+	for _, n := range []string{
+		"access.log", "error.log",
+		"shop.example.com.access.log", "shop.example.com.error.log",
+		"blog-access.log", "access_api.example.com.log",
+		// Rotated, compressed or dated: old lines, never read.
+		"access.log.1", "access.log.2.gz", "access.log-20261019", "shop.example.com.access.log.1",
+		"access-2026-10-19.log", "access.20261019.log", "access.3.log",
+		// Not an access or error log.
+		"nginx.pid", "notes.txt", "upstream.log",
+	} {
+		fsys["var/log/nginx/"+n] = &fstest.MapFile{Data: []byte("x\n")}
+	}
+	fsys["var/log/nginx/old-access.log/inside"] = &fstest.MapFile{}
+	access, errs := nginxLogs(fsys)
+	if strings.Join(access, " ") != "var/log/nginx/access.log var/log/nginx/access_api.example.com.log var/log/nginx/blog-access.log var/log/nginx/shop.example.com.access.log" {
+		t.Errorf("access logs = %v", access)
+	}
+	if strings.Join(errs, " ") != "var/log/nginx/error.log var/log/nginx/shop.example.com.error.log" {
+		t.Errorf("error logs = %v", errs)
+	}
+	if a, e := nginxLogs(fstest.MapFS{}); a != nil || e != nil {
+		t.Errorf("no nginx: %v %v", a, e)
+	}
+}
+
+func TestNginxLogsReadsAtMostMaxLogFiles(t *testing.T) {
+	fsys := fstest.MapFS{"var/log/nginx/access.log": {}}
+	for i := 0; i < MaxLogFiles+20; i++ {
+		fsys[fmt.Sprintf("var/log/nginx/site%03d.example.com.access.log", i)] = &fstest.MapFile{}
+	}
+	access, _ := nginxLogs(fsys)
+	if len(access) != MaxLogFiles || access[0] != "var/log/nginx/access.log" {
+		t.Errorf("read %d files, first %q", len(access), access[0])
+	}
+}
+
+func TestSiteAndSourceFromTheFileName(t *testing.T) {
+	cases := []struct {
+		file, site, source string
+		errorLog           bool
+	}{
+		{"access.log", "", "nginx", false},
+		{"error.log", "", "nginx error", true},
+		{"shop.example.com.access.log", "shop.example.com", "nginx shop.example.com", false},
+		{"shop.example.com.error.log", "shop.example.com", "nginx shop.example.com error", true},
+		{"shop-access.log", "shop", "nginx shop", false},
+		{"shop_error.log", "shop", "nginx shop error", true},
+		{"access_api.example.com.log", "api.example.com", "nginx api.example.com", false},
+		{"Blog.Example.com-access.log", "blog.example.com", "nginx blog.example.com", false},
+		{"ssl_access.log", "", "nginx", false},
+		{"default.access.log", "", "nginx", false},
+		{"203.0.113.9.access.log", "", "nginx", false},
+	}
+	for _, c := range cases {
+		p := "var/log/nginx/" + c.file
+		if got := fileSite(p); got != c.site {
+			t.Errorf("fileSite(%q) = %q, want %q", c.file, got, c.site)
+		}
+		if got := fileSource(p, c.errorLog); got != c.source {
+			t.Errorf("fileSource(%q) = %q, want %q", c.file, got, c.source)
+		}
+	}
+	long := strings.Repeat("a", 63) + "." + strings.Repeat("b", 63) + "." + strings.Repeat("c", 63) + ".example.com"
+	if got := fileSource("var/log/nginx/"+long+".error.log", true); len(got) != 200 || !strings.HasPrefix(got, "nginx aaa") {
+		t.Errorf("a long name gives %d characters: %q", len(got), got)
+	}
+}
+
+func TestCollectNamesTheSiteOfEachRequest(t *testing.T) {
+	start := time.Date(2026, 10, 10, 10, 0, 0, 0, time.UTC)
+	now := start
+	logs := func(shop, blog, plain, shopErr string) fstest.MapFS {
+		fsys := files("100", "900", "1000", "2000", "3", "1000000", plain)
+		fsys["var/log/nginx/shop.example.com.access.log"] = &fstest.MapFile{Data: []byte(shop)}
+		fsys["var/log/nginx/blog-access.log"] = &fstest.MapFile{Data: []byte(blog)}
+		fsys["var/log/nginx/shop.example.com.error.log"] = &fstest.MapFile{Data: []byte(shopErr)}
+		fsys["var/log/nginx/access.log.1"] = &fstest.MapFile{Data: []byte("old\n")}
+		return fsys
+	}
+	health := `203.0.113.9 - - [10/Oct/2026:10:00:30 +0000] "GET /health HTTP/1.1" 200 2 "-" "ua" 0.002` + "\n"
+	sys := &system.System{FS: logs("old\n", "old\n", "old\n", "old\n"), Now: func() time.Time { return now }}
+	c := &Collector{Sys: sys, Logs: true}
+	c.Collect(context.Background())
+	c.TakeLogs()
+
+	now = start.Add(time.Minute)
+	// The plain log says the site on the line; the per-site files do not.
+	vhost := `api.example.com:443 203.0.113.9 - - [10/Oct/2026:10:00:40 +0000] "GET /health HTTP/1.1" 200 2 "-" "ua"` + "\n"
+	sys.FS = logs("old\n"+health+health, "old\n"+health, "old\n"+health+vhost, "old\n2026/10/10 10:00:41 [error] 12#12: upstream timed out\n")
+	sys.FS.(fstest.MapFS)["var/log/nginx/access.log.1"] = &fstest.MapFile{Data: []byte("old\n" + health + health + health)}
+	m, _ := c.Collect(context.Background())
+	got := map[string]int{}
+	for _, e := range m.HTTP {
+		got[e.Site+" "+e.Endpoint] = e.Requests
+	}
+	want := map[string]int{"shop.example.com GET /health": 2, "blog GET /health": 1, "api.example.com GET /health": 1, " GET /health": 1}
+	if len(got) != len(want) {
+		t.Errorf("http = %v, want %v", got, want)
+	}
+	for k, n := range want {
+		if got[k] != n {
+			t.Errorf("%q: %d requests, want %d (all: %v)", k, got[k], n, got)
+		}
+	}
+	if m.HTTPSource != "/var/log/nginx/access.log, /var/log/nginx/blog-access.log, /var/log/nginx/shop.example.com.access.log" {
+		t.Errorf("source = %q", m.HTTPSource)
+	}
+	sources := map[string]int{}
+	for _, l := range c.TakeLogs().Lines {
+		sources[l.Source]++
+	}
+	if sources["nginx"] != 2 || sources["nginx shop.example.com"] != 2 || sources["nginx blog"] != 1 || sources["nginx shop.example.com error"] != 1 || len(sources) != 4 {
+		t.Errorf("log sources = %v", sources)
+	}
+
+	// A site's log that goes away is forgotten.
+	delete(sys.FS.(fstest.MapFS), "var/log/nginx/blog-access.log")
+	now = start.Add(2 * time.Minute)
+	c.Collect(context.Background())
+	if _, ok := c.fileOffset["var/log/nginx/blog-access.log"]; ok || len(c.fileOffset) != 3 {
+		t.Errorf("offsets = %v", c.fileOffset)
 	}
 }
 
