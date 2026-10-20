@@ -3,7 +3,9 @@ package collect
 import (
 	"context"
 	"io"
+	"io/fs"
 	"math"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -68,18 +70,105 @@ type Event struct {
 	At      string `json:"at,omitempty"`
 }
 
-// AccessLogs are the host files read for requests, when they exist.
-var AccessLogs = []string{"var/log/nginx/access.log"}
+// NginxLogDir is where the host's nginx writes its logs. Every access log
+// in it is read for requests, and every error log is sent as log lines.
+const NginxLogDir = "var/log/nginx"
 
-// ErrorLogs are the host web server's error logs, sent as log lines only.
-var ErrorLogs = []string{"var/log/nginx/error.log"}
+// MaxLogFiles is how many access logs, and how many error logs, are read.
+// A server with one log per site can have hundreds of old files left from
+// sites long gone; each one read is a file opened every minute, so past
+// this many the rest are left alone. access.log and error.log come first.
+const MaxLogFiles = 50
 
-// fileSource names a log file in the Logs screen.
-func fileSource(p string) string {
-	if strings.HasSuffix(p, "error.log") {
-		return "nginx error"
+// dated picks names with a date in them, such as access-2026-10-19.log,
+// which are old logs kept by a rotation that renames rather than numbers.
+var dated = regexp.MustCompile(`\d{8}|\d{4}-\d{2}-\d{2}|\.\d+\.log$`)
+
+// nginxLogs lists the access logs and the error logs in NginxLogDir: names
+// ending in .log with "access" or "error" in them, such as access.log,
+// shop.example.com.access.log, shop-access.log or access_shop.log. Rotated
+// copies (access.log.1, access.log.2.gz, access.log-20261019) do not end
+// in .log, and dated ones are skipped, so old lines are never counted.
+func nginxLogs(fsys fs.FS) (access, errs []string) {
+	entries, err := fs.ReadDir(fsys, NginxLogDir)
+	if err != nil {
+		return nil, nil
 	}
-	return "nginx"
+	for _, e := range entries {
+		n := e.Name()
+		if !e.Type().IsRegular() && e.Type()&fs.ModeSymlink == 0 {
+			continue
+		}
+		if !strings.HasSuffix(n, ".log") || dated.MatchString(n) {
+			continue
+		}
+		switch {
+		case strings.Contains(n, "access"):
+			access = append(access, path.Join(NginxLogDir, n))
+		case strings.Contains(n, "error"):
+			errs = append(errs, path.Join(NginxLogDir, n))
+		}
+	}
+	return firstFiles(access, "access.log"), firstFiles(errs, "error.log")
+}
+
+// firstFiles puts the plain log first, then the others by name, at most
+// MaxLogFiles of them.
+func firstFiles(list []string, plain string) []string {
+	sort.Slice(list, func(i, j int) bool {
+		a, b := path.Base(list[i]) == plain, path.Base(list[j]) == plain
+		if a != b {
+			return a
+		}
+		return list[i] < list[j]
+	})
+	if len(list) > MaxLogFiles {
+		list = list[:MaxLogFiles]
+	}
+	return list
+}
+
+// logWords are parts of a log's name that say what kind of log it is, not
+// which site: "ssl_access.log" and "default.access.log" name no site.
+var logWords = map[string]bool{"access": true, "error": true, "ssl": true, "default": true, "nginx": true, "log": true}
+
+// fileSite is the site a per-site log file is for, from its name:
+// shop.example.com.access.log and access_shop.example.com.log give
+// "shop.example.com", shop-access.log gives "shop". The plain access.log
+// and error.log give "".
+func fileSite(p string) string {
+	n := strings.TrimSuffix(path.Base(p), ".log")
+	for _, w := range []string{"access", "error"} {
+		for _, sep := range []string{".", "-", "_"} {
+			if s, ok := strings.CutSuffix(n, sep+w); ok {
+				n = s
+			} else if s, ok := strings.CutPrefix(n, w+sep); ok {
+				n = s
+			}
+		}
+	}
+	if logWords[strings.ToLower(n)] {
+		return ""
+	}
+	return Site(n)
+}
+
+// fileSource names a log file in the Logs screen: "nginx" and "nginx
+// error" for the plain logs, "nginx shop.example.com" and "nginx
+// shop.example.com error" for a site's own.
+func fileSource(p string, errorLog bool) string {
+	src := "nginx"
+	if site := fileSite(p); site != "" {
+		src += " " + site
+	}
+	if errorLog {
+		src += " error"
+	}
+	// The service takes names of up to 200 characters.
+	if len(src) > 200 {
+		src = src[:200]
+	}
+	return src
 }
 
 // webServerImage picks the containers whose output is a web server's access log.
@@ -284,23 +373,39 @@ func (c *Collector) readAccessLogs(ctx context.Context, now time.Time, list []sy
 		c.fileOffset, c.logSince = map[string]int64{}, map[string]time.Time{}
 	}
 	var sources []string
-	for _, p := range AccessLogs {
+	access, errs := nginxLogs(c.Sys.FS)
+	listed := map[string]bool{}
+	for _, p := range access {
+		listed[p] = true
+		// A line that names no site is for the site the file is for, if any.
+		site, source := fileSite(p), fileSource(p, false)
 		if c.tailFile(p, func(line string) {
 			if r, ok := ParseAccessLine(line); ok {
+				if r.Host == "" {
+					r.Host = site
+				}
 				reqs.Add(r)
 			}
 			if c.Logs {
-				c.buf.add(LogLine{At: now, Source: fileSource(p), Kind: "file", Text: line})
+				c.buf.add(LogLine{At: now, Source: source, Kind: "file", Text: line})
 			}
 		}) {
 			sources = append(sources, "/"+p)
 		}
 	}
 	if c.Logs {
-		for _, p := range ErrorLogs {
+		for _, p := range errs {
+			listed[p] = true
+			source := fileSource(p, true)
 			c.tailFile(p, func(line string) {
-				c.buf.add(LogLine{At: now, Source: fileSource(p), Kind: "file", Text: line})
+				c.buf.add(LogLine{At: now, Source: source, Kind: "file", Text: line})
 			})
+		}
+	}
+	// Forget files that are gone, so the list of places stays small.
+	for p := range c.fileOffset {
+		if !listed[p] {
+			delete(c.fileOffset, p)
 		}
 	}
 	if c.Sys.Docker != nil {
