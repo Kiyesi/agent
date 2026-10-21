@@ -3,9 +3,12 @@ package jobs
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -75,6 +78,49 @@ func TestTakeIgnoresLinksAndBadNames(t *testing.T) {
 	runs := Take(spool)
 	if len(runs) != 1 || runs[0].Name != "ok-job" {
 		t.Errorf("runs = %+v", runs)
+	}
+}
+
+// The spool takes files from every user, so a run's user is whoever owns
+// its file: a user cannot record a run as root.
+func TestTakeNamesTheFilesOwnerNotWhatTheFileClaims(t *testing.T) {
+	spool := t.TempDir()
+	_ = os.WriteFile(filepath.Join(spool, "a.start.json"), []byte(`{"name":"backup","run_id":"1","user":"root"}`), 0o600)
+	runs := Take(spool)
+	if len(runs) != 1 {
+		t.Fatalf("runs = %+v", runs)
+	}
+	me, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runs[0].User != me.Username {
+		t.Errorf("user = %q, want the file's owner %q", runs[0].User, me.Username)
+	}
+}
+
+// A pipe in the spool is never waited on, and one user's flood of runs
+// leaves room for others: the rest wait for the next go.
+func TestTakeNeverWaitsOnAPipeAndCapsEachUser(t *testing.T) {
+	spool := t.TempDir()
+	if err := syscall.Mkfifo(filepath.Join(spool, "0.start.json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 40 {
+		_ = os.WriteFile(filepath.Join(spool, fmt.Sprintf("r%02d.start.json", i)), []byte(fmt.Sprintf(`{"name":"job","run_id":"%d"}`, i)), 0o600)
+	}
+	done := make(chan []Run, 1)
+	go func() { done <- Take(spool) }()
+	select {
+	case runs := <-done:
+		if len(runs) != perUserRuns {
+			t.Fatalf("one user got %d runs in one go", len(runs))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Take waited on a pipe")
+	}
+	if left, _ := os.ReadDir(spool); len(left) != 40-perUserRuns {
+		t.Errorf("%d files wait for the next go", len(left))
 	}
 }
 

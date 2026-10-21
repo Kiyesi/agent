@@ -91,7 +91,7 @@ func newAgent(io IO) *cobra.Command {
 					var schedules []jobs.Schedule
 					if now := time.Now(); now.Sub(lastJobScan) >= scanEvery {
 						lastJobScan = now
-						schedules = jobs.Find(ctx, os.DirFS("/"), system.ExecRunner{}, now)
+						schedules = jobs.Find(ctx, system.NewRootFS("/"), system.ExecRunner{}, now)
 						if schedules == nil {
 							schedules = []jobs.Schedule{}
 						}

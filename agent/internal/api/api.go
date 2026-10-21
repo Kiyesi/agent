@@ -66,9 +66,16 @@ type Client struct {
 	HTTP *http.Client
 }
 
-// New returns a client with a time limit on every request.
+// noRedirect never follows a redirect: the service never sends one, and
+// following it would send the request, and what it carries, to another
+// address. The redirect comes back as the answer, which callers treat as an
+// error.
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+// New returns a client with a time limit on every request, that follows no
+// redirect.
 func New(api, token string) *Client {
-	return &Client{API: strings.TrimRight(api, "/"), Token: token, HTTP: &http.Client{Timeout: 30 * time.Second}}
+	return &Client{API: strings.TrimRight(api, "/"), Token: token, HTTP: &http.Client{Timeout: 30 * time.Second, CheckRedirect: noRedirect}}
 }
 
 func (c *Client) do(ctx context.Context, method, path string, in, out any) error {

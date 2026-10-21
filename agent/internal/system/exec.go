@@ -33,7 +33,7 @@ func (ExecRunner) Has(name string) bool {
 	if !allowed[name] {
 		return false
 	}
-	_, err := exec.LookPath(name)
+	_, err := Find(name)
 	return err == nil
 }
 
@@ -43,15 +43,18 @@ func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte,
 	if !allowed[name] {
 		return nil, fmt.Errorf("%s is not on the scan's list of read-only programs", name)
 	}
-	// #nosec G204 -- name is checked against the read-only allowlist above,
-	// and args are fixed by each check, never taken from the server.
-	cmd := exec.CommandContext(ctx, name, args...)
+	path, err := Find(name)
+	if err != nil {
+		return nil, fmt.Errorf("%s is not installed in %s", name, strings.Join(ProgramDirs, ", "))
+	}
+	// #nosec G204 -- name is checked against the read-only allowlist above and
+	// taken from root's own folders, and args are fixed by each check.
+	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Env = append(cmd.Environ(), "LC_ALL=C", "SYSTEMD_PAGER=", "NO_COLOR=1")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if len(msg) > 300 {
 			msg = msg[:300]

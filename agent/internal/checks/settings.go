@@ -75,7 +75,7 @@ func readSettings(e *Env) Settings {
 			if err != nil || info.Size() > 1<<20 {
 				return nil
 			}
-			data, err := fs.ReadFile(fsys, p)
+			data, err := readUserFile(fsys, p)
 			if errors.Is(err, fs.ErrPermission) {
 				s.Blocked = true
 				return nil
@@ -123,7 +123,7 @@ func readSettings(e *Env) Settings {
 			}
 		}
 		for _, f := range files {
-			if data, err := fs.ReadFile(fsys, f); err == nil {
+			if data, err := readUserFile(fsys, f); err == nil {
 				s.Scripts = append(s.Scripts, lines("/"+f, data)...)
 			}
 		}

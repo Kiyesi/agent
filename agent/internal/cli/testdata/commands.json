@@ -124,10 +124,10 @@
   },
   {
     "path": "kiyesi connect",
-    "use": "kiyesi connect --token <token> [flags]",
+    "use": "kiyesi connect [--token <token> | --token -] [flags]",
     "short": "Link this server to the service and start sending results",
-    "long": "Checks the token with the service, saves it where only root can read it, and\ninstalls and starts the kiyesi system service. The service runs a scan now and\nevery 15 minutes, and says it is alive every minute. On the free plan it\nreports every 10 minutes and scans every 6 hours, as the service asks. It\nonly reads, opens no port, and masks secrets before anything is sent.",
-    "example": "  sudo kiyesi connect --token ksv_...",
+    "long": "Checks the token with the service, saves it where only root can read it, and\ninstalls and starts the kiyesi system service. The service runs a scan now and\nevery 15 minutes, and says it is alive every minute. On the free plan it\nreports every 10 minutes and scans every 6 hours, as the service asks. It\nonly reads, opens no port, and masks secrets before anything is sent.\n\nThe token can come after --token, or on standard input with --token -, which\nkeeps it out of the list of processes other users can see, or in KIYESI_TOKEN.",
+    "example": "  echo ksv_... | sudo kiyesi connect --token -\n  sudo kiyesi connect --token ksv_...",
     "flags": [
       {
         "name": "api",
@@ -140,7 +140,7 @@
       },
       {
         "name": "token",
-        "usage": "the server token, starting with ksv_"
+        "usage": "the server token, starting with ksv_, or - to read it from standard input"
       }
     ]
   },
@@ -1023,12 +1023,16 @@
     "path": "kiyesi team invite",
     "use": "kiyesi team invite <email> [flags]",
     "short": "Invite someone by email into a role",
-    "long": "Emails an invite that works once, for 7 days. They choose a password and set up\nan authenticator app. Only an owner can invite owners and admins.",
+    "long": "Emails an invite that works once, for 7 days. They choose a password and set up\nan authenticator app. Only an owner can invite owners and admins. Inviting an\nowner, an admin or anyone who manages the team or its settings asks for the\ncode from your authenticator app.",
     "example": "  kiyesi team invite seun@example.com --role member --area backend",
     "flags": [
       {
         "name": "area",
         "usage": "what they work on: frontend, backend, database or devops"
+      },
+      {
+        "name": "code",
+        "usage": "the code from your authenticator app, for an owner, an admin or a manager"
       },
       {
         "name": "role",

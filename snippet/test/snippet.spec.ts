@@ -180,6 +180,30 @@ test("XMLHttpRequest failures too; a request the page cancels is not one", async
   expect(s.seen.headers.find((h) => h.path === "/api/fail")?.rid).toBeTruthy();
 });
 
+test("masks email addresses and tokens in messages and request paths", async ({ page }) => {
+  await page.goto(`http://localhost:${A}/page`);
+  await page.evaluate(async () => {
+    await fetch("/api/fail/ada.lovelace@example.com/reset/Zx9Q2mW7tR4yU1iO8pA3sD6fG0hJ5k");
+    setTimeout(() => {
+      throw new Error("login failed for grace@example.org with password=hunter2-hunter2");
+    });
+  });
+  await waitFor(2);
+  const all = JSON.stringify(reports());
+  for (const never of [
+    "ada.lovelace@example.com",
+    "Zx9Q2mW7tR4yU1iO8pA3sD6fG0hJ5k",
+    "grace@example.org",
+    "hunter2-hunter2",
+  ])
+    expect(all).not.toContain(never);
+  const req = reports().find((r) => r.kind === "request") as Record<string, string>;
+  expect(req.path).toBe("/api/fail/[masked]/reset/[masked]");
+  expect(req.message).toBe("GET /api/fail/[masked]/reset/[masked] returned 502");
+  const err = reports().find((r) => r.kind === "error") as Record<string, string>;
+  expect(err.message).toBe("login failed for [masked] with password=[masked]");
+});
+
 test("sends each error once, and at most ten reports a page", async ({ page }) => {
   await page.goto(`http://localhost:${A}/page`);
   await page.evaluate(() => {

@@ -5,6 +5,8 @@
 //
 // Privacy (PRD): it never reads what people type, cookies, storage or the
 // page's content, and it drops the query and fragment of every address.
+// Email addresses and token-like values in messages and paths are masked
+// before anything leaves the page; the service masks again.
 //
 // Manners: it never throws into the page, sends each error once per page
 // and at most ten reports per page, and sends without waiting for an
@@ -58,6 +60,24 @@
       return "";
     }
   };
+  /**
+   * Masks what could name a person or open an account: email addresses,
+   * secrets after a name such as password= or Bearer, and long token-like
+   * strings of letters and digits (24 or more). Roughly the service's own
+   * rules, kept short. A stack keeps its long strings, which are the
+   * bundles' file names its frames need.
+   */
+  const M = "[masked]";
+  const maskStack = (s: string) =>
+    s
+      .replace(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g, M)
+      .replace(/\b(bearer|basic)\s+[\w.~+/=-]{8,}/gi, `$1 ${M}`)
+      .replace(
+        /((?:password|passwd|pwd|secret|token|api[_-]?key|auth|session|cookie)[\w.-]*["']?\s*[:=]\s*["']?)[^\s"',;&]{3,}/gi,
+        `$1${M}`,
+      );
+  const mask = (s: string) =>
+    maskStack(s).replace(/[\w-]{24,}/g, (t) => (/\d/.test(t) && /[a-z]/i.test(t) ? M : t));
   /** Stack frames keep their file, line and column, but no query part. */
   const stackOf = (s: unknown) =>
     typeof s === "string" ? s.replace(/\?[^\s):]*/g, "").slice(0, 8000) : "";
@@ -99,8 +119,10 @@
       }
       const body = JSON.stringify({
         ...r,
-        message: r.message.slice(0, 1000),
-        page: clean(location.href),
+        message: mask(r.message.slice(0, 1000)),
+        stack: maskStack(r.stack),
+        ...(r.path ? { path: mask(r.path) } : {}),
+        page: mask(clean(location.href)),
         version,
         at: new Date().toISOString(),
       });

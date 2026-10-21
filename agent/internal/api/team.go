@@ -59,11 +59,16 @@ type InviteResult struct {
 }
 
 // InvitePerson invites someone by email into a role, with what they work on.
-func (c *Client) InvitePerson(ctx context.Context, email, role, area string) (InviteResult, error) {
+// Inviting an owner, an admin or anyone who manages the team or its settings
+// needs a fresh code from the authenticator app; code is empty otherwise.
+func (c *Client) InvitePerson(ctx context.Context, email, role, area, code string) (InviteResult, error) {
 	var out InviteResult
 	body := map[string]any{"email": email, "role": role, "area": nil}
 	if area != "" {
 		body["area"] = area
+	}
+	if code != "" {
+		body["twoStepCode"] = code
 	}
 	err := c.do(ctx, http.MethodPost, "/v1/team/invites", body, &out)
 	return out, err

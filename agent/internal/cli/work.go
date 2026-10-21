@@ -296,11 +296,11 @@ func newTeam(io IO) *cobra.Command {
 }
 
 func newTeamInvite(io IO) *cobra.Command {
-	var role, area string
+	var role, area, code string
 	cmd := &cobra.Command{
 		Use:     "invite <email>",
 		Short:   "Invite someone by email into a role",
-		Long:    "Emails an invite that works once, for 7 days. They choose a password and set up\nan authenticator app. Only an owner can invite owners and admins.",
+		Long:    "Emails an invite that works once, for 7 days. They choose a password and set up\nan authenticator app. Only an owner can invite owners and admins. Inviting an\nowner, an admin or anyone who manages the team or its settings asks for the\ncode from your authenticator app.",
 		Example: "  kiyesi team invite seun@example.com --role member --area backend",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -316,7 +316,12 @@ func newTeamInvite(io IO) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			out, err := c.InvitePerson(cmd.Context(), args[0], roleID, area)
+			out, err := c.InvitePerson(cmd.Context(), args[0], roleID, area, code)
+			// A role that manages the team or its settings: asked for the code.
+			var p *api.Problem
+			if code == "" && errors.As(err, &p) && p.Code == "two_step_failed" {
+				out, err = c.InvitePerson(cmd.Context(), args[0], roleID, area, codeOrAsk(io, ""))
+			}
 			if errors.Is(err, api.ErrNotFound) {
 				return &exitError{code: ExitUsage, msg: "Inviting people is for owners and admins."}
 			}
@@ -333,6 +338,7 @@ func newTeamInvite(io IO) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&role, "role", "member", "the role's name, such as member or \"Frontend contractor\"; kiyesi team roles lists them")
 	cmd.Flags().StringVar(&area, "area", "", "what they work on: frontend, backend, database or devops")
+	cmd.Flags().StringVar(&code, "code", "", "the code from your authenticator app, for an owner, an admin or a manager")
 	cmd.SetContext(context.Background())
 	return cmd
 }

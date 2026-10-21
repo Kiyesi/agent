@@ -9,17 +9,47 @@ published so you can read what it does before you install it.
   the server. [What it reads and sends](https://docs.kiyesi.dev/reference/agent-reads-and-sends/).
 - `snippet/`: the browser snippet that reports errors from your website's visitors.
 
-Version 0.37.0, from commit e6f1ba4 of Kiyesi's own repository. Each release is
+Version 0.38.0, from commit 27f665a of Kiyesi's own repository. Each release is
 copied here whole, as one commit with its tag.
 
 ## Install
 
 ```sh
-curl -fsSL https://get.kiyesi.dev | sh
+curl -fsSL https://get.kiyesi.dev/install.sh | sudo sh
 ```
 
 The installer checks that the download is signed with Kiyesi's release key
-(`agent/internal/update/release.pub`) before it installs anything.
+(`agent/internal/update/release.pub`) before it installs anything. The key's
+fingerprint is:
+
+```
+SHA256:0VzDAz1EgK2U4EOHsynWHyab3xZWo7cqzgyrhANVyzE
+```
+
+## Check a download by hand
+
+For Linux on x86_64; for ARM use `kiyesi-linux-arm64`, on a Mac `kiyesi-darwin-arm64`
+or `kiyesi-darwin-amd64`.
+
+1. Download the program, the signed list of checksums and its signature:
+   ```sh
+   curl -fsSLO https://get.kiyesi.dev/kiyesi-linux-amd64
+   curl -fsSLO https://get.kiyesi.dev/SHA256SUMS
+   curl -fsSLO https://get.kiyesi.dev/SHA256SUMS.sig
+   ```
+2. Check the signature with the release key. It must say `Good "kiyesi-release" signature`,
+   and `ssh-keygen -lf agent/internal/update/release.pub` must show the fingerprint above:
+   ```sh
+   echo 'releases@kiyesi.dev ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOcyIth+Acex97zKO5+nK58MFxDLEqVI2U8hendjz9uc' > allowed_signers
+   ssh-keygen -Y verify -f allowed_signers -I releases@kiyesi.dev -n kiyesi-release -s SHA256SUMS.sig < SHA256SUMS
+   ```
+3. Check the program against its signed checksum. It must say `OK`. (The first line of
+   SHA256SUMS is the release's version.)
+   ```sh
+   grep ' kiyesi-linux-amd64$' SHA256SUMS | sha256sum -c -
+   ```
+
+If either check fails, install nothing and tell security@kiyesi.dev.
 
 ## Build it yourself
 

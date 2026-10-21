@@ -39,7 +39,7 @@ export function start(portA: number, portB: number) {
       });
       return res.writeHead(202).end();
     }
-    if (url.pathname === "/api/fail") return res.writeHead(502).end("bad gateway");
+    if (url.pathname.startsWith("/api/fail")) return res.writeHead(502).end("bad gateway");
     if (url.pathname === "/api/ok") return res.writeHead(200).end("ok");
     if (url.pathname === "/api/slow")
       return void setTimeout(() => res.writeHead(200).end("late"), 2000);
