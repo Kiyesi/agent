@@ -4,19 +4,20 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
+
+	"github.com/kiyesi/kiyesi/agent/internal/system"
 )
 
 // What uninstall removes, and how it stops the service; tests replace them.
 var (
 	unitPath     = "/etc/systemd/system/kiyesi.service"
-	runSystemctl = func(args ...string) error { return exec.Command("systemctl", args...).Run() } // #nosec G204 -- fixed arguments from this file
-	hasSystemctl = func() bool { _, err := exec.LookPath("systemctl"); return err == nil }
+	runSystemctl = func(args ...string) error { return systemctl(args...).Run() }
+	hasSystemctl = func() bool { _, err := system.Find("systemctl"); return err == nil }
 	// Where install.sh may have put tab completion.
 	completionFiles = []string{
 		"/usr/share/bash-completion/completions/kiyesi", "/usr/local/etc/bash_completion.d/kiyesi",

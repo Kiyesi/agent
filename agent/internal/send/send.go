@@ -209,9 +209,16 @@ func CheckAPI(api string) error {
 	return fmt.Errorf("%s must use https://. Only this machine (localhost) may use http://, for testing", api)
 }
 
-// NewClient returns a client with a time limit on every request.
+// noRedirect never follows a redirect: the service never sends one, and
+// following it would hand the request's body, with what this server sent,
+// to another address. The redirect comes back as the answer, which is an
+// error to every caller.
+func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+// NewClient returns a client with a time limit on every request, that
+// follows no redirect.
 func NewClient(api, token string) *Client {
-	return &Client{API: strings.TrimRight(api, "/"), Token: token, HTTP: &http.Client{Timeout: 30 * time.Second}}
+	return &Client{API: strings.TrimRight(api, "/"), Token: token, HTTP: &http.Client{Timeout: 30 * time.Second, CheckRedirect: noRedirect}}
 }
 
 func (c *Client) post(ctx context.Context, path string, body []byte, gzipped bool) (*http.Response, error) {

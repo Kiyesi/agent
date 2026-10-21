@@ -225,7 +225,7 @@ func (s secretFile) Apply(_ context.Context, h Host, in Input, c *Changes) error
 		if err != nil {
 			return err
 		}
-		if err := c.Chmod(p, info.Mode().Perm()&^fs.FileMode(0o007)); err != nil {
+		if err := c.Chmod(p, info, info.Mode().Perm()&^fs.FileMode(0o007)); err != nil {
 			return err
 		}
 	}

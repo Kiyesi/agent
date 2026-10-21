@@ -1,6 +1,7 @@
 {
   "name": "@kiyesi/snippet",
   "private": true,
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node scripts/size.ts && node scripts/publish.ts",

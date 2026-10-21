@@ -6,11 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"hash/fnv"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -32,14 +34,23 @@ type cliHost struct {
 	chmodErr error
 }
 
-type cliInfo struct{ mode fs.FileMode }
+type cliInfo struct {
+	path string
+	mode fs.FileMode
+}
 
 func (i cliInfo) Name() string       { return "" }
 func (i cliInfo) Size() int64        { return 0 }
 func (i cliInfo) Mode() fs.FileMode  { return i.mode }
 func (i cliInfo) ModTime() time.Time { return time.Time{} }
-func (i cliInfo) IsDir() bool        { return false }
-func (i cliInfo) Sys() any           { return nil }
+func (i cliInfo) IsDir() bool        { return i.mode.IsDir() }
+func (i cliInfo) Sys() any           { return &syscall.Stat_t{Ino: cliInode(i.path)} }
+
+func cliInode(p string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(p))
+	return h.Sum64()
+}
 
 func (h *cliHost) ReadFile(p string) ([]byte, error) {
 	if d, ok := h.files[p]; ok {
@@ -49,19 +60,27 @@ func (h *cliHost) ReadFile(p string) ([]byte, error) {
 }
 func (h *cliHost) Lstat(p string) (fs.FileInfo, error) {
 	if _, ok := h.files[p]; !ok {
+		for f := range h.files {
+			if strings.HasPrefix(f, p+"/") {
+				return cliInfo{p, fs.ModeDir | 0o755}, nil
+			}
+		}
 		return nil, fs.ErrNotExist
 	}
-	return cliInfo{h.modes[p]}, nil
+	return cliInfo{p, h.modes[p]}, nil
 }
 func (h *cliHost) WriteFile(p string, d []byte, m fs.FileMode) error {
 	h.files[p], h.modes[p] = d, m
 	return nil
 }
 func (h *cliHost) Remove(p string) error { delete(h.files, p); return nil }
-func (h *cliHost) Chmod(p string, m fs.FileMode) error {
+func (h *cliHost) ChmodFile(p string, want fix.FileID, m fs.FileMode) error {
 	if err := h.chmodErr; err != nil {
 		h.chmodErr = nil
 		return err
+	}
+	if want.Ino != cliInode(p) {
+		return fs.ErrNotExist
 	}
 	h.modes[p] = m
 	return nil

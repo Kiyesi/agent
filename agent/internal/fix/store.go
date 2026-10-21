@@ -40,6 +40,9 @@ type Saved struct {
 	Mode     fs.FileMode `json:"mode"`
 	Content  []byte      `json:"content,omitempty"`
 	ModeOnly bool        `json:"mode_only,omitempty"`
+	// ID is the file a change of mode reached. Undo puts the mode back only
+	// on that same file. Records from before 0.38.0 have none.
+	ID *FileID `json:"id,omitempty"`
 }
 
 // Store keeps the records in one folder that only root can read.
@@ -160,7 +163,7 @@ func undo(ctx context.Context, h Host, _ *Store, r *Record) error {
 		var err error
 		switch {
 		case f.ModeOnly:
-			err = h.Chmod(f.Path, f.Mode)
+			err = restoreMode(h, r.ID, f)
 		case !f.Existed:
 			err = h.Remove(f.Path)
 		default:
@@ -182,6 +185,23 @@ func undo(ctx context.Context, h Host, _ *Store, r *Record) error {
 		return errors.New(strings.Join(problems, "; "))
 	}
 	return nil
+}
+
+// restoreMode puts a file's mode back, only on the file the fix changed and
+// only where no other user could have put a different file in its place.
+func restoreMode(h Host, id string, f Saved) error {
+	byHand := fmt.Sprintf("check it is still the file you expect (ls -l %s), then put the mode back by hand: sudo chmod %04o %s", f.Path, f.Mode.Perm(), f.Path)
+	if f.ID == nil {
+		return fmt.Errorf("fix %s was made by a Kiyesi older than 0.38.0, which did not note which file it changed, so its mode is not put back by itself. To do it yourself, %s", id, byHand)
+	}
+	dir, err := h.Lstat(filepath.Dir(f.Path))
+	if err != nil {
+		return err
+	}
+	if why := othersCanWrite(dir, f.ID.UID); why != "" {
+		return fmt.Errorf("its mode is not put back by Kiyesi, as %s. To do it yourself, %s", why, byHand)
+	}
+	return h.ChmodFile(f.Path, *f.ID, f.Mode.Perm())
 }
 
 // Changes is how a fix changes the server: each change is saved in the
@@ -237,21 +257,24 @@ func (c *Changes) Write(path string, data []byte, perm fs.FileMode) error {
 }
 
 // Chmod saves the file's mode, never its content, then changes the mode.
-func (c *Changes) Chmod(path string, perm fs.FileMode) error {
-	info, err := c.h.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
+// seen is the file as the fix looked at it, from Lstat: the change reaches
+// only that same file, so one swapped in since, such as a link, is left
+// alone.
+func (c *Changes) Chmod(path string, seen fs.FileInfo, perm fs.FileMode) error {
+	if !seen.Mode().IsRegular() {
 		return fmt.Errorf("%s is not a plain file, so it is left alone", path)
 	}
+	id, ok := IDOf(seen)
+	if !ok {
+		return fmt.Errorf("%s cannot be told apart from another file on this system, so it is left alone", path)
+	}
 	if !c.seen(path) {
-		c.rec.Files = append(c.rec.Files, Saved{Path: path, Existed: true, Mode: info.Mode().Perm(), ModeOnly: true})
+		c.rec.Files = append(c.rec.Files, Saved{Path: path, Existed: true, Mode: seen.Mode().Perm(), ModeOnly: true, ID: &id})
 		if err := c.s.save(c.rec); err != nil {
 			return err
 		}
 	}
-	return c.h.Chmod(path, perm)
+	return c.h.ChmodFile(path, id, perm)
 }
 
 // Then adds a command undo runs after the files are back.

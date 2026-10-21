@@ -1,6 +1,8 @@
 package update
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -87,14 +89,30 @@ func (s signer) sign(t *testing.T, msg []byte) []byte {
 	return armor(blob)
 }
 
+// newSums is the signed list as scripts/build-get.sh makes it from 0.38.0:
+// the version first, then a checksum line per build.
+func newSums(version string, bin []byte) []byte {
+	sum := hex.EncodeToString(func() []byte { s := sha256.Sum256(bin); return s[:] }())
+	head := ""
+	if version != "" {
+		head = "version " + version + "\n"
+	}
+	return []byte(fmt.Sprintf("%s%s  kiyesi-linux-amd64\n%s  kiyesi-darwin-arm64\n", head, sum, sum))
+}
+
 func release(t *testing.T, s signer, bin []byte, tamper string) *httptest.Server {
-	sum := sha256.Sum256(bin)
-	sums := []byte(fmt.Sprintf("%s  kiyesi-linux-amd64\n%s  kiyesi-darwin-arm64\n", hex.EncodeToString(sum[:]), hex.EncodeToString(sum[:])))
+	return releaseOf(t, s, bin, tamper, "0.24.0", "0.24.0")
+}
+
+// releaseOf serves a release whose unsigned VERSION file says one version
+// and whose signed list says another.
+func releaseOf(t *testing.T, s signer, bin []byte, tamper, unsigned, signed string) *httptest.Server {
+	sums := newSums(signed, bin)
 	sig := s.sign(t, sums)
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/VERSION":
-			fmt.Fprintln(w, "0.24.0")
+			fmt.Fprintln(w, unsigned)
 		case "/SHA256SUMS":
 			if tamper == "sums" {
 				w.Write(append(sums, '\n', 'x'))
@@ -120,7 +138,7 @@ func TestFetchChecksTheSignatureAndTheChecksum(t *testing.T) {
 	bin := []byte("#!/bin/sh\necho new kiyesi\n")
 	for _, tc := range []struct{ tamper, want string }{{"", ""}, {"sums", "signature does not match"}, {"binary", "checksum"}} {
 		srv := release(t, s, bin, tc.tamper)
-		src := Source{Base: srv.URL, Key: s.pub, HTTP: srv.Client(), OS: "linux", Arch: "amd64"}
+		src := Source{Base: srv.URL, Key: s.pub, HTTP: srv.Client(), OS: "linux", Arch: "amd64", Running: "0.23.0"}
 		r, got, err := src.Fetch(context.Background())
 		srv.Close()
 		if tc.want == "" {
@@ -135,12 +153,12 @@ func TestFetchChecksTheSignatureAndTheChecksum(t *testing.T) {
 	}
 	srv := release(t, s, bin, "")
 	defer srv.Close()
-	src := Source{Base: srv.URL, Key: s.pub, HTTP: srv.Client(), OS: "freebsd", Arch: "amd64"}
+	src := Source{Base: srv.URL, Key: s.pub, HTTP: srv.Client(), OS: "freebsd", Arch: "amd64", Running: "0.23.0"}
 	if _, _, err := src.Fetch(context.Background()); err == nil || !strings.Contains(err.Error(), "no kiyesi build for freebsd") {
 		t.Errorf("unknown system: %v", err)
 	}
 	other := newSigner(t)
-	src = Source{Base: srv.URL, Key: other.pub, HTTP: srv.Client(), OS: "linux", Arch: "amd64"}
+	src = Source{Base: srv.URL, Key: other.pub, HTTP: srv.Client(), OS: "linux", Arch: "amd64", Running: "0.23.0"}
 	if _, _, err := src.Fetch(context.Background()); err == nil || !strings.Contains(err.Error(), "Nothing was changed") {
 		t.Errorf("another key: %v", err)
 	}
@@ -213,3 +231,98 @@ func TestAFailedConnectionIsTriedThreeTimesThenSaysUnreachable(t *testing.T) {
 type roundTrip func(*http.Request) (*http.Response, error)
 
 func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// An attacker who controls the network or the site can serve an older
+// release, signed in its day, with VERSION saying it is new. The version
+// inside the signature decides, so it is refused.
+func TestFetchRefusesAnOlderOrTheSameSignedRelease(t *testing.T) {
+	s := newSigner(t)
+	bin := []byte("old kiyesi")
+	for _, signed := range []string{"0.22.0", "0.23.0"} {
+		srv := releaseOf(t, s, bin, "", "9.9.9", signed)
+		src := Source{Base: srv.URL, Key: s.pub, HTTP: srv.Client(), OS: "linux", Arch: "amd64", Running: "0.23.0"}
+		_, _, err := src.Fetch(context.Background())
+		srv.Close()
+		if err == nil || !strings.Contains(err.Error(), "kiyesi "+signed+", which is not newer than this kiyesi 0.23.0") {
+			t.Errorf("signed %s: %v", signed, err)
+		}
+	}
+}
+
+func TestFetchReportsTheSignedVersionNotTheUnsignedOne(t *testing.T) {
+	s := newSigner(t)
+	srv := releaseOf(t, s, []byte("new"), "", "0.99.0", "0.24.0")
+	defer srv.Close()
+	src := Source{Base: srv.URL, Key: s.pub, HTTP: srv.Client(), OS: "linux", Arch: "amd64", Running: "0.23.0"}
+	r, _, err := src.Fetch(context.Background())
+	if err != nil || r.Version != "0.24.0" {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+
+func TestFetchRefusesASignedListWithoutAVersion(t *testing.T) {
+	s := newSigner(t)
+	srv := releaseOf(t, s, []byte("new"), "", "0.24.0", "")
+	defer srv.Close()
+	src := Source{Base: srv.URL, Key: s.pub, HTTP: srv.Client(), OS: "linux", Arch: "amd64", Running: "0.23.0"}
+	if _, _, err := src.Fetch(context.Background()); err == nil || !strings.Contains(err.Error(), "does not name its version") {
+		t.Fatal(err)
+	}
+}
+
+// oldParse is how kiyesi 0.37.0 found its checksum in SHA256SUMS, copied
+// from that release's update.Fetch. Agents already installed run it, so the
+// new list must still give them the right checksum.
+func oldParse(sums []byte, file string) string {
+	want := ""
+	sc := bufio.NewScanner(bytes.NewReader(sums))
+	for sc.Scan() {
+		if f := strings.Fields(sc.Text()); len(f) == 2 && strings.TrimPrefix(f[1], "*") == file {
+			want = f[0]
+		}
+	}
+	return want
+}
+
+func TestTheNewSignedListStillWorksForKiyesi037(t *testing.T) {
+	bin := []byte("kiyesi 0.38.0")
+	sum := sha256.Sum256(bin)
+	sums := newSums("0.38.0", bin)
+	if got := oldParse(sums, "kiyesi-linux-amd64"); got != hex.EncodeToString(sum[:]) {
+		t.Fatalf("0.37.0 reads %q", got)
+	}
+	if v, got := ParseSums(sums, "kiyesi-linux-amd64"); v != "0.38.0" || got != hex.EncodeToString(sum[:]) {
+		t.Fatalf("%q %q", v, got)
+	}
+}
+
+func TestReleasesComeOnlyOverHTTPS(t *testing.T) {
+	for _, base := range []string{"http://get.kiyesi.dev", "ftp://get.kiyesi.dev", "get.kiyesi.dev", "http://10.0.0.1"} {
+		src := Source{Base: base, HTTP: &http.Client{Transport: roundTrip(func(*http.Request) (*http.Response, error) {
+			t.Fatalf("%s was asked", base)
+			return nil, nil
+		})}, Running: "0.23.0"}
+		if _, err := src.Latest(context.Background()); err == nil || !strings.Contains(err.Error(), "must be an https address") {
+			t.Errorf("%s: %v", base, err)
+		}
+	}
+	t.Setenv("KIYESI_GET_URL", "http://get.example.test")
+	if _, err := DefaultSource("linux", "amd64").Latest(context.Background()); err == nil || !strings.Contains(err.Error(), "KIYESI_GET_URL") {
+		t.Errorf("KIYESI_GET_URL over http: %v", err)
+	}
+}
+
+func TestARedirectToPlainHTTPIsRefused(t *testing.T) {
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprintln(w, "0.99.0") }))
+	defer plain.Close()
+	tls := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, plain.URL+"/VERSION", http.StatusFound)
+	}))
+	defer tls.Close()
+	c := tls.Client()
+	c.CheckRedirect = DefaultSource("linux", "amd64").HTTP.CheckRedirect
+	src := Source{Base: tls.URL, HTTP: c}
+	if _, err := src.Latest(context.Background()); err == nil || !strings.Contains(err.Error(), "only over https") {
+		t.Fatal(err)
+	}
+}

@@ -22,7 +22,7 @@ import (
 
 // newSystem builds the real system. Tests replace it.
 var newSystem = func(root bool, stateDir string) *system.System {
-	fsys := os.DirFS("/")
+	fsys := system.NewRootFS("/")
 	host, _ := os.Hostname()
 	return &system.System{
 		FS:       fsys,

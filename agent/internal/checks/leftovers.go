@@ -169,7 +169,7 @@ func (leftoversCheck) Run(ctx context.Context, env *Env) Result {
 			if info, err := d.Info(); err != nil || info.Size() > 1<<20 {
 				return nil
 			}
-			data, err := fs.ReadFile(fsys, p)
+			data, err := readUserFile(fsys, p)
 			if note(err) {
 				return nil
 			}

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io/fs"
 	"os"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -52,8 +54,16 @@ func (i info) Name() string       { return i.name }
 func (i info) Size() int64        { return 0 }
 func (i info) Mode() fs.FileMode  { return i.mode }
 func (i info) ModTime() time.Time { return time.Time{} }
-func (i info) IsDir() bool        { return false }
-func (i info) Sys() any           { return nil }
+func (i info) IsDir() bool        { return i.mode.IsDir() }
+
+// Sys gives each path its own inode, owned by root, as a real file has.
+func (i info) Sys() any { return &syscall.Stat_t{Ino: inodeOf(i.name)} }
+
+func inodeOf(p string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(p))
+	return h.Sum64()
+}
 
 func (h *fakeHost) ReadFile(p string) ([]byte, error) {
 	d, ok := h.files[p]
@@ -68,6 +78,11 @@ func (h *fakeHost) Lstat(p string) (fs.FileInfo, error) {
 		return info{p, fs.ModeSymlink | 0o777}, nil
 	}
 	if _, ok := h.files[p]; !ok {
+		for f := range h.files {
+			if strings.HasPrefix(f, p+"/") {
+				return info{p, fs.ModeDir | 0o755}, nil
+			}
+		}
 		return nil, fs.ErrNotExist
 	}
 	m, ok := h.modes[p]
@@ -89,8 +104,8 @@ func (h *fakeHost) Remove(p string) error {
 	return nil
 }
 
-func (h *fakeHost) Chmod(p string, perm fs.FileMode) error {
-	if _, ok := h.files[p]; !ok {
+func (h *fakeHost) ChmodFile(p string, want FileID, perm fs.FileMode) error {
+	if _, ok := h.files[p]; !ok || h.links[p] || want.Ino != inodeOf(p) {
 		return fs.ErrNotExist
 	}
 	h.modes[p] = perm

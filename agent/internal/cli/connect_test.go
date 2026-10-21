@@ -65,6 +65,54 @@ func TestConnectSavesTheTokenForRootOnly(t *testing.T) {
 	}
 }
 
+// A token after --token shows in the list of processes, which other users
+// can read, so it can also come on standard input or in KIYESI_TOKEN.
+func TestConnectTakesTheTokenOutOfTheCommandLine(t *testing.T) {
+	srv := fakeService(t, http.StatusOK)
+	saved := func(t *testing.T) {
+		t.Helper()
+		if _, token, err := loadConnection(); err != nil || token != goodToken {
+			t.Fatalf("saved %q %v", token, err)
+		}
+	}
+	t.Run("--token -", func(t *testing.T) {
+		t.Setenv("KIYESI_ETC", t.TempDir())
+		code, out, errOut := runCLIInput(t, goodToken+"\n", "connect", "--token", "-", "--api", srv.URL, "--no-service")
+		if code != ExitOK || strings.Contains(errOut, "Note:") || strings.Contains(out+errOut, goodToken) {
+			t.Fatalf("%d %q %q", code, out, errOut)
+		}
+		saved(t)
+	})
+	t.Run("standard input, no flag", func(t *testing.T) {
+		t.Setenv("KIYESI_ETC", t.TempDir())
+		if code, out, errOut := runCLIInput(t, goodToken, "connect", "--api", srv.URL, "--no-service"); code != ExitOK {
+			t.Fatalf("%d %q %q", code, out, errOut)
+		}
+		saved(t)
+	})
+	t.Run("KIYESI_TOKEN", func(t *testing.T) {
+		t.Setenv("KIYESI_ETC", t.TempDir())
+		if code, out, errOut := runCLIEnv(t, []string{"KIYESI_TOKEN=" + goodToken}, "connect", "--api", srv.URL, "--no-service"); code != ExitOK {
+			t.Fatalf("%d %q %q", code, out, errOut)
+		}
+		saved(t)
+	})
+	t.Run("--token still works, with a note", func(t *testing.T) {
+		t.Setenv("KIYESI_ETC", t.TempDir())
+		code, _, errOut := runCLI(t, "connect", "--token", goodToken, "--api", srv.URL, "--no-service")
+		if code != ExitOK || !strings.Contains(errOut, "Safer: echo ksv_... | sudo kiyesi connect --token -") {
+			t.Fatalf("%d %q", code, errOut)
+		}
+		saved(t)
+	})
+	t.Run("no token anywhere", func(t *testing.T) {
+		t.Setenv("KIYESI_ETC", t.TempDir())
+		if code, _, errOut := runCLI(t, "connect", "--api", srv.URL, "--no-service"); code != ExitUsage || !strings.Contains(errOut, "--token -") {
+			t.Fatalf("%d %q", code, errOut)
+		}
+	})
+}
+
 func TestConnectRefusals(t *testing.T) {
 	t.Setenv("KIYESI_ETC", t.TempDir())
 	srv := fakeService(t, http.StatusOK)
@@ -94,7 +142,7 @@ func TestUnitFileMakesRoomForTrivy(t *testing.T) {
 
 func TestUnitFileTakesPrivilegesAway(t *testing.T) {
 	u := unitFileFor("/usr/local/bin/kiyesi", false)
-	for _, want := range []string{"ExecStart=/usr/local/bin/kiyesi agent", "NoNewPrivileges=yes", "ProtectSystem=strict", "MemoryMax=64M", "CPUQuota=20%", "CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_NET_ADMIN"} {
+	for _, want := range []string{"ExecStart=/usr/local/bin/kiyesi agent", "NoNewPrivileges=yes", "ProtectSystem=strict", "MemoryMax=64M", "CPUQuota=20%", "CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_NET_ADMIN", "RestrictSUIDSGID=yes", "UMask=0077"} {
 		if !strings.Contains(u, want) {
 			t.Errorf("unit file lacks %q", want)
 		}

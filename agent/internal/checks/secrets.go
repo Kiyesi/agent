@@ -105,7 +105,7 @@ func (secretsCheck) Run(ctx context.Context, env *Env) Result {
 			if err != nil || info.Size() > 1<<20 {
 				return nil
 			}
-			data, err := fs.ReadFile(fsys, p)
+			data, err := readUserFile(fsys, p)
 			if errors.Is(err, fs.ErrPermission) {
 				blocked = true
 				return nil

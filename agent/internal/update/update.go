@@ -10,10 +10,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kiyesi/kiyesi/agent/internal/version"
 )
 
 // Release is what get.kiyesi.dev offers now.
@@ -29,6 +32,10 @@ type Source struct {
 	HTTP *http.Client
 	OS   string
 	Arch string
+	// Running is this program's version. Fetch takes only a release whose
+	// signed version is newer, so an old signed release cannot be sent
+	// back to replace a newer one.
+	Running string
 }
 
 // DefaultSource is get.kiyesi.dev, or KIYESI_GET_URL.
@@ -37,7 +44,34 @@ func DefaultSource(goos, goarch string) Source {
 	if base == "" {
 		base = "https://get.kiyesi.dev"
 	}
-	return Source{Base: strings.TrimRight(base, "/"), Key: ReleaseKey, HTTP: &http.Client{Timeout: 2 * time.Minute}, OS: goos, Arch: goarch}
+	return Source{Base: strings.TrimRight(base, "/"), Key: ReleaseKey, HTTP: &http.Client{Timeout: 2 * time.Minute, CheckRedirect: httpsOnly}, OS: goos, Arch: goarch, Running: version.Version}
+}
+
+// httpsOnly follows a redirect only to another https address.
+func httpsOnly(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 {
+		return errors.New("too many redirects")
+	}
+	if req.URL.Scheme != "https" {
+		return fmt.Errorf("refused a redirect to %s: releases come only over https", req.URL.Redacted())
+	}
+	return nil
+}
+
+// checkBase refuses a release site that is not https. Plain http is taken
+// only on this machine's own loopback address, which tests use.
+func checkBase(base string) error {
+	u, err := url.Parse(base)
+	if err == nil && u.Scheme == "https" && u.Host != "" {
+		return nil
+	}
+	if err == nil && u.Scheme == "http" {
+		switch u.Hostname() {
+		case "localhost", "127.0.0.1", "::1":
+			return nil
+		}
+	}
+	return fmt.Errorf("the release site must be an https address, not %q (check KIYESI_GET_URL)", base)
 }
 
 // ErrUnreachable means this network could not reach the release site at all.
@@ -47,6 +81,9 @@ var ErrUnreachable = errors.New("cannot reach the release site")
 var retryWait = []time.Duration{time.Second, 3 * time.Second}
 
 func (s Source) get(ctx context.Context, name string, limit int64) ([]byte, error) {
+	if err := checkBase(s.Base); err != nil {
+		return nil, err
+	}
 	var resp *http.Response
 	var err error
 	// Three tries: a phone network or a waking laptop often fails once.
@@ -82,12 +119,10 @@ func (s Source) Latest(ctx context.Context) (string, error) {
 }
 
 // Fetch downloads the program for this machine and returns it only if the
-// release's signature and the file's checksum both match.
+// release's signature and the file's checksum both match, and the version
+// the signature covers is newer than this one. VERSION, which is not
+// signed, only says whether to look.
 func (s Source) Fetch(ctx context.Context) (Release, []byte, error) {
-	version, err := s.Latest(ctx)
-	if err != nil {
-		return Release{}, nil, err
-	}
 	sums, err := s.get(ctx, "SHA256SUMS", 64<<10)
 	if err != nil {
 		return Release{}, nil, err
@@ -100,12 +135,12 @@ func (s Source) Fetch(ctx context.Context) (Release, []byte, error) {
 		return Release{}, nil, fmt.Errorf("%w. Nothing was changed. Tell security@kiyesi.dev", err)
 	}
 	file := fmt.Sprintf("kiyesi-%s-%s", s.OS, s.Arch)
-	want := ""
-	sc := bufio.NewScanner(bytes.NewReader(sums))
-	for sc.Scan() {
-		if f := strings.Fields(sc.Text()); len(f) == 2 && strings.TrimPrefix(f[1], "*") == file {
-			want = f[0]
-		}
+	signed, want := ParseSums(sums, file)
+	if signed == "" {
+		return Release{}, nil, errors.New("the release does not name its version in its signed list. Nothing was changed. Tell security@kiyesi.dev")
+	}
+	if !Newer(signed, s.Running) {
+		return Release{}, nil, fmt.Errorf("the release offered is kiyesi %s, which is not newer than this kiyesi %s, so nothing was changed", signed, s.Running)
 	}
 	if want == "" {
 		return Release{}, nil, fmt.Errorf("there is no kiyesi build for %s %s", s.OS, s.Arch)
@@ -118,7 +153,42 @@ func (s Source) Fetch(ctx context.Context) (Release, []byte, error) {
 	if hex.EncodeToString(sum[:]) != want {
 		return Release{}, nil, errors.New("the downloaded program does not match its checksum. Nothing was changed")
 	}
-	return Release{Version: version, File: file}, bin, nil
+	return Release{Version: signed, File: file}, bin, nil
+}
+
+// ParseSums reads the signed list: a line "version 0.38.0", and a line
+// "<sha256>  <file>" for each build. It returns the version and the
+// checksum of file. Kiyesi 0.37.0 and older read only the checksum lines,
+// whose second word is a file name, so they skip the version line.
+func ParseSums(sums []byte, file string) (version, sum string) {
+	sc := bufio.NewScanner(bytes.NewReader(sums))
+	for sc.Scan() {
+		f := strings.Fields(sc.Text())
+		if len(f) != 2 {
+			continue
+		}
+		switch {
+		case f[0] == "version" && validVersion(f[1]):
+			version = f[1]
+		case strings.TrimPrefix(f[1], "*") == file:
+			sum = f[0]
+		}
+	}
+	return version, sum
+}
+
+// validVersion is three numbers with dots, such as 0.38.0.
+func validVersion(v string) bool {
+	p := strings.Split(v, ".")
+	if len(p) != 3 {
+		return false
+	}
+	for _, n := range p {
+		if n == "" || len(n) > 6 || strings.Trim(n, "0123456789") != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // ErrPermission means the program's folder needs sudo to change.

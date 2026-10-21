@@ -10,9 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -200,9 +202,19 @@ func PrepareSpool(state string) (string, error) {
 	return spool, nil
 }
 
+// perUser caps how many files of one user Take reads in one go, and how
+// many of their runs it returns, so one user filling the spool cannot
+// crowd out everyone else's runs. Their other files wait for the next go.
+const (
+	perUserReads = 200
+	perUserRuns  = 25
+)
+
 // Take reads the records waiting in the spool, oldest first, at most 50 (a
 // batch holds 100 items),
-// and removes them. A file that cannot be read is removed too.
+// and removes them. A file that cannot be read is removed too. A run's user
+// is whoever owns its file, not what the file says, so nobody can record a
+// run as someone else.
 func Take(spool string) []Run {
 	entries, err := os.ReadDir(spool)
 	if err != nil {
@@ -216,6 +228,8 @@ func Take(spool string) []Run {
 		return ka < kb
 	})
 	var out []Run
+	reads := map[uint32]int{}
+	runs := map[uint32]int{}
 	for _, e := range entries {
 		n := e.Name()
 		if e.IsDir() || strings.HasPrefix(n, ".") || !strings.HasSuffix(n, ".json") {
@@ -226,12 +240,18 @@ func Take(spool string) []Run {
 			continue
 		}
 		p := filepath.Join(spool, n)
-		data, err := readSmall(p)
+		if uid, ok := ownerOf(e); ok && (reads[uid] >= perUserReads || runs[uid] >= perUserRuns) {
+			continue
+		}
+		data, uid, err := readSmall(p)
 		_ = os.Remove(p)
+		reads[uid]++
 		var r Run
 		if err != nil || json.Unmarshal(data, &r) != nil || !NamePattern.MatchString(r.Name) || r.RunID == "" {
 			continue
 		}
+		r.User = userName(uid)
+		runs[uid]++
 		out = append(out, r)
 		if len(out) == 50 {
 			break
@@ -240,19 +260,48 @@ func Take(spool string) []Run {
 	return out
 }
 
-func readSmall(p string) ([]byte, error) {
-	// Never follow a link: a user could point one at a file only root reads.
-	if info, err := os.Lstat(p); err != nil || !info.Mode().IsRegular() {
-		return nil, errors.New("not a regular file")
-	}
-	f, err := os.Open(p) // #nosec G304 -- a file in the agent's own spool folder
+// readSmall reads a spool file and says who owns it. It never follows a
+// link, as a user could point one at a file only root reads, and never
+// waits on a pipe.
+func readSmall(p string) ([]byte, uint32, error) {
+	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0) // #nosec G304 -- a file in the agent's own spool folder
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer f.Close()
 	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() > 64*1024 {
-		return nil, errors.New("not a small regular file")
+	if err != nil {
+		return nil, 0, err
 	}
-	return io.ReadAll(io.LimitReader(f, 64*1024))
+	uid, _ := ownerOfInfo(info)
+	if !info.Mode().IsRegular() || info.Size() > 64*1024 {
+		return nil, uid, errors.New("not a small regular file")
+	}
+	data, err := io.ReadAll(io.LimitReader(f, 64*1024))
+	return data, uid, err
+}
+
+func ownerOf(e os.DirEntry) (uint32, bool) {
+	info, err := e.Info()
+	if err != nil {
+		return 0, false
+	}
+	return ownerOfInfo(info)
+}
+
+func ownerOfInfo(info os.FileInfo) (uint32, bool) {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || st == nil {
+		return 0, false
+	}
+	return st.Uid, true
+}
+
+// userName is the login name of uid, or the number when it has none.
+func userName(uid uint32) string {
+	id := strconv.FormatUint(uint64(uid), 10)
+	if u, err := user.LookupId(id); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return id
 }
