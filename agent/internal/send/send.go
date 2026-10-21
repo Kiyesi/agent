@@ -26,6 +26,7 @@ import (
 	"github.com/kiyesi/kiyesi/agent/internal/collect"
 	"github.com/kiyesi/kiyesi/agent/internal/dbwatch"
 	"github.com/kiyesi/kiyesi/agent/internal/jobs"
+	"github.com/kiyesi/kiyesi/agent/internal/machine"
 	"github.com/kiyesi/kiyesi/agent/internal/mask"
 	"github.com/kiyesi/kiyesi/agent/internal/scan"
 	"github.com/kiyesi/kiyesi/agent/internal/software"
@@ -37,8 +38,15 @@ type Batch struct {
 	BatchID      string `json:"batch_id"`
 	SentAt       string `json:"sent_at"`
 	AgentVersion string `json:"agent_version"`
-	Items        []Item `json:"items"`
+	// MachineHash is a one-way hash of the server's machine ID, so the
+	// service knows the same server connected twice. Left out when there
+	// is no machine ID; the ID itself is never sent.
+	MachineHash string `json:"machine_hash,omitempty"`
+	Items       []Item `json:"items"`
 }
+
+// machineHash gives the hash for each batch, read once. Tests change it.
+var machineHash = machine.Hash
 
 // Item is a heartbeat, a scan, a minute of metrics, an event or a minute
 // of log lines.
@@ -113,7 +121,7 @@ func NewID() string {
 // Heartbeat makes a batch that says the server is alive.
 func Heartbeat(at time.Time) Batch {
 	stamp := at.UTC().Format(time.RFC3339)
-	return Batch{BatchID: NewID(), SentAt: stamp, AgentVersion: version.Version, Items: []Item{{Kind: "heartbeat", At: stamp}}}
+	return Batch{BatchID: NewID(), SentAt: stamp, AgentVersion: version.Version, MachineHash: machineHash(), Items: []Item{{Kind: "heartbeat", At: stamp}}}
 }
 
 // Minute makes the batch sent each minute: a heartbeat, the minute's
@@ -138,7 +146,7 @@ func Minute(at time.Time, m *collect.Metrics, events []collect.Event, logs *coll
 func Scan(r scan.Report, now time.Time) Batch {
 	r.ReportFile = "" // a path on this server is of no use to the service
 	return Batch{
-		BatchID: NewID(), SentAt: now.UTC().Format(time.RFC3339), AgentVersion: version.Version,
+		BatchID: NewID(), SentAt: now.UTC().Format(time.RFC3339), AgentVersion: version.Version, MachineHash: machineHash(),
 		Items: []Item{{Kind: "scan", At: r.StartedAt.UTC().Format(time.RFC3339), Report: &r}},
 	}
 }
