@@ -18,6 +18,7 @@ import (
 
 	"github.com/kiyesi/kiyesi/agent/internal/collect"
 	"github.com/kiyesi/kiyesi/agent/internal/jobs"
+	"github.com/kiyesi/kiyesi/agent/internal/machine"
 	"github.com/kiyesi/kiyesi/agent/internal/scan"
 )
 
@@ -187,6 +188,9 @@ func TestNewIDIsAUUID(t *testing.T) {
 // The API's tests validate this file against the API's schema, so the
 // agent and the API cannot drift apart.
 func TestBatchGoldenForTheAPI(t *testing.T) {
+	// A fixed machine, so the files do not change with the computer the
+	// tests run on.
+	defer withMachineHash(machine.Of("4c4c4544004a4b1080354ac04f4e3332"))()
 	r := report()
 	r.Version = "0.2.0"
 	r.Host = scan.Host{Name: "checkout-api-prod", OS: "Ubuntu 24.04", Tested: true, Root: true}
@@ -244,6 +248,47 @@ func TestBatchGoldenForTheAPI(t *testing.T) {
 		_ = json.Indent(&pretty, raw, "", "  ")
 		if err := os.WriteFile("testdata/"+name, pretty.Bytes(), 0o644); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+// withMachineHash makes batches carry hash, and returns the undo.
+func withMachineHash(hash string) func() {
+	before := machineHash
+	machineHash = func() string { return hash }
+	return func() { machineHash = before }
+}
+
+// Every batch carries the machine hash next to the agent version, and
+// leaves the field out, never empty, when the server has no machine ID.
+func TestBatchesCarryTheMachineHash(t *testing.T) {
+	at := time.Date(2026, 10, 9, 10, 0, 5, 0, time.UTC)
+	hash := machine.Of("4c4c4544004a4b1080354ac04f4e3332")
+	decode := func(b Batch) map[string]any {
+		t.Helper()
+		body, err := Encode(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		zr, _ := gzip.NewReader(bytes.NewReader(body))
+		raw, _ := io.ReadAll(zr)
+		var out map[string]any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	undo := withMachineHash(hash)
+	for name, b := range map[string]Batch{"heartbeat": Heartbeat(at), "minute": Minute(at, nil, nil, nil), "scan": Scan(report(), at)} {
+		if got := decode(b)["machine_hash"]; got != hash {
+			t.Errorf("%s: machine_hash = %v, want %s", name, got, hash)
+		}
+	}
+	undo()
+	defer withMachineHash("")()
+	for name, b := range map[string]Batch{"heartbeat": Heartbeat(at), "scan": Scan(report(), at)} {
+		if got, ok := decode(b)["machine_hash"]; ok {
+			t.Errorf("%s: machine_hash = %v, want it left out", name, got)
 		}
 	}
 }
