@@ -153,9 +153,7 @@ func (m watchModel) open() tea.Cmd {
 					d.lines = append(d.lines, "  "+*i.Fix.Command)
 				}
 			}
-			for _, l := range whoMoved(i) {
-				d.lines = append(d.lines, l)
-			}
+			d.lines = append(d.lines, whoMoved(i)...)
 			if h := nextSteps(i, mayDo(ctx, c, "incidents", "act")); h != "" {
 				d.lines = append(d.lines, "", h)
 			}

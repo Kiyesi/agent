@@ -1,0 +1,41 @@
+{
+  "batch_id": "0f8b8c3e-6f5d-4b7a-9c1e-2d3f4a5b6c7d",
+  "sent_at": "2026-10-09T10:00:05Z",
+  "agent_version": "0.39.0",
+  "machine_hash": "191fa272ca1d7b438b2ba654dc60b87aaccde08d64d950458746323d1a72b0ae",
+  "items": [
+    {
+      "kind": "fixed",
+      "at": "2026-10-09T10:00:05Z",
+      "fixed": {
+        "id": "3876",
+        "fix": "keys",
+        "done": "Removed login key SHA256:BEvNIvJXhPSZ6sZYlp+jSrx2h7QWco8li1kZOHLgNTk (ci deploy) from ada",
+        "user": "ada"
+      }
+    },
+    {
+      "kind": "access",
+      "at": "2026-10-09T10:00:05Z",
+      "access": {
+        "keys": [
+          {
+            "user": "ada",
+            "fingerprint": "SHA256:FTTdNdFL7P1Edcs9NJAoKniBAlw3N76qvPVqzpuVeW8",
+            "type": "ssh-ed25519",
+            "comment": "ada@laptop",
+            "changed_at": "2026-10-07T10:00:05Z"
+          },
+          {
+            "user": "deploy",
+            "fingerprint": "SHA256:BEvNIvJXhPSZ6sZYlp+jSrx2h7QWco8li1kZOHLgNTk",
+            "type": "ssh-rsa",
+            "comment": "ci deploy",
+            "changed_at": "2026-10-06T10:00:05Z",
+            "restricted": true
+          }
+        ]
+      }
+    }
+  ]
+}

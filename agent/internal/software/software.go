@@ -37,6 +37,66 @@ type List struct {
 	SwapBytes   int64       `json:"swap_bytes"`
 	// AutoUpdates is set on Debian and Ubuntu: whether security updates install by themselves.
 	AutoUpdates *bool `json:"auto_updates,omitempty"`
+	// Settings are a few of the server's settings, for comparing two
+	// servers that should be alike: names and values, never a secret.
+	Settings *Settings `json:"settings,omitempty"`
+}
+
+// Settings are what kiyesi compare sets side by side, beside the packages.
+type Settings struct {
+	// Ports are the TCP ports listening on a public address.
+	Ports []int `json:"ports"`
+	// Services are the systemd services running, by unit name.
+	Services []string `json:"services"`
+	// SSH is how SSH lets people in, when it runs.
+	SSH *SSHSettings `json:"ssh,omitempty"`
+	// Firewall is ufw, firewalld, nftables or iptables when one is on,
+	// "off" when none is, or "" when it could not be read.
+	Firewall string `json:"firewall,omitempty"`
+	// Timezone is the system's time zone, such as Etc/UTC.
+	Timezone string `json:"timezone,omitempty"`
+}
+
+// SSHSettings are SSH's login settings.
+type SSHSettings struct {
+	PasswordLogin bool  `json:"password_login"`
+	RootLogin     bool  `json:"root_login"`
+	Ports         []int `json:"ports"`
+}
+
+// ParseRunning reads systemctl list-units --type=service --state=running
+// --plain --no-legend: one unit name per line, sorted, at most 300.
+func ParseRunning(out string) []string {
+	var units []string
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) > 0 && strings.HasSuffix(f[0], ".service") && len(f[0]) <= 120 {
+			units = append(units, f[0])
+		}
+	}
+	sort.Strings(units)
+	if len(units) > 300 {
+		units = units[:300]
+	}
+	return units
+}
+
+// Timezone reads the system's time zone from /etc/timezone, or from where
+// /etc/localtime points.
+func Timezone(fsys fs.FS) string {
+	if b, err := fs.ReadFile(fsys, "etc/timezone"); err == nil {
+		if tz := strings.TrimSpace(string(b)); tz != "" && len(tz) <= 60 {
+			return tz
+		}
+	}
+	if l, ok := fsys.(fs.ReadLinkFS); ok {
+		if t, err := l.ReadLink("etc/localtime"); err == nil {
+			if _, tz, ok := strings.Cut(t, "zoneinfo/"); ok && len(tz) <= 60 {
+				return tz
+			}
+		}
+	}
+	return ""
 }
 
 // OS is the system from os-release.

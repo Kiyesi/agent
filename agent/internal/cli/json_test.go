@@ -54,6 +54,9 @@ var actionOnly = map[string]string{
 	"kiyesi completion fish":       "prints a shell script",
 	"kiyesi completion powershell": "prints a shell script",
 	"kiyesi help":                  "cobra's help",
+	"kiyesi keys edit-own":         "a hidden helper that prints nothing",
+	"kiyesi guard":                 "runs a command and says what changed; guard list --json is its data",
+	"kiyesi guard undo":            "puts settings files back",
 }
 
 func TestEveryCommandThatPrintsDataHasJSON(t *testing.T) {

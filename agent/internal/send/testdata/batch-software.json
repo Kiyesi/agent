@@ -1,0 +1,59 @@
+{
+  "batch_id": "0f8b8c3e-6f5d-4b7a-9c1e-2d3f4a5b6c7d",
+  "sent_at": "2026-10-09T10:00:05Z",
+  "agent_version": "0.39.0",
+  "machine_hash": "191fa272ca1d7b438b2ba654dc60b87aaccde08d64d950458746323d1a72b0ae",
+  "items": [
+    {
+      "kind": "software",
+      "at": "2026-10-09T10:00:05Z",
+      "software": {
+        "os": {
+          "id": "ubuntu",
+          "version_id": "24.04",
+          "codename": "noble",
+          "name": "Ubuntu 24.04.1 LTS"
+        },
+        "kernel": "6.8.0-45-generic",
+        "packages": [
+          {
+            "name": "openssl",
+            "source": "openssl",
+            "version": "3.0.13-0ubuntu3.4",
+            "manager": "dpkg"
+          }
+        ],
+        "containers": [
+          {
+            "name": "checkout-api",
+            "image": "ghcr.io/acme/checkout:3.8.1",
+            "memory_limit": 0,
+            "restart_policy": "unless-stopped"
+          }
+        ],
+        "memory_bytes": 2048000000,
+        "swap_bytes": 0,
+        "settings": {
+          "ports": [
+            22,
+            80,
+            443
+          ],
+          "services": [
+            "nginx.service",
+            "ssh.service"
+          ],
+          "ssh": {
+            "password_login": false,
+            "root_login": false,
+            "ports": [
+              22
+            ]
+          },
+          "firewall": "ufw",
+          "timezone": "Etc/UTC"
+        }
+      }
+    }
+  ]
+}

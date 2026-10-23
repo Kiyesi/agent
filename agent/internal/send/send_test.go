@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kiyesi/kiyesi/agent/internal/keys"
+	"github.com/kiyesi/kiyesi/agent/internal/software"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -234,7 +236,30 @@ func TestBatchGoldenForTheAPI(t *testing.T) {
 		"batch-fixed.json": Fixes(r, at, []Fixed{
 			{ID: "7f3a", Fix: "ssh-password", Done: "SSH password login off", User: "ada"},
 			{ID: "1c0e", Fix: "firewall", Done: "Firewall on", User: "ada", Undo: true},
-		})}
+		}),
+		// Who can sign in with a key, and a key removal by kiyesi keys remove.
+		"batch-access.json": Items(at,
+			Item{Kind: "fixed", At: at.UTC().Format(time.RFC3339), Fixed: &Fixed{ID: "3876", Fix: "keys", Done: "Removed login key SHA256:BEvNIvJXhPSZ6sZYlp+jSrx2h7QWco8li1kZOHLgNTk (ci deploy) from ada", User: "ada"}},
+			Access(at, []keys.Key{
+				{User: "ada", Fingerprint: "SHA256:FTTdNdFL7P1Edcs9NJAoKniBAlw3N76qvPVqzpuVeW8", Type: "ssh-ed25519", Comment: "ada@laptop", ChangedAt: at.Add(-48 * time.Hour)},
+				{User: "deploy", Fingerprint: "SHA256:BEvNIvJXhPSZ6sZYlp+jSrx2h7QWco8li1kZOHLgNTk", Type: "ssh-rsa", Comment: "ci deploy", ChangedAt: at.Add(-72 * time.Hour), Restricted: true},
+			}),
+		),
+		"batch-no-keys.json": Items(at, Access(at, nil)),
+		// What is installed, with the settings kiyesi compare sets side by side.
+		"batch-software.json": Items(at, Software(at, software.List{
+			OS:          software.OS{ID: "ubuntu", VersionID: "24.04", Codename: "noble", Name: "Ubuntu 24.04.1 LTS"},
+			Kernel:      "6.8.0-45-generic",
+			Packages:    []software.Package{{Name: "openssl", Source: "openssl", Version: "3.0.13-0ubuntu3.4", Manager: "dpkg"}},
+			Containers:  []software.Container{{Name: "checkout-api", Image: "ghcr.io/acme/checkout:3.8.1", RestartPolicy: "unless-stopped"}},
+			MemoryBytes: 2048000000,
+			Settings: &software.Settings{
+				Ports: []int{22, 80, 443}, Services: []string{"nginx.service", "ssh.service"},
+				SSH:      &software.SSHSettings{PasswordLogin: false, RootLogin: false, Ports: []int{22}},
+				Firewall: "ufw", Timezone: "Etc/UTC",
+			},
+		})),
+	}
 	for name, b := range batches {
 		// A fixed id, so the files only change when the shape does.
 		b.BatchID = "0f8b8c3e-6f5d-4b7a-9c1e-2d3f4a5b6c7d"

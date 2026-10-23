@@ -307,6 +307,12 @@ func fakeAPI(t *testing.T, pendingPolls int32) *httptest.Server {
 			_, _ = w.Write([]byte(`{"content":{"label":"Week of 5 October","caught":9,"fixed":8,"fixMinutes":38,"summary":"9 problems caught, eight fixed, typical time to fix 38 minutes."}}`))
 		case "/v1/data-map":
 			_, _ = w.Write([]byte(`{"home":{"code":"NG","name":"Nigeria","chosen":true},"counts":{"mapped":3,"outside":2,"inside":1,"review":0,"mustMove":1},"rows":[{"serverId":"s1","serverName":"checkout-api-prod","kind":"database","name":"orders:5432","provider":"DigitalOcean","place":"London, UK","country":"GB","confidence":"likely","payment":true,"managed":false,"result":"must_move"},{"serverId":"s1","serverName":"checkout-api-prod","kind":"server","name":"DigitalOcean, London, UK","provider":"DigitalOcean","place":"London, UK","country":"GB","confidence":"confirmed","payment":false,"managed":false,"result":"outside"},{"serverId":"s2","serverName":"storefront","kind":"server","name":"storefront","provider":"render","place":"Nigeria","country":"NG","confidence":"set","payment":false,"managed":true,"result":"inside"}],"ipinfo":true}`))
+		case "/v1/servers/compare":
+			if r.URL.Query().Get("a") != "s1" || r.URL.Query().Get("b") != "s2" {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			_, _ = w.Write([]byte(`{"a":{"id":"s1","name":"checkout-api-prod","read":true,"covered":true},"b":{"id":"s2","name":"new-box","read":true,"covered":true},"differences":3,"sections":[{"key":"system","rows":[],"same":3},{"key":"security","rows":[{"name":"ssh_password","a":"off","b":"on"}],"same":3},{"key":"packages","rows":[{"name":"openssl","a":"3.0.13-0ubuntu3.4","b":"3.0.13-0ubuntu3.1"},{"name":"redis-server","a":null,"b":"7.0.15"}],"same":412}]}`))
 		case "/v1/tips":
 			if r.URL.Query().Get("server") != "" && r.URL.Query().Get("server") != "s1" {
 				w.WriteHeader(http.StatusNotFound)

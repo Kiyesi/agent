@@ -26,6 +26,23 @@ func (r RootFS) ReadDir(name string) ([]fs.DirEntry, error) { return fs.ReadDir(
 
 func (r RootFS) Stat(name string) (fs.FileInfo, error) { return fs.Stat(r.dirFS(), name) }
 
+// ReadLink returns where a link points, as the system says it, such as a
+// process's program in /proc/<pid>/exe. Only read, never followed.
+func (r RootFS) ReadLink(name string) (string, error) {
+	if !fs.ValidPath(name) {
+		return "", &fs.PathError{Op: "readlink", Path: name, Err: fs.ErrInvalid}
+	}
+	return os.Readlink(filepath.Join(r.Dir, filepath.FromSlash(name)))
+}
+
+// Lstat describes name itself, a link as a link.
+func (r RootFS) Lstat(name string) (fs.FileInfo, error) {
+	if !fs.ValidPath(name) {
+		return nil, &fs.PathError{Op: "lstat", Path: name, Err: fs.ErrInvalid}
+	}
+	return os.Lstat(filepath.Join(r.Dir, filepath.FromSlash(name)))
+}
+
 // OpenNoFollow opens name for reading, refusing a link at its last step and
 // never waiting on a pipe or a device.
 func (r RootFS) OpenNoFollow(name string) (fs.File, error) {

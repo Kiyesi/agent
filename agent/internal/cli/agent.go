@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -16,10 +17,12 @@ import (
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
 
+	"github.com/kiyesi/kiyesi/agent/internal/checks"
 	"github.com/kiyesi/kiyesi/agent/internal/collect"
 	"github.com/kiyesi/kiyesi/agent/internal/config"
 	"github.com/kiyesi/kiyesi/agent/internal/dbwatch"
 	"github.com/kiyesi/kiyesi/agent/internal/jobs"
+	"github.com/kiyesi/kiyesi/agent/internal/keys"
 	"github.com/kiyesi/kiyesi/agent/internal/render"
 	"github.com/kiyesi/kiyesi/agent/internal/scan"
 	"github.com/kiyesi/kiyesi/agent/internal/send"
@@ -77,8 +80,8 @@ func newAgent(io IO) *cobra.Command {
 					fmt.Fprintf(io.Err, "timed jobs cannot be recorded: %v\n", err)
 				}
 			}
-			var lastJobScan, lastDBRead, softwareSent time.Time
-			softwarePrint := ""
+			var lastJobScan, lastDBRead, softwareSent, keysSent time.Time
+			softwarePrint, keysPrint := "", ""
 			dbs := &dbwatch.Reader{DiskBytes: diskBytes(col.Sys)}
 			a := agentLoop{
 				collect: func(ctx context.Context) (*collect.Metrics, []collect.Event, *collect.Logs, []send.Item) {
@@ -105,9 +108,20 @@ func newAgent(io IO) *cobra.Command {
 					if schedules != nil {
 						now := time.Now()
 						list := software.Read(ctx, col.Sys)
+						list.Settings = serverSettings(ctx, col.Sys)
 						if p := list.Print(); p != softwarePrint || now.Sub(softwareSent) >= 24*time.Hour {
 							softwarePrint, softwareSent = p, now
 							items = append(items, send.Software(now, list))
+						}
+						// Who can sign in with a key, for the access map:
+						// when it changed, and at least once a day. Only root
+						// can read every account's keys.
+						if os.Geteuid() == 0 {
+							ks := keys.Read(col.Sys.FS)
+							if p := keys.Print(ks); p != keysPrint || now.Sub(keysSent) >= 24*time.Hour {
+								keysPrint, keysSent = p, now
+								items = append(items, send.Access(now, ks))
+							}
 						}
 					}
 					// The databases in the settings, every 5 minutes.
@@ -409,4 +423,37 @@ func withHome(c *send.Client, errOut io.Writer) *send.Client {
 		}
 	}
 	return c
+}
+
+// serverSettings reads the few settings kiyesi compare sets side by side:
+// public ports, running services, SSH's login settings, the firewall and
+// the time zone. Names and values only.
+func serverSettings(ctx context.Context, sys *system.System) *software.Settings {
+	env := checks.NewEnv(sys, config.Default())
+	st := &software.Settings{Ports: []int{}, Services: []string{}, Timezone: software.Timezone(sys.FS)}
+	if ls, err := env.Listeners(); err == nil {
+		seen := map[int]bool{}
+		for _, l := range ls {
+			if !seen[l.Port] {
+				seen[l.Port] = true
+				st.Ports = append(st.Ports, l.Port)
+			}
+		}
+		sort.Ints(st.Ports)
+	}
+	if sys.Exec.Has("systemctl") {
+		if out, err := sys.Exec.Run(ctx, "systemctl", "list-units", "--type=service", "--state=running", "--plain", "--no-legend", "--no-pager"); err == nil {
+			st.Services = software.ParseRunning(string(out))
+		}
+	}
+	if ssh := env.SSH(ctx); ssh.Present {
+		st.SSH = &software.SSHSettings{PasswordLogin: ssh.PasswordLogin, RootLogin: ssh.RootLogin, Ports: ssh.Ports}
+	}
+	if fw := env.Firewall(ctx); fw.Known {
+		st.Firewall = fw.Name
+		if st.Firewall == "" {
+			st.Firewall = "off"
+		}
+	}
+	return st
 }

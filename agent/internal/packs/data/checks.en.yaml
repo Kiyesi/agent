@@ -8,7 +8,7 @@
 
 version: 1
 language: en
-total_checks: 23
+total_checks: 24
 
 skips:
   needs-root: "needs root: run sudo kiyesi scan"
@@ -517,6 +517,103 @@ checks:
           Each deploy leaves the previous image and its build cache behind. It is disk you pay
           for, and a full disk stops every app on the server. Volumes are never counted.
         fix: "docker image prune -a --filter until=168h && docker builder prune --filter until=168h"
+
+  - id: break-in
+    area: security
+    name: Signs of a break-in
+    reads: >-
+      The checksums dpkg --verify or rpm -V compare for programs in the system folders (once a
+      day in the background); each running process's name, program path and command line, to
+      look for a miner's words (only the name and path are kept); /etc/crontab, /etc/cron.d,
+      the cron folders and users' cron tables, systemd's units in /etc/systemd/system and
+      users' own, and /etc/rc.local; /etc/passwd; the dates of users' authorized_keys files;
+      /etc/ld.so.preload; where users' .bash_history points; and the dates and sizes of the
+      sign-in log and the system log. Never a file's contents beyond these, and never a
+      command line, which may hold secrets.
+    root:
+      needed: always
+      why: Other users' cron tables, login keys and programs can be read only by root, and "no signs" without them would mislead.
+    passed: "No signs of a break-in"
+    findings:
+      changed-program:
+        severity: critical
+        sentence: "{count|No system programs differ from their packages|system program differs from its package|system programs differ from their packages}, such as {path}"
+        why: >-
+          A program in a system folder changed after it was installed is what a backdoor or a
+          rootkit leaves behind. An update stopped halfway can do it too, so check before you
+          treat the server as broken into.
+        fix: "sudo dpkg --verify (or sudo rpm -Va) lists them; reinstall each package (sudo apt-get install --reinstall $(dpkg -S {path} | cut -d: -f1)). If nobody changed them, follow docs.kiyesi.dev/guides/break-in/"
+      temp-program:
+        severity: critical
+        sentence: "Process {name} (pid {pid}) runs a program from {folder}"
+        why: >-
+          Anyone on the server can write to {folder}, so real software is never installed
+          there. It is where attackers drop their tools, because it always works.
+        fix: "sudo ls -l /proc/{pid}/exe to see the program, then sudo kill {pid}, and look for what starts it again (this check reads cron and systemd too)"
+      miner:
+        severity: critical
+        sentence: "A crypto miner is running: {name} (pid {pid})"
+        why: >-
+          Miners are the most common thing attackers run on a server they get into. It earns
+          them money, and costs you the CPU, the speed of your apps and often the trust of your
+          provider.
+        fix: "sudo kill {pid}, then find how it got in and how it starts again: sudo crontab -l, sudo ls /etc/cron.d /etc/systemd/system, and docs.kiyesi.dev/guides/break-in/"
+      autostart-temp:
+        severity: critical
+        sentence: "{path} starts a program from a temporary folder"
+        why: >-
+          A program that starts itself from /tmp, /var/tmp or /dev/shm is how an attacker comes
+          back after a restart. Real jobs run programs installed in the system folders.
+        fix: "sudo cat {path}, and remove the entry if nobody on your team added it"
+      autostart-download:
+        severity: critical
+        sentence: "{path} downloads code and runs it, or opens a shell to another machine"
+        why: >-
+          An entry that fetches a script and runs it, or hands a shell to another address, at
+          every start or on a timer, gives someone else the server whenever they want it.
+        fix: "sudo cat {path}, and remove the entry if nobody on your team added it"
+      extra-root:
+        severity: critical
+        sentence: "Account {user} has root's powers (user id 0)"
+        why: >-
+          Only root should have user id 0. A second one is a well-known hidden way back in,
+          because it looks like an ordinary account in most lists.
+        fix: "sudo grep ':x:0:' /etc/passwd to see it, then sudo userdel {user} if nobody on your team made it"
+      preload:
+        severity: critical
+        sentence: "{path} is loaded into every program through /etc/ld.so.preload"
+        why: >-
+          This is how many rootkits hide their files and processes from the system
+          tools. Very few real programs need it.
+        fix: "sudo cat /etc/ld.so.preload. If nobody on your team added it, follow docs.kiyesi.dev/guides/break-in/"
+      history-off:
+        severity: warning
+        sentence: "{user}'s shell history is sent to /dev/null"
+        why: >-
+          Attackers turn history off to hide what they typed. Some people do it on purpose,
+          which also leaves nothing to look back on after a problem.
+        fix: "sudo rm ~{user}/.bash_history if nobody on your team set it; the shell starts a new one"
+      auth-log-empty:
+        severity: warning
+        sentence: "{path} is empty and has not changed since {date}, while the other logs go on"
+        why: >-
+          Every sign-in and use of sudo is written there. A sign-in log that stopped while the
+          rest goes on is often one that was wiped to hide a break-in.
+        fix: "sudo journalctl -u ssh -u sshd --since -7d to read the sign-ins from the journal, then sudo systemctl restart rsyslog"
+      new-account:
+        severity: info
+        sentence: "Login account {user} was added, first seen {date}"
+        why: >-
+          Check it was someone on your team. Adding an account is a common way to get back in
+          later.
+        fix: "sudo lastlog -u {user} to see its sign-ins; sudo userdel -r {user} if nobody knows it"
+      new-key:
+        severity: info
+        sentence: "{user}'s login keys changed on {date}"
+        why: >-
+          Each line in that file opens the server to whoever holds the key. Check the change
+          was someone on your team.
+        fix: "sudo cat ~{user}/.ssh/authorized_keys, and remove any line nobody recognises"
 
   # --------------------------------------------------------- Data location
   # Each data-location finding says confirmed or likely. Only the provider's

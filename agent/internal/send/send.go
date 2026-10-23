@@ -26,6 +26,7 @@ import (
 	"github.com/kiyesi/kiyesi/agent/internal/collect"
 	"github.com/kiyesi/kiyesi/agent/internal/dbwatch"
 	"github.com/kiyesi/kiyesi/agent/internal/jobs"
+	"github.com/kiyesi/kiyesi/agent/internal/keys"
 	"github.com/kiyesi/kiyesi/agent/internal/machine"
 	"github.com/kiyesi/kiyesi/agent/internal/mask"
 	"github.com/kiyesi/kiyesi/agent/internal/scan"
@@ -67,6 +68,21 @@ type Item struct {
 	Software *software.List `json:"software,omitempty"`
 	// A change sudo kiyesi fix made or undid, for the server's history.
 	Fixed *Fixed `json:"fixed,omitempty"`
+	// Who can sign in with an SSH key: fingerprints, never keys.
+	Access *AccessList `json:"access,omitempty"`
+}
+
+// AccessList is every login key on the server, by account.
+type AccessList struct {
+	Keys []keys.Key `json:"keys"`
+}
+
+// Access makes the item for the login keys read this time.
+func Access(at time.Time, ks []keys.Key) Item {
+	if ks == nil {
+		ks = []keys.Key{}
+	}
+	return Item{Kind: "access", At: at.UTC().Format(time.RFC3339), Access: &AccessList{Keys: ks}}
 }
 
 // Fixed is one change kiyesi fix made on this server, or undid.
@@ -148,6 +164,15 @@ func Scan(r scan.Report, now time.Time) Batch {
 	return Batch{
 		BatchID: NewID(), SentAt: now.UTC().Format(time.RFC3339), AgentVersion: version.Version, MachineHash: machineHash(),
 		Items: []Item{{Kind: "scan", At: r.StartedAt.UTC().Format(time.RFC3339), Report: &r}},
+	}
+}
+
+// Items makes a batch of the given items, such as a key removal and the
+// keys left after it.
+func Items(now time.Time, items ...Item) Batch {
+	return Batch{
+		BatchID: NewID(), SentAt: now.UTC().Format(time.RFC3339), AgentVersion: version.Version, MachineHash: machineHash(),
+		Items: items,
 	}
 }
 

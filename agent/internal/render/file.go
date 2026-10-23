@@ -20,6 +20,8 @@ const (
 	ByFix
 	// ByUndo is the check after kiyesi fix undo put a change back.
 	ByUndo
+	// ByGuard is the check before or after kiyesi guard ran a command.
+	ByGuard
 )
 
 // footer is the report's last line: what Kiyesi did to make it.
@@ -31,6 +33,8 @@ func (b By) footer() string {
 		return "Written after kiyesi fix changed this server: sudo kiyesi fix undo lists the changes. The check itself only read it."
 	case ByUndo:
 		return "Written after kiyesi fix undo put a change back. The check itself only read this server."
+	case ByGuard:
+		return "Written by kiyesi guard, around a command you ran: sudo kiyesi guard list shows them. The check itself only read this server."
 	}
 	return "Kiyesi only read this server. It changed nothing and sent nothing."
 }
