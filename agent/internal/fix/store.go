@@ -27,9 +27,29 @@ type Record struct {
 	// Files are saved before they changed, in the order they changed.
 	Files []Saved `json:"files,omitempty"`
 	// Then are run after the files are back, in order, such as reloading SSH.
-	Then     [][]string `json:"then,omitempty"`
+	Then [][]string `json:"then,omitempty"`
+	// Keys are login keys taken out of users' authorized_keys, put back by
+	// undo with each user's own rights (kiyesi keys remove).
+	Keys     []KeyLines `json:"keys,omitempty"`
 	UndoneAt *time.Time `json:"undone_at,omitempty"`
 }
+
+// KeyLines are the lines taken out of one authorized_keys file.
+type KeyLines struct {
+	User  string   `json:"user"`
+	UID   int      `json:"uid"`
+	GID   int      `json:"gid"`
+	Home  string   `json:"home"`
+	Path  string   `json:"path"`
+	Lines []string `json:"lines"`
+}
+
+// RestoreKeys puts key lines back into a user's file, as that user. The
+// command line sets it; a record with keys is not undone without it.
+var RestoreKeys func(ctx context.Context, k KeyLines) error
+
+// Save writes a record made outside Run, such as a key removal's.
+func (s *Store) Save(r *Record) error { return s.save(r) }
 
 // Saved is a file as it was before a fix touched it. Content is kept only
 // for settings files a fix rewrites, never for a file whose mode alone
@@ -171,6 +191,15 @@ func undo(ctx context.Context, h Host, _ *Store, r *Record) error {
 		}
 		if err != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", f.Path, err))
+		}
+	}
+	for _, k := range r.Keys {
+		if RestoreKeys == nil {
+			problems = append(problems, k.Path+": login keys cannot be put back here")
+			continue
+		}
+		if err := RestoreKeys(ctx, k); err != nil {
+			problems = append(problems, err.Error())
 		}
 	}
 	for _, c := range r.Then {

@@ -123,6 +123,32 @@
     ]
   },
   {
+    "path": "kiyesi breach-check",
+    "use": "kiyesi breach-check [flags]",
+    "short": "Look for signs that someone already got into this server. Nothing leaves the server",
+    "long": "Answers one question: has someone already got in? It compares the system's\nprograms with the packages they came from, and looks for crypto miners,\nprograms run from temporary folders, autostart entries that download and run\ncode, a second root account, a library loaded into every program, and history\nor sign-in logs turned off. Each sign says what it means and what to do.\nIt only reads, needs root, and sends nothing. The same check runs in every scan.",
+    "example": "  sudo kiyesi breach-check\n  sudo kiyesi breach-check --json   # exit 1 when there is a sign of a break-in",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi compare",
+    "use": "kiyesi compare <server> <server> [flags]",
+    "short": "Set two servers that should be alike side by side, and list what differs",
+    "long": "Compares two servers you can see, from what their agents last sent: the system\nand kernel, SSH and firewall settings, open ports, running services, packages and\ntheir versions, containers and their images, timed jobs and failing checks. Only\nwhat differs is listed, with a count of what is the same.",
+    "example": "  kiyesi compare web-1 web-2\n  kiyesi compare web-1 web-2 --json",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the comparison as JSON"
+      }
+    ]
+  },
+  {
     "path": "kiyesi connect",
     "use": "kiyesi connect [--token <token> | --token -] [flags]",
     "short": "Link this server to the service and start sending results",
@@ -424,6 +450,63 @@
     ]
   },
   {
+    "path": "kiyesi guard",
+    "use": "kiyesi guard -- <command> [flags]",
+    "short": "A seatbelt for a risky change: save the settings, run a command, check again, offer to put them back",
+    "long": "Before the command runs, saves a copy of /etc and notes what works: the grade,\nthe services, the containers, and the server's own sites. After, it checks again\nand says what changed. If a service failed, a site stopped answering, a container\nstopped or the grade fell, it offers to put the settings back and restart what\nfailed. Package upgrades are listed with the command to go back, never undone by\nthemselves. Password hashes and private keys are never copied. The copy stays on\nthis server, for root only; the last 5 are kept.",
+    "example": "  sudo kiyesi guard -- apt-get upgrade\n  sudo kiyesi guard --check http://127.0.0.1:3000/health -- ./deploy.sh\n  sudo kiyesi guard list\n  sudo kiyesi guard undo 7f3a",
+    "flags": [
+      {
+        "name": "check",
+        "usage": "an address on this server to ask before and after, such as http://127.0.0.1:3000/health (repeat for more)"
+      },
+      {
+        "name": "config",
+        "usage": "the settings file",
+        "default": "/etc/kiyesi/config.yaml"
+      },
+      {
+        "name": "no-restore",
+        "usage": "never put the settings back; only say what broke"
+      },
+      {
+        "name": "restore",
+        "usage": "put the settings back without asking when something broke"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi guard list",
+    "use": "kiyesi guard list [flags]",
+    "short": "List the last guarded runs on this server",
+    "example": "  sudo kiyesi guard list",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the runs as JSON"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi guard undo",
+    "use": "kiyesi guard undo <id> [flags]",
+    "short": "Put /etc back as it was before one guarded run, after a yes",
+    "long": "Puts back every settings file that changed since that run began: changed and\nremoved files from its copy, and files added since taken away. That includes\nchanges made after it, so it lists them first and asks.",
+    "example": "  sudo kiyesi guard undo 7f3a",
+    "flags": [
+      {
+        "name": "config",
+        "usage": "the settings file",
+        "default": "/etc/kiyesi/config.yaml"
+      },
+      {
+        "name": "yes",
+        "short": "y",
+        "usage": "put them back without asking"
+      }
+    ]
+  },
+  {
     "path": "kiyesi history",
     "use": "kiyesi history [flags]",
     "short": "Deploys, findings, grade changes, restarts and outages, in time order",
@@ -484,6 +567,42 @@
       {
         "name": "json",
         "usage": "print the result as JSON, for scripts"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi keys",
+    "use": "kiyesi keys [flags]",
+    "short": "List who can sign in to this server with an SSH key, and remove a key",
+    "long": "Lists every SSH key that opens this server, by account: its fingerprint,\ntype and comment, and when its file last changed. The keys themselves are never\nshown or sent. On a connected server the same list feeds the dashboard's\nAccess map, which shows each key across all your servers.",
+    "example": "  sudo kiyesi keys\n  sudo kiyesi keys remove SHA256:JQ6b…   # from every account on this server, after a yes",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the keys as JSON"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi keys remove",
+    "use": "kiyesi keys remove <fingerprint> [flags]",
+    "short": "Take one SSH key out of every account on this server, after a yes",
+    "long": "Takes the key with this fingerprint out of every authorized_keys file on this\nserver, after saying where it is and asking. Each file is changed with its own\naccount's rights, and the lines are kept, so sudo kiyesi fix undo <id> puts\nthem back. The key you are signed in with is never the last one taken away.",
+    "example": "  sudo kiyesi keys remove SHA256:JQ6bTs0Wp5uD9IhzbSPDx3VfmHmzSj0Ep0e2p8KQhXk",
+    "flags": [
+      {
+        "name": "config",
+        "usage": "the settings file",
+        "default": "/etc/kiyesi/config.yaml"
+      },
+      {
+        "name": "json",
+        "usage": "print what was removed as JSON (needs --yes)"
+      },
+      {
+        "name": "yes",
+        "short": "y",
+        "usage": "remove without asking"
       }
     ]
   },
@@ -1200,6 +1319,19 @@
       {
         "name": "project",
         "usage": "move it to this project"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi verify",
+    "use": "kiyesi verify <file, link or id> [flags]",
+    "short": "Check a Kiyesi health certificate is real, unchanged and still valid",
+    "long": "Checks a health certificate's signature with Kiyesi's public key, built into\nthis program, so a downloaded certificate file is checked with no network at all.\nGiven its link or id instead, it also asks the service whether it was revoked.",
+    "example": "  kiyesi verify kiyesi-certificate-web-1.json\n  kiyesi verify https://kiyesi.dev/verify/?id=Qm9yX3pXnFv2kTr8aLdE1c0b",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the result as JSON"
       }
     ]
   },

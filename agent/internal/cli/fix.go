@@ -95,6 +95,14 @@ func fixReady(configPath, what string) (config.Config, error) {
 	return cfg, nil
 }
 
+// changesOff says whether the server's settings forbid Kiyesi to change it
+// (fix: off): kiyesi fix, kiyesi keys remove and kiyesi guard's putting
+// back all keep to it.
+func changesOff(configPath string) bool {
+	cfg, err := config.Load(configPath)
+	return err == nil && cfg.Fix == "off"
+}
+
 // planned is one fix with its findings and its plan.
 type planned struct {
 	fixer    fix.Fixer

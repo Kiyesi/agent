@@ -257,7 +257,7 @@ func (leftoversCheck) Run(ctx context.Context, env *Env) Result {
 			return nil
 		}
 		if info, err := d.Info(); err == nil && d.Type().IsRegular() && info.Size() >= bigLogBytes {
-			add("big-log", map[string]string{"path": "/" + p, "size": bytesText(uint64(info.Size()))})
+			add("big-log", map[string]string{"path": "/" + p, "size": bytesText(sizeOf(info.Size()))})
 		}
 		return nil
 	})
@@ -270,7 +270,7 @@ func (leftoversCheck) Run(ctx context.Context, env *Env) Result {
 			continue
 		}
 		if info.Size() >= bigLogBytes {
-			add("big-container-log", map[string]string{"name": c.Name, "size": bytesText(uint64(info.Size()))})
+			add("big-container-log", map[string]string{"name": c.Name, "size": bytesText(sizeOf(info.Size()))})
 		}
 	}
 
@@ -280,7 +280,7 @@ func (leftoversCheck) Run(ctx context.Context, env *Env) Result {
 		if errors.Is(err, system.ErrNeedsRoot) {
 			blocked = true
 		} else if err == nil && u.Reclaimable() >= dockerWasteBytes {
-			add("docker-waste", map[string]string{"size": bytesText(uint64(u.Reclaimable()))})
+			add("docker-waste", map[string]string{"size": bytesText(sizeOf(u.Reclaimable()))})
 		}
 	}
 
@@ -306,4 +306,12 @@ func (leftoversCheck) Run(ctx context.Context, env *Env) Result {
 // loopback is a published port reachable only from the server itself.
 func loopback(ip string) bool {
 	return ip == "127.0.0.1" || ip == "::1" || strings.HasPrefix(ip, "127.")
+}
+
+// sizeOf is a size the system gave, never below zero.
+func sizeOf(n int64) uint64 {
+	if n < 0 {
+		return 0
+	}
+	return uint64(n)
 }

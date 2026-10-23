@@ -21,8 +21,12 @@ var allowed = map[string]bool{
 	"sshd":       true,
 	"trivy":      true,
 	"gitleaks":   true,
-	// rpm -qa only lists installed packages (Red Hat family).
+	// rpm -qa only lists installed packages, and rpm -Va only compares
+	// them with the package database (Red Hat family).
 	"rpm": true,
+	// dpkg --verify only compares installed files with the package
+	// database's checksums (Debian family).
+	"dpkg": true,
 }
 
 // ExecRunner runs allowlisted commands on this machine.

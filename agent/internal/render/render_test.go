@@ -303,7 +303,7 @@ func TestFooterSaysHowToOpenARootOnlyReport(t *testing.T) {
 // report does not offer it, so a perfect grade never reads as a problem.
 func TestAPerfectGradeOffersNoFix(t *testing.T) {
 	r := designReport(t)
-	r.Grade, r.Counts = scan.Grade{Score: 100, Letter: "A", BasedOn: 23, Total: 23}, scan.Counts{Passed: 23, Run: 23}
+	r.Grade, r.Counts = scan.Grade{Score: 100, Letter: "A", BasedOn: 24, Total: 24}, scan.Counts{Passed: 24, Run: 24}
 	r.Checks = []scan.CheckResult{{ID: "leftovers", Name: "Leftovers", Status: "pass", Findings: []scan.Finding{
 		{Check: "leftovers", Severity: "info", AutoFix: "docker-cleanup", Sentence: "Docker keeps 2.4 GB that nothing uses: old images and build cache"},
 	}}}

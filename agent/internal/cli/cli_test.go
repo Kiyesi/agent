@@ -129,7 +129,7 @@ func TestScanJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &r); err != nil {
 		t.Fatalf("not JSON: %v\n%s", err, out)
 	}
-	if r.Schema != "kiyesi.scan/v1" || r.Grade.Total != 23 || r.Grade.Letter == "" || r.ReportFile == "" {
+	if r.Schema != "kiyesi.scan/v1" || r.Grade.Total != 24 || r.Grade.Letter == "" || r.ReportFile == "" {
 		t.Errorf("report = %+v", r)
 	}
 	if strings.Contains(out, "correct-horse-battery") {

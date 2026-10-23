@@ -126,6 +126,8 @@ var (
 		"secrets-in-files": time.Minute,
 		// apt's dry run takes over 20 s on a 1-CPU server with little memory.
 		"updates": time.Minute,
+		// Comparing every installed program with its package, once a day.
+		"break-in": 5 * time.Minute,
 		// Reading a new backup through, up to 1 GB, once.
 		"backups": 2 * time.Minute,
 	}
