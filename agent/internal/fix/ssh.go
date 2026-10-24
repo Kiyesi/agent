@@ -56,12 +56,27 @@ func (sshRoot) Plan(_ context.Context, h Host, in Input) Plan {
 	}
 	if in.User == "" || in.User == "root" {
 		// Signed in as root: turning root login off could lock them out.
-		// Say what is already true, and the step that comes first.
+		// Say what is already true, then the safe order, command by command.
+		// The new user gets only the person's own key: root's file may hold
+		// a key nobody recognises, so it is never copied.
+		first := "Password login is already off, so root can sign in only with its key."
 		if in.SSH.PasswordLogin {
-			p.Refuse = "You are signed in as root, so turning root login off could lock you out. First turn password login off (sudo kiyesi fix ssh-password): root can then sign in only with its key. To turn root login off entirely, make a user of your own with sudo and an SSH key, sign in as that user, then run sudo kiyesi fix ssh-root."
-		} else {
-			p.Refuse = "You are signed in as root, so turning root login off could lock you out. Password login is already off, so root can sign in only with its key. To turn root login off entirely, make a user of your own with sudo and an SSH key, sign in as that user, then run sudo kiyesi fix ssh-root."
+			first = "First turn password login off, so root can sign in only with its key: sudo kiyesi fix ssh-password"
 		}
+		p.Refuse = "You are signed in as root, so turning root login off now could lock you out. " + first + "\n" +
+			"To turn root login off safely, as root, with your own name for <you>:\n" +
+			"  1. Check root's keys, and take out any nobody recognises:\n" +
+			"       sudo kiyesi keys\n" +
+			"       sudo kiyesi keys remove <fingerprint>\n" +
+			"  2. Make your own user, able to use sudo:\n" +
+			"       adduser <you> && usermod -aG sudo <you>\n" +
+			"  3. Give it only your own key, never a copy of root's authorized_keys. On your\n" +
+			"     own computer, cat ~/.ssh/id_ed25519.pub; then here, with that one line:\n" +
+			"       install -d -m 700 -o <you> -g <you> /home/<you>/.ssh\n" +
+			"       echo 'ssh-ed25519 AAAA... you@laptop' > /home/<you>/.ssh/authorized_keys\n" +
+			"       chown <you>: /home/<you>/.ssh/authorized_keys && chmod 600 /home/<you>/.ssh/authorized_keys\n" +
+			"  4. Keep this session open. From a new terminal: ssh <you>@this-server, then sudo -v\n" +
+			"  5. Only when both work, signed in as <you>: sudo kiyesi fix ssh-root"
 		return p
 	}
 	if keysOf(h, in.User) == 0 {

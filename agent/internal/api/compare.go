@@ -27,6 +27,8 @@ type CompareSection struct {
 	Key  string       `json:"key"`
 	Rows []CompareRow `json:"rows"`
 	Same int          `json:"same"`
+	// More counts the differing rows left out, past the most the service lists.
+	More int `json:"more"`
 }
 
 // CompareRow is one thing and its value on each server; nil where absent.

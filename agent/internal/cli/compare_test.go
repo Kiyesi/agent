@@ -54,3 +54,17 @@ func TestCompareWithOneServerNotReadYet(t *testing.T) {
 		t.Fatalf("out:\n%s", b.String())
 	}
 }
+
+// A long list is cut by the service; what it left out is counted, never
+// silently dropped.
+func TestCompareSaysHowManyRowsWereLeftOut(t *testing.T) {
+	v := "1"
+	var b strings.Builder
+	printComparison(IO{Out: &b, Environ: []string{"NO_COLOR=1"}}, api.Comparison{
+		A: api.CompareSide{Name: "web-1", Read: true, Covered: true}, B: api.CompareSide{Name: "web-2", Read: true, Covered: true},
+		Differences: 214, Sections: []api.CompareSection{{Key: "packages", Rows: []api.CompareRow{{Name: "adduser", A: &v}}, Same: 3, More: 213}},
+	})
+	if !strings.Contains(b.String(), "… and 213 more that differ") {
+		t.Fatalf("out:\n%s", b.String())
+	}
+}

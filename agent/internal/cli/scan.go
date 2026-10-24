@@ -122,6 +122,18 @@ func scanWithEnv(ctx context.Context, configPath string, reuseSlowFor time.Durat
 			}
 		}
 	}
+	if by == render.ByScan && root && os.Getenv("SUDO_USER") == "" {
+		// A person signed in as root, not through sudo: kiyesi fix always
+		// leaves root login to them then, so this scan does not offer it.
+		// The agent's own scans keep it, for the dashboard.
+		for i := range r.Checks {
+			for j := range r.Checks[i].Findings {
+				if r.Checks[i].Findings[j].AutoFix == "ssh-root" {
+					r.Checks[i].Findings[j].AutoFix = ""
+				}
+			}
+		}
+	}
 	path, saveErr := report.Save(dir, sys.Now(), render.File(r, by))
 	if saveErr == nil {
 		r.ReportFile = path

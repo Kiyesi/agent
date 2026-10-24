@@ -98,7 +98,7 @@
           "severity": "warning",
           "sentence": "Newest backup is 31 hours old",
           "why": "Backups are expected every 24 hours. The last one was written on Wed 7 Oct at 04:00.",
-          "fix": "crontab -l | grep -i backup"
+          "fix": "Find the job that writes it: sudo grep -ril backup /etc/cron* /var/spool/cron 2\u003e/dev/null, and systemctl list-timers --all | grep -i backup"
         }
       ]
     },

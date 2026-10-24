@@ -78,12 +78,16 @@ func newFindings(io IO) *cobra.Command {
 					likely = " · likely"
 				}
 				fmt.Fprintf(io.Out, "%-8s  %s%s\n          %s · %s\n          %s\n", label, f.Sentence, likely, f.Server.Name, f.CheckName, f.Why)
+				first, byHand := render.FixLines(strings.TrimSpace(f.Fix), autoFixOf(f.AutoFix))
 				fmt.Fprintln(io.Out, "          Fix:")
-				for _, line := range strings.Split(strings.TrimSpace(f.Fix), "\n") {
+				for _, line := range strings.Split(first, "\n") {
 					fmt.Fprintf(io.Out, "            %s\n", line)
 				}
-				if f.AutoFix != nil && *f.AutoFix != "" {
-					fmt.Fprintf(io.Out, "          or: sudo kiyesi fix %s\n", *f.AutoFix)
+				if byHand != "" {
+					fmt.Fprintln(io.Out, "          By hand:")
+					for _, line := range strings.Split(byHand, "\n") {
+						fmt.Fprintf(io.Out, "            %s\n", line)
+					}
 				}
 			}
 			return nil
@@ -136,4 +140,12 @@ func noFindings(servers []api.Server, severity string, named bool) string {
 		return fmt.Sprintf("No findings on the latest scans. %s not sent a scan yet.", plural(waiting, "server has", "servers have"))
 	}
 	return "No findings: every check passed on the latest scans."
+}
+
+// autoFixOf is the kiyesi fix a finding names, or "" when it names none.
+func autoFixOf(name *string) string {
+	if name == nil {
+		return ""
+	}
+	return *name
 }

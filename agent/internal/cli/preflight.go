@@ -88,7 +88,7 @@ func newPreflight(io IO) *cobra.Command {
 func printPreflight(io IO, p api.Preflight) {
 	w := render.NewWriter(io.Out, io.Environ)
 	place := p.Server.Name
-	if p.Server.Project != nil {
+	if p.Server.Project != nil && p.Server.Project.Name != "" {
 		place += " · " + p.Server.Project.Name
 	}
 	if p.Server.Environment != nil {

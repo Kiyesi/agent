@@ -224,7 +224,7 @@ func TestFindingsOfferKiyesiFixAndHelpSaysItExists(t *testing.T) {
 		"/v1/findings": say(`{"findings":[{"server":{"id":"s1","name":"web"},"check":"ssh","checkName":"SSH settings","severity":"warning","sentence":"SSH allows password login","why":"w","fix":"edit sshd_config","autoFix":"ssh-password","scannedAt":"2026-10-20T10:00:00Z"}]}`),
 	})
 	code, out, _ := runCLI(t, "findings")
-	if code != ExitOK || !strings.Contains(out, "or: sudo kiyesi fix ssh-password") {
+	if code != ExitOK || !strings.Contains(out, "Fix:\n            sudo kiyesi fix ssh-password\n          By hand:") {
 		t.Errorf("%d %q", code, out)
 	}
 	_, help, _ := runCLI(t, "findings", "--help")

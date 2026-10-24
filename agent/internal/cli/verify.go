@@ -32,7 +32,7 @@ func newVerify(io IO) *cobra.Command {
 		Long: "Checks a health certificate's signature with Kiyesi's public key, built into\n" +
 			"this program, so a downloaded certificate file is checked with no network at all.\n" +
 			"Given its link or id instead, it also asks the service whether it was revoked.",
-		Example: "  kiyesi verify kiyesi-certificate-web-1.json\n  kiyesi verify https://kiyesi.dev/verify/?id=Qm9yX3pXnFv2kTr8aLdE1c0b",
+		Example: "  kiyesi verify kiyesi-certificate-web-1-3jtDKL.json\n  kiyesi verify https://kiyesi.dev/verify/?id=Qm9yX3pXnFv2kTr8aLdE1c0b",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			f, online, err := loadCertificate(cmd.Context(), args[0])

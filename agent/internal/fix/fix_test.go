@@ -742,7 +742,27 @@ func TestRootRefusalSaysWhatIsAlreadyTrue(t *testing.T) {
 		t.Errorf("passwords off: %q", p.Refuse)
 	}
 	in.SSH.PasswordLogin = true
-	if p := (sshRoot{}).Plan(context.Background(), h, in); !strings.Contains(p.Refuse, "First turn password login off (sudo kiyesi fix ssh-password)") {
+	p := (sshRoot{}).Plan(context.Background(), h, in)
+	if !strings.Contains(p.Refuse, "First turn password login off, so root can sign in only with its key: sudo kiyesi fix ssh-password") {
 		t.Errorf("passwords on: %q", p.Refuse)
+	}
+	// The safe order, command by command: root's keys checked first, the new
+	// user given only the person's own key, and the test from a new terminal.
+	for _, want := range []string{
+		"sudo kiyesi keys\n",
+		"sudo kiyesi keys remove <fingerprint>",
+		"adduser <you> && usermod -aG sudo <you>",
+		"never a copy of root's authorized_keys",
+		"cat ~/.ssh/id_ed25519.pub",
+		"install -d -m 700 -o <you> -g <you> /home/<you>/.ssh",
+		"Keep this session open. From a new terminal: ssh <you>@this-server, then sudo -v",
+		"Only when both work, signed in as <you>: sudo kiyesi fix ssh-root",
+	} {
+		if !strings.Contains(p.Refuse, want) {
+			t.Errorf("the steps lack %q:\n%s", want, p.Refuse)
+		}
+	}
+	if strings.Index(p.Refuse, "sudo kiyesi keys") > strings.Index(p.Refuse, "adduser") {
+		t.Error("root's keys must be checked before the new user is made")
 	}
 }

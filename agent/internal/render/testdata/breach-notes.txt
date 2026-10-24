@@ -1,0 +1,19 @@
+
+Kiyesi 0.1.0 · break-in check · nothing leaves this server
+web-1 · Ubuntu 25.04 (untested) · 11 signs checked in 4.2 s
+
+2 changes to confirm: were they your team?
+
+ NOTE  root's login keys changed on 23 Oct 2026
+       Each line in that file opens the server to whoever holds the key.
+       Check the change was someone on your team.
+       Fix: sudo kiyesi keys lists each key's fingerprint and comment. On
+            your own computer, ssh-keygen -lf ~/.ssh/id_ed25519.pub prints
+            yours to compare. Take out a key nobody recognises with sudo
+            kiyesi keys remove <fingerprint>: it asks first, can be undone,
+            and never takes your own last key
+
+ NOTE  Login account support was added, first seen 22 Oct 2026
+       Check it was someone on your team.
+       Fix: sudo lastlog -u support
+

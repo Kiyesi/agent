@@ -437,7 +437,7 @@ func TestScanOffersKiyesiFixOnlyWhereItRuns(t *testing.T) {
 	}
 	_, out, _ := runCLI(t, "scan")
 	// ssh-password, login-protection and secret-files.
-	if !strings.Contains(out, "Kiyesi can fix 3 things for you: sudo kiyesi fix") || !strings.Contains(report(out), "Or let Kiyesi do it: sudo kiyesi fix secret-files") {
+	if !strings.Contains(out, "Kiyesi can fix 3 things for you: sudo kiyesi fix") || !strings.Contains(report(out), "Fix: sudo kiyesi fix secret-files") {
 		t.Fatalf("fix allowed, not offered:\n%s", out)
 	}
 	if err := os.WriteFile(configFlag, []byte("fix: off\n"), 0o600); err != nil {

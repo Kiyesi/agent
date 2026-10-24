@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -97,5 +98,61 @@ func TestBreachCheckNeedsRoot(t *testing.T) {
 	code, _, errOut := runCLI(t, "breach-check")
 	if code != ExitNoAccess || !strings.Contains(errOut, "sudo kiyesi breach-check") {
 		t.Fatalf("code %d, err %q", code, errOut)
+	}
+}
+
+// Login keys changed an hour ago: the note points to kiyesi keys, and lists
+// the sign-ins around the change from the sign-in log, with the key each
+// used named from the keys on this server. A progress line comes first.
+func TestBreachCheckShowsSigninsAroundAKeyChange(t *testing.T) {
+	ed, _ := os.ReadFile("../keys/testdata/ed25519.pub")
+	fp, _ := os.ReadFile("../keys/testdata/ed25519.fp")
+	now := time.Now().UTC()
+	changed := now.Add(-time.Hour)
+	stamp := func(d time.Duration) string { return now.Add(d).Format("2006-01-02T15:04:05.000000+00:00") }
+	log := stamp(-70*time.Minute) + " web-1 sshd[812]: Accepted publickey for root from 203.0.113.9 port 50122 ssh2: ED25519 " + strings.TrimSpace(string(fp)) + "\n" +
+		stamp(-50*time.Minute) + " web-1 sshd[901]: Accepted password for deploy from 198.51.100.4 port 40000 ssh2\n" +
+		stamp(-72*time.Hour) + " web-1 sshd[100]: Accepted publickey for root from 192.0.2.1 port 1 ssh2\n" +
+		stamp(-30*time.Minute) + " web-1 sshd[902]: Failed password for root from 192.0.2.9 port 2 ssh2\n"
+	breachSystem(t, fstest.MapFS{
+		"root/.ssh/authorized_keys": {Data: ed, Mode: 0o600, ModTime: changed},
+		"var/log/auth.log":          {Data: []byte(log), ModTime: now},
+	})
+	code, out, _ := runCLI(t, "breach-check")
+	if code != ExitOK {
+		t.Fatalf("code %d\n%s", code, out)
+	}
+	for _, want := range []string{
+		"Comparing every system program with the package it came from",
+		"1 change to confirm: was it your team?",
+		"sudo kiyesi keys lists each key's fingerprint",
+		"ssh-keygen -lf ~/.ssh/id_ed25519.pub",
+		"SSH sign-ins within a day of the change (" + changed.Format("2 Jan 15:04 UTC") + "):",
+		"root from 203.0.113.9, key " + strings.TrimSpace(string(fp))[:15] + "… (ada@laptop)",
+		"deploy from 198.51.100.4, with password",
+		"signs checked in",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	for _, not := range []string{"192.0.2.1", "192.0.2.9", "change to check was"} {
+		if strings.Contains(out, not) {
+			t.Errorf("%q should not be there:\n%s", not, out)
+		}
+	}
+	// --json prints only the result: no progress line in it.
+	_, out, _ = runCLI(t, "breach-check", "--json")
+	if strings.Contains(out, "Comparing") || !strings.HasPrefix(strings.TrimSpace(out), "[") {
+		t.Errorf("json: %q", out)
+	}
+}
+
+func TestBreachCheckHelpNamesTheNotes(t *testing.T) {
+	_, out, _ := runCLI(t, "breach-check", "--help")
+	for _, want := range []string{"a\nlogin account added since the last scan", "login keys changed in the last 7", "can take a minute on a small server"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("help lacks %q:\n%s", want, out)
+		}
 	}
 }

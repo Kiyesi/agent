@@ -45,7 +45,7 @@ func (b By) footer() string {
 func File(r scan.Report, by By) string {
 	var b strings.Builder
 	line := func(s string) { b.WriteString(s + "\n") }
-	line(fmt.Sprintf("Kiyesi %s · read-only scan · full report", version.Short()))
+	line(fmt.Sprintf("Kiyesi %s · read-only scan · full report", version.Version))
 	line(hostLine(r))
 	as := "as root"
 	if !r.Host.Root {
@@ -73,20 +73,17 @@ func File(r scan.Report, by By) string {
 			for _, l := range wrap("Why: "+f.Why, fixWidth, 5) {
 				line("       " + l)
 			}
-			for _, l := range wrap("Fix: "+f.Fix, fixWidth, 5) {
+			for _, l := range fixLines(f, fixWidth) {
 				line("       " + l)
-			}
-			if f.AutoFix != "" {
-				line("       Or let Kiyesi do it: sudo kiyesi fix " + f.AutoFix)
 			}
 			line("")
 		}
 	}
 	section("CRITICAL", "FAIL", crit)
 	section("WARNING", "WARN", warn)
-	// Clean-ups that do not move the grade, so kiyesi fix never offers
-	// one the report did not name.
-	section("OPTIONAL (does not affect the grade)", "INFO", optional(r))
+	// What does not move the grade: clean-ups, so kiyesi fix never offers
+	// one the report did not name, and changes to confirm or plan for.
+	section("INFO (does not affect the grade)", "INFO", optional(r))
 	if rows := locations(r); len(rows) > 0 {
 		if r.Home.Code == "" {
 			line("DATA LOCATION (no home country chosen: set home_country in /etc/kiyesi/config.yaml, or choose it in the dashboard)")

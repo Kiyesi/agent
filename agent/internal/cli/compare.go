@@ -74,7 +74,7 @@ func printComparison(io IO, r api.Comparison) {
 	fmt.Fprintln(out)
 	for _, s := range []api.CompareSide{r.A, r.B} {
 		if !s.Read {
-			why := "its agent has not sent what is installed yet (Kiyesi 0.39 or later, within a day)"
+			why := "its agent has not sent what is installed yet (Kiyesi 0.39.0 or later, within a day)"
 			if !s.Covered {
 				why = "the free plan does not watch it; add credit to compare it"
 			}
@@ -118,6 +118,9 @@ func printComparison(io IO, r api.Comparison) {
 			fmt.Fprintf(w, "  %s\t%s\t%s\n", name, valueOr(row.A), valueOr(row.B))
 		}
 		_ = w.Flush()
+		if s.More > 0 {
+			fmt.Fprintln(out, render.Grey(fmt.Sprintf("  … and %d more that differ", s.More)))
+		}
 	}
 	fmt.Fprintln(out)
 }

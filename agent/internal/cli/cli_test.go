@@ -82,7 +82,7 @@ func TestScanPrintsTheReportAndSavesIt(t *testing.T) {
 		t.Fatalf("exit code = %d", code)
 	}
 	for _, want := range []string{
-		"Kiyesi " + version.Short() + " · read-only scan · nothing leaves this server",
+		"Kiyesi " + version.Version + " · read-only scan · nothing leaves this server",
 		"test-server · Ubuntu 24.04 · ",
 		"WARN  This server has 974 MB of memory and no swap",
 		"WARN  SSH allows password login",
@@ -131,7 +131,7 @@ func TestScanJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &r); err != nil {
 		t.Fatalf("not JSON: %v\n%s", err, out)
 	}
-	if r.Schema != "kiyesi.scan/v1" || r.Grade.Total != 24 || r.Grade.Letter == "" || r.ReportFile == "" {
+	if r.Schema != "kiyesi.scan/v1" || r.Grade.Total != 25 || r.Grade.Letter == "" || r.ReportFile == "" {
 		t.Errorf("report = %+v", r)
 	}
 	if strings.Contains(out, "correct-horse-battery") {

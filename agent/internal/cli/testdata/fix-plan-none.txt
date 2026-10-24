@@ -1,0 +1,30 @@
+
+GRADE  D  50/100
+
+  What took points off: 100 − 15 − 5 × 3 = 50
+    −15  Redis is open to the internet on port 6379
+     −5  SSH allows root login  (left to you, below)
+     −5  /opt/appstack/.env.api holds secrets and every user on this server can read it
+     −5  No backup is set up for Kiyesi to check
+  Every finding, with its fix: sudo kiyesi scan
+
+  Nothing Kiyesi can change safely right now.
+
+  Left to you (1):
+
+  • SSH allows root login (ssh-root)  +5, to D 55, when done
+    You are signed in as root, so turning root login off now could lock you out. Password login is already off, so root can sign in only with its key.
+    To turn root login off safely, as root, with your own name for <you>:
+      1. Check root's keys, and take out any nobody recognises:
+           sudo kiyesi keys
+           sudo kiyesi keys remove <fingerprint>
+      2. Make your own user, able to use sudo:
+           adduser <you> && usermod -aG sudo <you>
+      3. Give it only your own key, never a copy of root's authorized_keys. On your
+         own computer, cat ~/.ssh/id_ed25519.pub; then here, with that one line:
+           install -d -m 700 -o <you> -g <you> /home/<you>/.ssh
+           echo 'ssh-ed25519 AAAA... you@laptop' > /home/<you>/.ssh/authorized_keys
+           chown <you>: /home/<you>/.ssh/authorized_keys && chmod 600 /home/<you>/.ssh/authorized_keys
+      4. Keep this session open. From a new terminal: ssh <you>@this-server, then sudo -v
+      5. Only when both work, signed in as <you>: sudo kiyesi fix ssh-root
+

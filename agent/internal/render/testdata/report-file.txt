@@ -1,4 +1,4 @@
-Kiyesi 0.1 · read-only scan · full report
+Kiyesi 0.1.0 · read-only scan · full report
 checkout-api-prod · Ubuntu 22.04 · 22 checks in 6.4 s
 Scanned on Thu 8 Oct 2026 at 10:45 UTC, as root
 
@@ -22,21 +22,23 @@ CRITICAL
 WARNING
  WARN  SSL certificate for api.example.com expires in 9 days
        Why: When it expires, browsers and apps will refuse to connect.
-       Fix: sudo certbot renew
-       Or let Kiyesi do it: sudo kiyesi fix certificates
+       Fix: sudo kiyesi fix certificates
+       By hand: sudo certbot renew
 
  WARN  SSH allows password login
        Why: Passwords can be guessed by automated attacks. Keys cannot. Check
             that your key works before you turn passwords off.
-       Fix: echo "PasswordAuthentication no" |
-            sudo tee /etc/ssh/sshd_config.d/00-kiyesi-no-password.conf &&
-            sudo systemctl reload ssh
-       Or let Kiyesi do it: sudo kiyesi fix ssh-password
+       Fix: sudo kiyesi fix ssh-password
+       By hand: echo "PasswordAuthentication no" |
+                sudo tee /etc/ssh/sshd_config.d/00-kiyesi-no-password.conf &&
+                sudo systemctl reload ssh
 
  WARN  Newest backup is 31 hours old
        Why: Backups are expected every 24 hours. The last one was written on
             Wed 7 Oct at 04:00.
-       Fix: crontab -l | grep -i backup
+       Fix: Find the job that writes it: sudo grep -ril backup /etc/cron*
+            /var/spool/cron 2>/dev/null, and systemctl list-timers --all |
+            grep -i backup
 
 DATA LOCATION (home country: Nigeria)
  Server     DigitalOcean, London, UK     confirmed   outside Nigeria

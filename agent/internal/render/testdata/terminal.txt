@@ -1,5 +1,5 @@
 
-Kiyesi 0.1 · read-only scan · nothing leaves this server
+Kiyesi 0.1.0 · read-only scan · nothing leaves this server
 checkout-api-prod · Ubuntu 22.04 · 22 checks in 6.4 s
 
 GRADE  D  55/100     2 critical · 3 warnings · 17 passed

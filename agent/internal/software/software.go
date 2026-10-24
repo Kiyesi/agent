@@ -40,6 +40,10 @@ type List struct {
 	// Settings are a few of the server's settings, for comparing two
 	// servers that should be alike: names and values, never a secret.
 	Settings *Settings `json:"settings,omitempty"`
+	// OSLifeChecked is set by an agent whose scan judges the system's end
+	// of life itself (the end-of-life check), so the service's tips leave
+	// it out rather than say it twice.
+	OSLifeChecked bool `json:"os_life_checked,omitempty"`
 }
 
 // Settings are what kiyesi compare sets side by side, beside the packages.

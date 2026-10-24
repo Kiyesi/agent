@@ -332,26 +332,31 @@ func printPlan(out io.Writer, r scan.Report, list []*planned, names []string) {
 			}
 		}
 	}
-	switch {
-	case len(list) == 0 && len(names) > 0:
+	if len(list) == 0 && len(names) > 0 {
 		fmt.Fprintf(out, "%s     Nothing to fix for %s: %s.\n\n", head, strings.Join(names, ", "), passedWord(len(names)))
 		return
+	}
+	if len(list) == 0 && r.Counts.Critical+r.Counts.Warnings == 0 {
+		fmt.Fprintf(out, "%s     Nothing to fix. Lovely. ✨\n\n", head)
+		return
+	}
+	// The grade first, and what took points off it, so it adds up before
+	// anything is offered.
+	fmt.Fprintln(out, head)
+	printBreakdown(out, r, list)
+	switch {
 	case len(list) == 0:
 		left := r.Counts.Critical + r.Counts.Warnings
-		if left == 0 {
-			fmt.Fprintf(out, "%s     Nothing to fix. Lovely. ✨\n\n", head)
-		} else {
-			fmt.Fprintf(out, "%s     Nothing here Kiyesi can fix by itself. %s a person: sudo kiyesi scan\n\n", head, plural(left, "finding needs", "findings need"))
-		}
+		fmt.Fprintf(out, "  %s\n\n", render.Bold("Nothing here Kiyesi can fix by itself: "+plural(left, "finding needs", "findings need")+" a person."))
 		return
 	case n == 0:
-		fmt.Fprintf(out, "%s     Kiyesi could fix these, but not safely right now:\n\n", head)
+		fmt.Fprintf(out, "  %s\n\n", render.Bold("Nothing Kiyesi can change safely right now."))
 	case optional:
 		// Nothing here moves the grade: say so, so it never reads as a problem.
-		fmt.Fprintf(out, "%s     Nothing affects the grade. %s, if you want %s:\n\n", head,
-			plural(n, "optional clean-up", "optional clean-ups"), map[bool]string{true: "it", false: "them"}[n == 1])
+		fmt.Fprintf(out, "  %s\n\n", render.Bold(fmt.Sprintf("Nothing affects the grade. %s, if you want %s:",
+			plural(n, "optional clean-up", "optional clean-ups"), map[bool]string{true: "it", false: "them"}[n == 1])))
 	default:
-		fmt.Fprintf(out, "%s     Kiyesi can fix %s for you:\n\n", head, plural(n, "thing", "things"))
+		fmt.Fprintf(out, "  %s\n\n", render.Bold(fmt.Sprintf("Kiyesi can fix %s for you:", plural(n, "thing", "things"))))
 	}
 	var later []*planned
 	i := 0
@@ -370,12 +375,12 @@ func printPlan(out io.Writer, r scan.Report, list []*planned, names []string) {
 	}
 	// What Kiyesi will not do now, apart and unnumbered, so the count above
 	// is the count of what it does.
-	if len(later) > 0 && n > 0 {
+	if len(later) > 0 {
 		fmt.Fprintf(out, "  %s\n\n", render.Bold(fmt.Sprintf("Left to you (%d):", len(later))))
 	}
 	for _, p := range later {
 		gain := ""
-		if g := gainOf(p.findings); g > 0 && n > 0 {
+		if g := gainOf(p.findings); g > 0 {
 			to := min(r.Grade.Score+g, 100)
 			gain = render.Grey(fmt.Sprintf("  +%d, to %s %d, when done", g, scan.Letter(to), to))
 		}
@@ -383,10 +388,75 @@ func printPlan(out io.Writer, r scan.Report, list []*planned, names []string) {
 		if p.plan.Skip != "" {
 			fmt.Fprintln(out, "    "+render.Grey(p.plan.Skip))
 		} else {
-			fmt.Fprintln(out, "    "+p.plan.Refuse)
+			for _, l := range strings.Split(p.plan.Refuse, "\n") {
+				fmt.Fprintln(out, "    "+l)
+			}
 		}
 		fmt.Fprintln(out)
 	}
+}
+
+// printBreakdown lists every finding that took points off the grade, worst
+// first, with its points and whether Kiyesi fixes it below or leaves it to
+// the person, and the sum, so the grade adds up.
+func printBreakdown(out io.Writer, r scan.Report, list []*planned) {
+	status := map[string]string{}
+	for _, p := range list {
+		tag := "Kiyesi fixes this below"
+		if p.plan.Refuse != "" || p.plan.Skip != "" {
+			tag = "left to you, below"
+		}
+		for _, f := range p.findings {
+			status[f.Check+"\x00"+f.Sentence] = tag
+		}
+	}
+	var crit, warn []string
+	line := func(points string, f scan.Finding) string {
+		l := "    " + points + "  " + f.Sentence
+		if t := status[f.Check+"\x00"+f.Sentence]; t != "" {
+			l += render.Grey("  (" + t + ")")
+		}
+		return l
+	}
+	for _, c := range r.Checks {
+		for _, f := range c.Findings {
+			switch f.Severity {
+			case "critical":
+				crit = append(crit, line(render.Red("−15"), f))
+			case "warning":
+				warn = append(warn, line(render.Amber(" −5"), f))
+			}
+		}
+	}
+	if len(crit)+len(warn) == 0 {
+		fmt.Fprintln(out)
+		return
+	}
+	sum := "100"
+	switch len(crit) {
+	case 0:
+	case 1:
+		sum += " − 15"
+	default:
+		sum += fmt.Sprintf(" − 15 × %d", len(crit))
+	}
+	switch len(warn) {
+	case 0:
+	case 1:
+		sum += " − 5"
+	default:
+		sum += fmt.Sprintf(" − 5 × %d", len(warn))
+	}
+	fmt.Fprintf(out, "\n  %s %s\n", render.Bold("What took points off:"), render.Grey(fmt.Sprintf("%s = %d", sum, r.Grade.Score)))
+	for i, l := range append(crit, warn...) {
+		if i == 12 {
+			fmt.Fprintln(out, render.Grey(fmt.Sprintf("    and %d more", len(crit)+len(warn)-12)))
+			break
+		}
+		fmt.Fprintln(out, l)
+	}
+	fmt.Fprintln(out, render.Grey("  Every finding, with its fix: sudo kiyesi scan"))
+	fmt.Fprintln(out)
 }
 
 // planTitle is a fix's findings in one line, at most three.

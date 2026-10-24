@@ -120,12 +120,16 @@ func TestGuardPutsTheSettingsBackWhenSomethingBroke(t *testing.T) {
 
 func TestGuardAsksAndLeavesItWhenToldNo(t *testing.T) {
 	etc, restarted, _ := guardServer(t, breakNginx)
-	code, out, _ := runCLI(t, "guard", "--", "./deploy.sh")
+	code, out, asked := runCLI(t, "guard", "--", "./deploy.sh")
 	if code != ExitFindings || !strings.Contains(out, "sudo kiyesi guard undo") || len(*restarted) != 0 {
 		t.Fatalf("code %d, restarted %v:\n%s", code, *restarted, out)
 	}
 	if data, _ := os.ReadFile(filepath.Join(etc, "nginx/nginx.conf")); string(data) != "broken\n" {
 		t.Fatal("put back without a yes")
+	}
+	// The question counts the files once, in words that fit one file.
+	if !strings.Contains(out+asked, "Put the 1 settings file back as it was, and restart nginx.service? [y/N]") {
+		t.Errorf("the question reads:\n%s%s", out, asked)
 	}
 	// Later, by its id.
 	list, _ := guardStore().List()

@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
@@ -49,7 +50,7 @@ func Terminal(w io.Writer, r scan.Report, saveErr error, viaSudo bool) error {
 	line := func(s string) { b.WriteString(s + "\n") }
 
 	line("")
-	line(grey.Render(fmt.Sprintf("Kiyesi %s · read-only scan · nothing leaves this server", version.Short())))
+	line(grey.Render(fmt.Sprintf("Kiyesi %s · read-only scan · nothing leaves this server", version.Version)))
 	body(&b, r)
 	if n := fixable(r); n > 0 {
 		line(bold.Render("Kiyesi can fix "+plural(n, "thing", "things")+" for you:") + " sudo kiyesi fix")
@@ -115,7 +116,7 @@ func body(b *strings.Builder, r scan.Report) {
 		line(redB.Render("CRITICAL"))
 		for _, f := range crit {
 			line(" " + red.Render("FAIL") + "  " + sentence(f))
-			for _, fl := range wrap("Fix: "+f.Fix, fixWidth, 5) {
+			for _, fl := range fixLines(f, fixWidth) {
 				line("       " + grey.Render(fl))
 			}
 		}
@@ -158,6 +159,26 @@ func howLong(d time.Duration) string {
 	default:
 		return plural(max(int(d/time.Minute), 1), "minute", "minutes")
 	}
+}
+
+// FixLines is how a fix is said everywhere: Kiyesi's own command first
+// when it has one, then the change by hand. fix is the pack's fix, auto the
+// kiyesi fix that makes it, or "".
+func FixLines(fix, auto string) (first, byHand string) {
+	if auto == "" {
+		return fix, ""
+	}
+	return "sudo kiyesi fix " + auto, fix
+}
+
+// fixLines wraps a fix for the terminal, indented under its finding.
+func fixLines(f scan.Finding, width int) []string {
+	first, byHand := FixLines(f.Fix, f.AutoFix)
+	out := wrap("Fix: "+first, width, 5)
+	if byHand != "" {
+		out = append(out, wrap("By hand: "+byHand, width, 9)...)
+	}
+	return out
 }
 
 // fixable counts the fixes kiyesi fix would offer for the findings that
@@ -366,7 +387,7 @@ func chunks(s string) []string {
 func quotedFields(s string) []string {
 	var out []string
 	var b strings.Builder
-	var quote rune
+	var quote, prev rune
 	for _, r := range s {
 		switch {
 		case quote != 0:
@@ -374,7 +395,9 @@ func quotedFields(s string) []string {
 			if r == quote {
 				quote = 0
 			}
-		case r == '\'' || r == '"':
+		// A quote opens only where a word starts, never between letters,
+		// so the apostrophe in "key's" does not hold the rest together.
+		case (r == '\'' || r == '"') && !unicode.IsLetter(prev) && !unicode.IsDigit(prev):
 			quote = r
 			b.WriteRune(r)
 		case r == ' ' || r == '\t':
@@ -385,6 +408,7 @@ func quotedFields(s string) []string {
 		default:
 			b.WriteRune(r)
 		}
+		prev = r
 	}
 	if b.Len() > 0 {
 		out = append(out, b.String())
