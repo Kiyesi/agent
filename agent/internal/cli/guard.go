@@ -215,8 +215,7 @@ func guardOne(ctx context.Context, io IO, args, sites []string, restore, noResto
 	worse := guard.Worse(m.Before, after)
 
 	if m.Before.Letter != "" && after.Letter != "" {
-		fmt.Fprintf(out, "  %s %s %d  →  %s %s\n", render.Bold("GRADE"), render.GradeBlock(m.Before.Letter), m.Before.Score,
-			render.GradeBlock(after.Letter), render.Bold(fmt.Sprintf("%d/100", after.Score)))
+		fmt.Fprintf(out, "  %s\n", render.GradeMove(m.Before.Letter, m.Before.Score, after.Letter, after.Score))
 	}
 	if len(worse) == 0 {
 		fmt.Fprintf(out, "  %s %s\n", render.Green("✓"), "No service failed, the sites answer as before, and the containers still run")

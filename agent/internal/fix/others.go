@@ -185,8 +185,10 @@ func (loginProtection) Apply(ctx context.Context, h Host, _ Input, c *Changes) e
 // owner and group keep access, so the app that reads them still can.
 type secretFile struct{}
 
-func (secretFile) Name() string      { return "secret-files" }
-func (secretFile) Targets() []Target { return []Target{{"secrets-in-files", "world-readable"}} }
+func (secretFile) Name() string { return "secret-files" }
+func (secretFile) Targets() []Target {
+	return []Target{{"secrets-in-files", "world-readable"}, {"secrets-in-files", "readable-closed"}}
+}
 
 func (secretFile) paths(h Host, in Input) (ok, skipped []string) {
 	for _, f := range in.Findings {

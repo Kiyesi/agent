@@ -85,7 +85,7 @@ var findingKeys = map[string][]string{
 	"ssh":               {"password", "root"},
 	"firewall":          {"off"},
 	"login-protection":  {"missing"},
-	"secrets-in-files":  {"world-readable", "in-compose", "in-history"},
+	"secrets-in-files":  {"world-readable", "readable-closed", "in-compose", "in-history"},
 	"risky-containers":  {"privileged", "docker-socket", "root"},
 	"vulnerabilities":   {"system", "image"},
 	"break-in": {"changed-program", "temp-program", "miner", "autostart-temp", "autostart-download",

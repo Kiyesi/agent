@@ -383,6 +383,15 @@ checks:
         sentence: "{path} holds secrets and every user on this server can read it"
         why: Any user or program on the server can read the secrets in this file.
         fix: "sudo chmod 600 {path}"
+      readable-closed:
+        severity: info
+        auto: secret-files
+        sentence: "{path} holds secrets and is set readable by everyone, but {folder} keeps other users out"
+        why: >-
+          Nobody else can reach it now, as {folder} lets only its owner through. If that folder or
+          the file is ever moved or opened up, every user could read the secrets. Tightening the
+          file costs nothing.
+        fix: "sudo chmod 600 {path}"
       in-compose:
         severity: warning
         sentence: "A secret is written into {path} at line {line}"

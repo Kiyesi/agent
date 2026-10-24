@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -214,5 +215,24 @@ func TestSecretsNeverKeepTheValue(t *testing.T) {
 				t.Fatalf("a secret value leaked into a finding: %+v", f)
 			}
 		}
+	}
+}
+
+// A secret file set readable by all is a door open only when every folder
+// above it lets other users through. Behind /root (700) it is a note.
+func TestSecretFileBehindAClosedFolderIsANote(t *testing.T) {
+	secret := "sk_" + "live_" + "9f3b2c1d4e5f6a7b8c9d0e1f2a3b4c5d6e"
+	e := newTestEnv()
+	e.fs["root"] = &fstest.MapFile{Mode: fs.ModeDir | 0o700}
+	e.fs["root/.env"] = &fstest.MapFile{Data: []byte("STRIPE_KEY=" + secret + "\n"), Mode: 0o644}
+	e.fs["opt/appstack"] = &fstest.MapFile{Mode: fs.ModeDir | 0o755}
+	e.fs["opt/appstack/.env.api"] = &fstest.MapFile{Data: []byte("STRIPE_KEY=" + secret + "\n"), Mode: 0o644}
+	r := run(t, secretsCheck{}, e)
+	wantStatus(t, r, StatusFail, "world-readable", "readable-closed")
+	if v := r.Findings[0].Vars; v["path"] != "/opt/appstack/.env.api" {
+		t.Errorf("open finding = %v", v)
+	}
+	if v := r.Findings[1].Vars; v["path"] != "/root/.env" || v["folder"] != "/root" {
+		t.Errorf("closed finding = %v", v)
 	}
 }

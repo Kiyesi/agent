@@ -731,3 +731,18 @@ func TestFixDoneButRecordNotSaved(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// Signed in as root, the refusal says what is already true: with passwords
+// off root can only use its key; with them on, that fix comes first.
+func TestRootRefusalSaysWhatIsAlreadyTrue(t *testing.T) {
+	h := newHost()
+	in := input("root")
+	in.SSH.PasswordLogin = false
+	if p := (sshRoot{}).Plan(context.Background(), h, in); !strings.Contains(p.Refuse, "Password login is already off, so root can sign in only with its key") {
+		t.Errorf("passwords off: %q", p.Refuse)
+	}
+	in.SSH.PasswordLogin = true
+	if p := (sshRoot{}).Plan(context.Background(), h, in); !strings.Contains(p.Refuse, "First turn password login off (sudo kiyesi fix ssh-password)") {
+		t.Errorf("passwords on: %q", p.Refuse)
+	}
+}

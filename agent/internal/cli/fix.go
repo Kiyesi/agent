@@ -353,30 +353,67 @@ func printPlan(out io.Writer, r scan.Report, list []*planned, names []string) {
 	default:
 		fmt.Fprintf(out, "%s     Kiyesi can fix %s for you:\n\n", head, plural(n, "thing", "things"))
 	}
+	var later []*planned
 	i := 0
 	for _, p := range list {
+		if p.plan.Refuse != "" || p.plan.Skip != "" {
+			later = append(later, p)
+			continue
+		}
 		i++
-		var titles []string
-		for _, f := range p.findings {
-			titles = append(titles, f.Sentence)
-		}
-		if len(titles) > 3 {
-			titles = append(titles[:2], fmt.Sprintf("and %d more", len(titles)-2))
-		}
-		fmt.Fprintf(out, "  %d. %s %s\n", i, render.Bold(strings.Join(titles, "; ")), render.Grey("("+p.fixer.Name()+")"))
-		switch {
-		case p.plan.Skip != "":
-			fmt.Fprintln(out, "     "+render.Grey(p.plan.Skip))
-		case p.plan.Refuse != "":
-			fmt.Fprintln(out, "     "+render.Amber("Left to you: ")+p.plan.Refuse)
-		default:
-			fmt.Fprintln(out, "     "+p.plan.Say)
-			for _, w := range p.plan.Warn {
-				fmt.Fprintln(out, "     "+render.Amber("! ")+w)
-			}
+		fmt.Fprintf(out, "  %d. %s %s\n", i, render.Bold(planTitle(p)), render.Grey("("+p.fixer.Name()+")"))
+		fmt.Fprintln(out, "     "+p.plan.Say)
+		for _, w := range p.plan.Warn {
+			fmt.Fprintln(out, "     "+render.Amber("! ")+w)
 		}
 		fmt.Fprintln(out)
 	}
+	// What Kiyesi will not do now, apart and unnumbered, so the count above
+	// is the count of what it does.
+	if len(later) > 0 && n > 0 {
+		fmt.Fprintf(out, "  %s\n\n", render.Bold(fmt.Sprintf("Left to you (%d):", len(later))))
+	}
+	for _, p := range later {
+		gain := ""
+		if g := gainOf(p.findings); g > 0 && n > 0 {
+			to := min(r.Grade.Score+g, 100)
+			gain = render.Grey(fmt.Sprintf("  +%d, to %s %d, when done", g, scan.Letter(to), to))
+		}
+		fmt.Fprintf(out, "  • %s %s%s\n", render.Bold(planTitle(p)), render.Grey("("+p.fixer.Name()+")"), gain)
+		if p.plan.Skip != "" {
+			fmt.Fprintln(out, "    "+render.Grey(p.plan.Skip))
+		} else {
+			fmt.Fprintln(out, "    "+p.plan.Refuse)
+		}
+		fmt.Fprintln(out)
+	}
+}
+
+// planTitle is a fix's findings in one line, at most three.
+func planTitle(p *planned) string {
+	var titles []string
+	for _, f := range p.findings {
+		titles = append(titles, f.Sentence)
+	}
+	if len(titles) > 3 {
+		titles = append(titles[:2], fmt.Sprintf("and %d more", len(titles)-2))
+	}
+	return strings.Join(titles, "; ")
+}
+
+// gainOf is how many points the grade gains when these findings go: 15 for
+// each critical one and 5 for each warning, as the grade counts them.
+func gainOf(fs []scan.Finding) int {
+	g := 0
+	for _, f := range fs {
+		switch f.Severity {
+		case "critical":
+			g += 15
+		case "warning":
+			g += 5
+		}
+	}
+	return g
 }
 
 func passedWord(n int) string {
@@ -446,16 +483,7 @@ func rescanAndSend(ctx context.Context, out io.Writer, configPath string, before
 		}
 		fmt.Fprintln(out)
 	} else if !quiet {
-		cheer := ""
-		switch {
-		case after.Grade.Score > before.Grade.Score && after.Grade.Letter == "A":
-			cheer = "  🎉"
-		case after.Grade.Score > before.Grade.Score:
-			cheer = "  ✨"
-		}
-		fmt.Fprintf(out, "\n  %s %s %d  →  %s %s%s\n", render.Bold("GRADE"),
-			render.GradeBlock(before.Grade.Letter), before.Grade.Score,
-			render.GradeBlock(after.Grade.Letter), render.Bold(fmt.Sprintf("%d/100", after.Grade.Score)), cheer)
+		fmt.Fprintf(out, "\n  %s\n", render.GradeMove(before.Grade.Letter, before.Grade.Score, after.Grade.Letter, after.Grade.Score))
 		if after.Grade.Score < before.Grade.Score {
 			if l := notBetter(before, after, applied); l != "" {
 				fmt.Fprintln(out, "  "+l)
