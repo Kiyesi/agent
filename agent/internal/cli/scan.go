@@ -20,6 +20,9 @@ import (
 	"github.com/kiyesi/kiyesi/agent/internal/system"
 )
 
+// scanAsRoot says whether the scan runs as root. Tests replace it.
+var scanAsRoot = func() bool { return os.Geteuid() == 0 }
+
 // newSystem builds the real system. Tests replace it.
 var newSystem = func(root bool, stateDir string) *system.System {
 	fsys := system.NewRootFS("/")
@@ -104,7 +107,7 @@ func scanWithEnv(ctx context.Context, configPath string, reuseSlowFor time.Durat
 	if err != nil {
 		return r, nil, nil, &exitError{code: ExitUsage, msg: "The built-in wording is damaged: " + err.Error() + ". Reinstall Kiyesi."}
 	}
-	root := os.Geteuid() == 0
+	root := scanAsRoot()
 	dir := report.Dir(root)
 	sys := newSystem(root, dir)
 	sys.Docker = system.FilterDocker(sys.Docker, cfg.Containers.Include, cfg.Containers.Exclude)

@@ -3,6 +3,8 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/kiyesi/kiyesi/agent/internal/api"
 )
 
 func TestCompareListsWhatDiffers(t *testing.T) {
@@ -31,5 +33,24 @@ func TestCompareListsWhatDiffers(t *testing.T) {
 	}
 	if code, out, _ := runCLI(t, "compare", "checkout-api-prod", "new-box", "--json"); code != ExitOK || !strings.Contains(out, `"differences": 3`) {
 		t.Errorf("json: %d %s", code, out)
+	}
+}
+
+// With one server not read yet, nothing is called a difference.
+func TestCompareWithOneServerNotReadYet(t *testing.T) {
+	v := "3.0.13-0ubuntu3.4"
+	var b strings.Builder
+	printComparison(IO{Out: &b, Environ: []string{"NO_COLOR=1"}}, api.Comparison{
+		A: api.CompareSide{Name: "web-1", Read: true, Covered: true}, B: api.CompareSide{Name: "web-2", Covered: true},
+		Differences: 1, Sections: []api.CompareSection{{Key: "packages", Rows: []api.CompareRow{{Name: "openssl", A: &v}}}},
+	})
+	out := b.String()
+	if !strings.Contains(out, "Only web-1 has been read so far") || strings.Contains(out, "differ in") || !strings.Contains(out, "web-2: its agent has not sent") {
+		t.Fatalf("out:\n%s", out)
+	}
+	b.Reset()
+	printComparison(IO{Out: &b, Environ: []string{"NO_COLOR=1"}}, api.Comparison{A: api.CompareSide{Name: "web-1", Covered: true}, B: api.CompareSide{Name: "web-2", Covered: true}})
+	if !strings.Contains(b.String(), "Neither server has been read yet") {
+		t.Fatalf("out:\n%s", b.String())
 	}
 }
