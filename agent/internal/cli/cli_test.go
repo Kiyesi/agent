@@ -32,8 +32,10 @@ func testSystem(t *testing.T) {
 		t.Fatal(err)
 	}
 	configFlag = cfg
-	old := newSystem
-	t.Cleanup(func() { newSystem = old; configFlag = "" })
+	old, oldRoot := newSystem, scanAsRoot
+	t.Cleanup(func() { newSystem, scanAsRoot = old, oldRoot; configFlag = "" })
+	// The tests describe a scan by an ordinary account, whoever runs them.
+	scanAsRoot = func() bool { return false }
 	newSystem = func(root bool, stateDir string) *system.System {
 		return &system.System{
 			FS: fstest.MapFS{

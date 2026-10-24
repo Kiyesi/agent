@@ -81,11 +81,24 @@ func printComparison(io IO, r api.Comparison) {
 			fmt.Fprintln(out, render.Amber("! ")+s.Name+": "+why)
 		}
 	}
-	if r.Differences == 0 {
+	if !r.A.Read || !r.B.Read {
+		if r.A.Read || r.B.Read {
+			read := r.A.Name
+			if r.B.Read {
+				read = r.B.Name
+			}
+			fmt.Fprintf(out, "Only %s has been read so far, so this lists what it has, not differences.\n", read)
+		} else {
+			fmt.Fprintln(out, "Neither server has been read yet, so there is nothing to compare.")
+			fmt.Fprintln(out)
+			return
+		}
+	} else if r.Differences == 0 {
 		fmt.Fprintf(out, "%s %s and %s are alike in everything Kiyesi compares.\n\n", render.Green("✓"), r.A.Name, r.B.Name)
 		return
+	} else {
+		fmt.Fprintf(out, "%s and %s differ in %s.\n", render.Bold(r.A.Name), render.Bold(r.B.Name), plural(r.Differences, "thing", "things"))
 	}
-	fmt.Fprintf(out, "%s and %s differ in %s.\n", render.Bold(r.A.Name), render.Bold(r.B.Name), plural(r.Differences, "thing", "things"))
 	for _, s := range r.Sections {
 		if len(s.Rows) == 0 {
 			continue
