@@ -15,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/kiyesi/kiyesi/agent/internal/api"
+	"github.com/kiyesi/kiyesi/agent/internal/render"
 )
 
 // kiyesi watch: a live view of what needs you, open incidents and every
@@ -176,7 +177,11 @@ func (m watchModel) open() tea.Cmd {
 		d := watchDetail{title: s.Name + "  findings"}
 		for _, f := range list {
 			if f.Server.ID == s.ID {
-				d.lines = append(d.lines, fmt.Sprintf("%-8s %s", strings.ToUpper(f.Severity), f.Sentence), "         Fix: "+strings.ReplaceAll(strings.TrimSpace(f.Fix), "\n", "\n              "))
+				first, byHand := render.FixLines(strings.TrimSpace(f.Fix), autoFixOf(f.AutoFix))
+				d.lines = append(d.lines, fmt.Sprintf("%-8s %s", strings.ToUpper(f.Severity), f.Sentence), "         Fix: "+strings.ReplaceAll(first, "\n", "\n              "))
+				if byHand != "" {
+					d.lines = append(d.lines, "         By hand: "+strings.ReplaceAll(byHand, "\n", "\n              "))
+				}
 			}
 		}
 		if len(d.lines) == 0 {

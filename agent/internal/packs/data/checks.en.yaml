@@ -8,7 +8,7 @@
 
 version: 1
 language: en
-total_checks: 24
+total_checks: 25
 
 skips:
   needs-root: "needs root: run sudo kiyesi scan"
@@ -204,12 +204,12 @@ checks:
         severity: warning
         sentence: "No backup found in {path}"
         why: The backup folder is set up but holds no files, so the backup job is not writing there.
-        fix: "crontab -l | grep -i backup"
+        fix: "Find the job that writes it: sudo grep -ril backup /etc/cron* /var/spool/cron 2>/dev/null, and systemctl list-timers --all | grep -i backup"
       old:
         severity: warning
         sentence: "Newest backup is {age} old"
         why: Backups are expected every {limit} hours. The last one was written on {when}.
-        fix: "crontab -l | grep -i backup"
+        fix: "Find the job that writes it: sudo grep -ril backup /etc/cron* /var/spool/cron 2>/dev/null, and systemctl list-timers --all | grep -i backup"
       unreadable:
         severity: critical
         sentence: "The newest backup in {path} would not restore: {reason}"
@@ -246,6 +246,56 @@ checks:
 
   # -------------------------------------------------------------- Security
 
+  - id: end-of-life
+    area: health
+    name: Security fixes for the system
+    reads: >-
+      The system and its version in /etc/os-release, whether Ubuntu Pro's extended fixes are
+      on in /var/lib/ubuntu-advantage/status.json, and the end-of-life dates built into
+      kiyesi, from the vendors' own pages: ubuntu.com/about/release-cycle and Ubuntu's
+      end-of-life announcements, debian.org/releases and wiki.debian.org/LTS, and Red Hat's
+      life-cycle page, with endoflife.date for the rest. Nothing is downloaded. The date is
+      the last day of free security fixes: for Debian, of its long-term support; for Red Hat
+      and its rebuilds, of Maintenance Support. It warns from 90 days before.
+    root:
+      needed: never
+    passed: "{os} gets security fixes until {date}{with}"
+    skips:
+      unknown-system: "Kiyesi has no end-of-life dates for {os}"
+      unknown-release: "{os} is not in the end-of-life dates built into this kiyesi (from {fetched}): sudo kiyesi update may know it"
+    findings:
+      ended:
+        severity: critical
+        sentence: "{os} stopped getting security fixes on {date}"
+        why: >-
+          Every flaw found since, in the system or the programs it came with, stays open:
+          updates no longer arrive, so nothing else on the server can make it safe. Plan the
+          move now.
+        fix: "Take a snapshot first. Move to a release that still gets fixes: upgrade in place, or build a new server on a long-term release and move the apps to it"
+        fix-variants:
+          ubuntu: "Take a snapshot first. sudo kiyesi guard -- do-release-upgrade moves it to the next release, one release at a time, and checks the services and sites after; on a small server, building a new one on Ubuntu 26.04 LTS and moving the apps to it is often easier"
+          debian: "Take a snapshot first. Point apt at the next release as its release notes say, then sudo kiyesi guard -- apt full-upgrade, which checks the services and sites after; or build a new server on Debian 13 and move the apps to it"
+          rhel: "Take a snapshot first. sudo kiyesi guard -- leapp upgrade moves it to the next major release in place; or build a new server on a supported release and move the apps to it"
+      ending:
+        severity: warning
+        sentence: "{os} stops getting security fixes on {date}, in {days|less than a day|day|days}"
+        why: >-
+          After that day, flaws found in the system or the programs it came with stay open.
+          Moving takes planning, so start now.
+        fix: "Take a snapshot first. Move to a release that still gets fixes: upgrade in place, or build a new server on a long-term release and move the apps to it"
+        fix-variants:
+          ubuntu: "Take a snapshot first. sudo kiyesi guard -- do-release-upgrade moves it to the next release, one release at a time, and checks the services and sites after; on a small server, building a new one on Ubuntu 26.04 LTS and moving the apps to it is often easier"
+          debian: "Take a snapshot first. Point apt at the next release as its release notes say, then sudo kiyesi guard -- apt full-upgrade, which checks the services and sites after; or build a new server on Debian 13 and move the apps to it"
+          rhel: "Take a snapshot first. sudo kiyesi guard -- leapp upgrade moves it to the next major release in place; or build a new server on a supported release and move the apps to it"
+      lts:
+        severity: info
+        sentence: "{os} is in long-term support: security fixes until {date}, for most packages"
+        why: >-
+          Debian's own security team has handed this release to its long-term support team,
+          which keeps fixing the packages most servers use, but not every package. Nothing
+          to do now; plan the move before the date.
+        fix: "Nothing to do yet. To see which installed packages long-term support leaves out: sudo apt install debian-security-support, then check-support-status. Kiyesi warns 90 days before the date"
+
   - id: open-ports
     area: security
     name: Open ports
@@ -260,7 +310,7 @@ checks:
         why: >-
           Every open port is a way in. Only ports you mean to serve should be open. If this one
           should be open, add it to ports.allowed in /etc/kiyesi/config.yaml.
-        fix: "Bind the program to 127.0.0.1, or close the port: sudo ufw deny {port}"
+        fix: "Bind the program to 127.0.0.1 if only this server needs it. Or keep it behind the firewall: with none on, sudo kiyesi fix firewall turns ufw on, open only to SSH and ports.allowed; with ufw on, sudo ufw status numbered shows the rule that allows {port}, and sudo ufw delete <number> removes it"
 
   - id: exposed-databases
     area: security
@@ -512,7 +562,7 @@ checks:
         severity: warning
         sentence: "{path} has grown to {size}"
         why: A log this big is not being rotated. It fills the disk, and old lines are rarely read.
-        fix: "sudo logrotate -f /etc/logrotate.conf, and check /etc/logrotate.d has a rule for {path}"
+        fix: "Check /etc/logrotate.d has a rule for {path}, then sudo logrotate -f /etc/logrotate.conf (if logrotate is missing: sudo apt-get install -y logrotate)"
       big-container-log:
         severity: warning
         sentence: "Container {name}'s log has grown to {size}, with no size limit"
@@ -566,7 +616,7 @@ checks:
           Miners are the most common thing attackers run on a server they get into. It earns
           them money, and costs you the CPU, the speed of your apps and often the trust of your
           provider.
-        fix: "sudo kill {pid}, then find how it got in and how it starts again: sudo crontab -l, sudo ls /etc/cron.d /etc/systemd/system, and docs.kiyesi.dev/guides/break-in/"
+        fix: "sudo kill {pid}, then find how it got in and how it starts again: sudo ls /etc/cron.d /var/spool/cron/crontabs /etc/systemd/system 2>/dev/null, and docs.kiyesi.dev/guides/break-in/"
       autostart-temp:
         severity: critical
         sentence: "{path} starts a program from a temporary folder"
@@ -615,14 +665,14 @@ checks:
         why: >-
           Check it was someone on your team. Adding an account is a common way to get back in
           later.
-        fix: "sudo lastlog -u {user} to see its sign-ins; sudo userdel -r {user} if nobody knows it"
+        fix: "sudo journalctl -u ssh -u sshd --since -30d | grep -w {user} to see its sign-ins; sudo userdel -r {user} if nobody knows it"
       new-key:
         severity: info
         sentence: "{user}'s login keys changed on {date}"
         why: >-
           Each line in that file opens the server to whoever holds the key. Check the change
           was someone on your team.
-        fix: "sudo cat ~{user}/.ssh/authorized_keys, and remove any line nobody recognises"
+        fix: "sudo kiyesi keys lists each key's fingerprint and comment. On your own computer, ssh-keygen -lf ~/.ssh/id_ed25519.pub prints yours to compare. Take out a key nobody recognises with sudo kiyesi keys remove <fingerprint>: it asks first, can be undone, and never takes your own last key"
 
   # --------------------------------------------------------- Data location
   # Each data-location finding says confirmed or likely. Only the provider's

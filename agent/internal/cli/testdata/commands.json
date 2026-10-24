@@ -126,7 +126,7 @@
     "path": "kiyesi breach-check",
     "use": "kiyesi breach-check [flags]",
     "short": "Look for signs that someone already got into this server. Nothing leaves the server",
-    "long": "Answers one question: has someone already got in? It compares the system's\nprograms with the packages they came from, and looks for crypto miners,\nprograms run from temporary folders, autostart entries that download and run\ncode, a second root account, a library loaded into every program, and history\nor sign-in logs turned off. Each sign says what it means and what to do.\nIt only reads, needs root, and sends nothing. The same check runs in every scan.",
+    "long": "Answers one question: has someone already got in? It compares the system's\nprograms with the packages they came from, and looks for crypto miners,\nprograms run from temporary folders, autostart entries that download and run\ncode, a second root account, a library loaded into every program, and history\nor sign-in logs turned off. Each sign says what it means and what to do.\nTwo notes cost no points and ask you to confirm a change was your team's: a\nlogin account added since the last scan, and login keys changed in the last 7\ndays. For changed keys it shows the SSH sign-ins within a day of the change,\nwith the key each used, to compare with sudo kiyesi keys and your own key.\nComparing every program with its package can take a minute on a small server.\nIt only reads, needs root, and sends nothing. The same check runs in every scan.",
     "example": "  sudo kiyesi breach-check\n  sudo kiyesi breach-check --json   # exit 1 when there is a sign of a break-in",
     "flags": [
       {
@@ -1327,7 +1327,7 @@
     "use": "kiyesi verify <file, link or id> [flags]",
     "short": "Check a Kiyesi health certificate is real, unchanged and still valid",
     "long": "Checks a health certificate's signature with Kiyesi's public key, built into\nthis program, so a downloaded certificate file is checked with no network at all.\nGiven its link or id instead, it also asks the service whether it was revoked.",
-    "example": "  kiyesi verify kiyesi-certificate-web-1.json\n  kiyesi verify https://kiyesi.dev/verify/?id=Qm9yX3pXnFv2kTr8aLdE1c0b",
+    "example": "  kiyesi verify kiyesi-certificate-web-1-3jtDKL.json\n  kiyesi verify https://kiyesi.dev/verify/?id=Qm9yX3pXnFv2kTr8aLdE1c0b",
     "flags": [
       {
         "name": "json",

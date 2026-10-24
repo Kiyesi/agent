@@ -109,6 +109,7 @@ func newAgent(io IO) *cobra.Command {
 						now := time.Now()
 						list := software.Read(ctx, col.Sys)
 						list.Settings = serverSettings(ctx, col.Sys)
+						list.OSLifeChecked = true
 						if p := list.Print(); p != softwarePrint || now.Sub(softwareSent) >= 24*time.Hour {
 							softwarePrint, softwareSent = p, now
 							items = append(items, send.Software(now, list))

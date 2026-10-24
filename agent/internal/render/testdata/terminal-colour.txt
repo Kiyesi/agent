@@ -1,5 +1,5 @@
 
-[90mKiyesi 0.1 · read-only scan · nothing leaves this server[m
+[90mKiyesi 0.1.0 · read-only scan · nothing leaves this server[m
 [90mcheckout-api-prod · Ubuntu 22.04 · 22 checks in 6.4 s[m
 
 [1mGRADE[m [1;38;2;255;255;255;48;2;181;71;27m D [m [1m55/100[m     2 critical · 3 warnings · 17 passed

@@ -117,7 +117,7 @@ func golden(tb testing.TB, name, got string) {
 func TestTerminalMatchesTheDesign(t *testing.T) {
 	got := terminal(t, designReport(t), colorprofile.NoTTY)
 	design := []string{
-		"Kiyesi 0.1 · read-only scan · nothing leaves this server",
+		"Kiyesi 0.1.0 · read-only scan · nothing leaves this server",
 		"checkout-api-prod · Ubuntu 22.04 · 22 checks in 6.4 s",
 		"GRADE  D  55/100     2 critical · 3 warnings · 17 passed",
 		"CRITICAL",
@@ -216,19 +216,19 @@ func TestExampleForTheDocs(t *testing.T) {
 
 // Two of the design's findings (the certificate and SSH passwords) are
 // ones kiyesi fix can make, so the report says so, and the saved report
-// names the fix under each.
+// leads each one's fix with it, the change by hand after.
 func TestReportsOfferKiyesiFix(t *testing.T) {
 	r := designReport(t)
 	if got := terminal(t, r, colorprofile.NoTTY); !strings.Contains(got, "Kiyesi can fix 2 things for you: sudo kiyesi fix\nIt says what it will change, and asks first.\n") {
 		t.Errorf("no kiyesi fix line in:\n%s", got)
 	}
 	file := File(r, ByScan)
-	for _, want := range []string{"Or let Kiyesi do it: sudo kiyesi fix ssh-password", "Or let Kiyesi do it: sudo kiyesi fix certificates"} {
+	for _, want := range []string{"Fix: sudo kiyesi fix ssh-password\n       By hand: ", "Fix: sudo kiyesi fix certificates\n       By hand: "} {
 		if !strings.Contains(file, want) {
 			t.Errorf("missing %q in the saved report", want)
 		}
 	}
-	if strings.Count(file, "Or let Kiyesi do it") != 2 {
+	if strings.Count(file, "Fix: sudo kiyesi fix") != 2 {
 		t.Errorf("a finding kiyesi fix cannot make was offered:\n%s", file)
 	}
 	var b bytes.Buffer
@@ -303,7 +303,7 @@ func TestFooterSaysHowToOpenARootOnlyReport(t *testing.T) {
 // report does not offer it, so a perfect grade never reads as a problem.
 func TestAPerfectGradeOffersNoFix(t *testing.T) {
 	r := designReport(t)
-	r.Grade, r.Counts = scan.Grade{Score: 100, Letter: "A", BasedOn: 24, Total: 24}, scan.Counts{Passed: 24, Run: 24}
+	r.Grade, r.Counts = scan.Grade{Score: 100, Letter: "A", BasedOn: 25, Total: 25}, scan.Counts{Passed: 25, Run: 25}
 	r.Checks = []scan.CheckResult{{ID: "leftovers", Name: "Leftovers", Status: "pass", Findings: []scan.Finding{
 		{Check: "leftovers", Severity: "info", AutoFix: "docker-cleanup", Sentence: "Docker keeps 2.4 GB that nothing uses: old images and build cache"},
 	}}}
@@ -326,11 +326,11 @@ func TestReportFileNamesOptionalCleanUps(t *testing.T) {
 		finding(t, "leftovers", "docker-waste", "", map[string]string{"size": "2.4 GB"}),
 	}})
 	got := File(r, ByScan)
-	at := strings.Index(got, "OPTIONAL (does not affect the grade)\n INFO  Docker keeps 2.4 GB that nothing uses")
+	at := strings.Index(got, "INFO (does not affect the grade)\n INFO  Docker keeps 2.4 GB that nothing uses")
 	if at < 0 || at < strings.Index(got, "WARNING") || at > strings.Index(got, "DATA LOCATION") {
-		t.Fatalf("no OPTIONAL section between WARNING and DATA LOCATION:\n%s", got)
+		t.Fatalf("no INFO section between WARNING and DATA LOCATION:\n%s", got)
 	}
-	if !strings.Contains(got[at:], "Or let Kiyesi do it: sudo kiyesi fix docker-cleanup") || !strings.Contains(got[at:], "Why: ") {
+	if !strings.Contains(got[at:], "Fix: sudo kiyesi fix docker-cleanup") || !strings.Contains(got[at:], "Why: ") {
 		t.Errorf("the clean-up has no why or kiyesi fix line:\n%s", got[at:])
 	}
 	if !strings.Contains(got, " PASS  Leftovers: passed, with an optional clean-up above\n") {

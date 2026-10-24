@@ -1,0 +1,34 @@
+
+Kiyesi 0.1.0 · break-in check · nothing leaves this server
+web-1 · Ubuntu 25.04 (untested) · 11 signs checked in 1.0 s
+Ubuntu 25.04 stopped getting security fixes on 15 Jan 2026
+How to move to a release that still gets them: sudo kiyesi scan
+
+1 sign of a break-in, and 2 things to look at
+
+ SIGN  A crypto miner is running: xmrig (pid 4242)
+       Miners earn attackers money.
+       Fix: sudo kill 4242
+
+ LOOK  root's shell history is sent to /dev/null
+       Attackers turn history off.
+       Fix: sudo rm ~root/.bash_history
+
+ NOTE  root's login keys changed on 23 Oct 2026
+       Each line in that file opens the server to whoever holds the key.
+       Check the change was someone on your team.
+       Fix: sudo kiyesi keys lists each key's fingerprint and comment. On
+            your own computer, ssh-keygen -lf ~/.ssh/id_ed25519.pub prints
+            yours to compare. Take out a key nobody recognises with sudo
+            kiyesi keys remove <fingerprint>: it asks first, can be undone,
+            and never takes your own last key
+
+What to do now
+ 1. Do not wipe the server yet: take a snapshot at your provider, so there
+    is evidence.
+ 2. From another computer, change every password and key this server held:
+    database, cloud, payment, email.
+ 3. Build a fresh server from your code and backups, rather than cleaning
+    this one.
+ 4. The full guide: https://docs.kiyesi.dev/guides/break-in/
+

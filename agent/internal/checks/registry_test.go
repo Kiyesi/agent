@@ -79,6 +79,7 @@ var findingKeys = map[string][]string{
 	"certificates":      {"expiring", "expired"},
 	"backups":           {"not-set", "empty", "old"},
 	"updates":           {"waiting"},
+	"end-of-life":       {"ended", "ending"},
 	"open-ports":        {"open"},
 	"exposed-databases": {"open"},
 	"docker-firewall":   {"bypass"},
@@ -106,5 +107,5 @@ var skipKeys = map[string][]string{
 	"vulnerabilities": {"not-installed", "no-database", "bad-version", "failed", "needs-root"},
 	"server-location": {"unknown", "failed"}, "database-connections": {"needs-root", "failed"},
 	"backup-destinations": {"needs-root", "failed"}, "outside-services": {"needs-root"},
-	"payment-data": {"failed"}, "break-in": {"needs-root"},
+	"payment-data": {"failed"}, "break-in": {"needs-root"}, "end-of-life": {"unknown-system", "unknown-release", "failed"},
 }

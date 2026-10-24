@@ -31,12 +31,12 @@ func GradeLetter(letter string) string {
 }
 
 // GradeMove is a grade's change after a fix, an undo or a guarded command:
-// "GRADE  F 25 → F 35/100  +10", with a cheer only on reaching A.
+// "GRADE  F 25 → F 35/100  +10", with a cheer only on reaching A or 100.
 func GradeMove(beforeLetter string, before int, afterLetter string, after int) string {
 	line := fmt.Sprintf("%s  %s %d → %s %s", Bold("GRADE"), GradeLetter(beforeLetter), before,
 		GradeLetter(afterLetter), Bold(fmt.Sprintf("%d/100", after)))
 	switch d := after - before; {
-	case d > 0 && afterLetter == "A":
+	case d > 0 && ((afterLetter == "A" && beforeLetter != "A") || after == 100):
 		line += "  " + Green(fmt.Sprintf("+%d", d)) + " 🎉"
 	case d > 0:
 		line += "  " + Green(fmt.Sprintf("+%d", d))

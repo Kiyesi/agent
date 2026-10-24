@@ -237,7 +237,10 @@ func guardOne(ctx context.Context, io IO, args, sites []string, restore, noResto
 		}
 		failedNow := newlyFailed(m.Before.Failed, after.Failed)
 		if backable > 0 {
-			q := fmt.Sprintf("\nPut the %d settings %s back as they were", backable, plural(backable, "file", "files"))
+			q := "\nPut the " + plural(backable, "settings file", "settings files") + " back as they were"
+			if backable == 1 {
+				q = "\nPut the 1 settings file back as it was"
+			}
 			if len(failedNow) > 0 {
 				q += ", and restart " + strings.Join(failedNow, ", ")
 			}
