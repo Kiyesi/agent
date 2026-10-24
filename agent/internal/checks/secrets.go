@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -130,7 +131,13 @@ func (secretsCheck) Run(ctx context.Context, env *Env) Result {
 			case kind == kindHistory:
 				found = append(found, Found("in-history", map[string]string{"path": full, "line": strconv.Itoa(lines[0])}))
 			case info.Mode().Perm()&0o004 != 0:
-				found = append(found, Found("world-readable", map[string]string{"path": full}))
+				if shut := closedFolder(fsys, p); shut != "" {
+					// Set readable by all, but a folder above keeps other
+					// users out: worth tightening, not a door open now.
+					found = append(found, Found("readable-closed", map[string]string{"path": full, "folder": shut}))
+				} else {
+					found = append(found, Found("world-readable", map[string]string{"path": full}))
+				}
 			}
 			return nil
 		})
@@ -214,4 +221,23 @@ func gitleaksLines(ctx context.Context, env *Env, full string) []int {
 	}
 	sort.Ints(lines)
 	return lines
+}
+
+// closedFolder is the first folder above a file that other users cannot
+// pass through (no execute bit for others), such as /root, or "" when every
+// folder lets them through, so the file's own mode decides. name is a path
+// from the root without its leading slash, as io/fs gives it.
+func closedFolder(fsys fs.FS, name string) string {
+	for d := path.Dir(name); ; d = path.Dir(d) {
+		info, err := fs.Stat(fsys, d)
+		if err != nil {
+			return ""
+		}
+		if info.IsDir() && info.Mode().Perm()&0o001 == 0 {
+			return "/" + strings.TrimPrefix(d, ".")
+		}
+		if d == "." {
+			return ""
+		}
+	}
 }

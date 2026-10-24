@@ -55,7 +55,13 @@ func (sshRoot) Plan(_ context.Context, h Host, in Input) Plan {
 		return p
 	}
 	if in.User == "" || in.User == "root" {
-		p.Refuse = "You are signed in as root, so turning root login off could lock you out. Make a user of your own with sudo and an SSH key, sign in as that user, then run sudo kiyesi fix ssh-root."
+		// Signed in as root: turning root login off could lock them out.
+		// Say what is already true, and the step that comes first.
+		if in.SSH.PasswordLogin {
+			p.Refuse = "You are signed in as root, so turning root login off could lock you out. First turn password login off (sudo kiyesi fix ssh-password): root can then sign in only with its key. To turn root login off entirely, make a user of your own with sudo and an SSH key, sign in as that user, then run sudo kiyesi fix ssh-root."
+		} else {
+			p.Refuse = "You are signed in as root, so turning root login off could lock you out. Password login is already off, so root can sign in only with its key. To turn root login off entirely, make a user of your own with sudo and an SSH key, sign in as that user, then run sudo kiyesi fix ssh-root."
+		}
 		return p
 	}
 	if keysOf(h, in.User) == 0 {
