@@ -129,7 +129,7 @@ func TestBreachCheckShowsSigninsAroundAKeyChange(t *testing.T) {
 		"ssh-keygen -lf ~/.ssh/id_ed25519.pub",
 		"SSH sign-ins within a day of the change (" + changed.Format("2 Jan 15:04 UTC") + "):",
 		"root from 203.0.113.9, key " + strings.TrimSpace(string(fp))[:15] + "… (ada@laptop)",
-		"deploy from 198.51.100.4, with password",
+		"deploy from 198.51.100.4, with a password",
 		"signs checked in",
 	} {
 		if !strings.Contains(out, want) {
@@ -153,6 +153,15 @@ func TestBreachCheckHelpNamesTheNotes(t *testing.T) {
 	for _, want := range []string{"a\nlogin account added since the last scan", "login keys changed in the last 7", "can take a minute on a small server"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+// The same words as the service's alerts and the dashboard.
+func TestSigninMethodInWords(t *testing.T) {
+	for m, want := range map[string]string{"publickey": "a key", "password": "a password", "keyboard-interactive": "a password or one-time code", "something-new": "something-new"} {
+		if got := signinMethod(m); got != want {
+			t.Errorf("%s: %q, want %q", m, got, want)
 		}
 	}
 }

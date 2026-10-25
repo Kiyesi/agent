@@ -68,7 +68,7 @@ func (r *Reader) readMySQL(ctx context.Context, name string, u *url.URL, f *Figu
 	var version string
 	var size sql.NullInt64
 	if err := db.QueryRowContext(ctx, `SELECT VERSION(),
-		(SELECT SUM(data_length + index_length) FROM information_schema.tables WHERE table_schema = DATABASE())`).Scan(&version, &size); err != nil {
+		(SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.tables WHERE table_schema = DATABASE())`).Scan(&version, &size); err != nil {
 		return err
 	}
 	f.Version = version

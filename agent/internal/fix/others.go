@@ -140,10 +140,15 @@ func (loginProtection) Plan(_ context.Context, h Host, in Input) Plan {
 }
 
 func (loginProtection) Apply(ctx context.Context, h Host, _ Input, c *Changes) error {
-	if err := c.Then("systemctl", "disable", "--now", "fail2ban"); err != nil {
-		return err
-	}
-	if !installed(h, fail2banClient) {
+	// Undo stops fail2ban, then removes it if this fix installed it. Stopping
+	// is noted only once there is a fail2ban to stop: an install that fails
+	// leaves nothing to put back, and says so plainly.
+	stop := func() error { return c.Then("systemctl", "disable", "--now", "fail2ban") }
+	if installed(h, fail2banClient) {
+		if err := stop(); err != nil {
+			return err
+		}
+	} else {
 		pkgs := []string{"install", "-y", "-q", "fail2ban"}
 		// Without auth.log (Debian 12 and later), fail2ban reads the journal.
 		journal := !installed(h, "/var/log/auth.log")
@@ -155,6 +160,9 @@ func (loginProtection) Apply(ctx context.Context, h Host, _ Input, c *Changes) e
 		}
 		if _, err := c.Run(ctx, "apt-get", pkgs...); err != nil {
 			return aptProblem(err)
+		}
+		if err := stop(); err != nil {
+			return err
 		}
 		if err := c.Then("apt-get", "remove", "-y", "-q", "fail2ban"); err != nil {
 			return err

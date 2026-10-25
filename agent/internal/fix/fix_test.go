@@ -766,3 +766,26 @@ func TestRootRefusalSaysWhatIsAlreadyTrue(t *testing.T) {
 		t.Error("root's keys must be checked before the new user is made")
 	}
 }
+
+// The package servers cannot be reached: nothing was installed, so nothing
+// is undone, and the message says only what went wrong.
+func TestLoginProtectionThatCannotInstallChangesNothing(t *testing.T) {
+	h := newHost()
+	h.answer = func(cmd string) (string, error) {
+		if strings.HasPrefix(cmd, "apt-get install") {
+			return "E: Failed to fetch http://deb.debian.org/debian/pool/main/f/fail2ban.deb", errors.New("exit status 100")
+		}
+		return "", nil
+	}
+	p := loginProtection{}.Plan(context.Background(), h, input("ada"))
+	_, err := Run(context.Background(), h, store(t), loginProtection{}, input("ada"), p)
+	if err == nil {
+		t.Fatal("an install that failed was called done")
+	}
+	if strings.Contains(err.Error(), "putting it back also failed") || strings.Contains(err.Error(), "may still be changed") {
+		t.Errorf("says something may be changed when nothing was: %v", err)
+	}
+	if h.didRun("systemctl disable --now fail2ban") {
+		t.Errorf("stopped a fail2ban that was never installed: %v", h.ran)
+	}
+}

@@ -88,7 +88,9 @@ func nextSteps(i api.Incident, mayAct bool) string {
 }
 
 // already is the service saying an Acknowledge or Mark fixed changed
-// nothing, because it was done before: its words name who and when.
+// nothing, because it was done before: its words name who and when. What
+// was asked for is already true, so it is said and the command succeeds,
+// as turning off a mute that is already off does.
 func already(err error) (string, bool) {
 	var p *api.Problem
 	if errors.As(err, &p) && p.Status == 409 && strings.HasPrefix(p.Code, "already_") && p.Message != "" {
@@ -248,7 +250,8 @@ func newAck(io IO) *cobra.Command {
 				}
 				if err := c.AckWork(cmd.Context(), row.Key); err != nil {
 					if msg, ok := already(err); ok {
-						return usageErr("%s %s", args[0], strings.TrimPrefix(msg, "It "))
+						fmt.Fprintf(io.Out, "%s %s\n", args[0], strings.TrimPrefix(msg, "It "))
+						return nil
 					}
 					return workErr(err)
 				}
@@ -257,7 +260,8 @@ func newAck(io IO) *cobra.Command {
 			}
 			if err := c.AckIncident(cmd.Context(), args[0]); err != nil {
 				if msg, ok := already(err); ok {
-					return usageErr("%s", msg)
+					fmt.Fprintln(io.Out, msg)
+					return nil
 				}
 				return incidentErr(err)
 			}
@@ -295,7 +299,8 @@ func newResolve(io IO) *cobra.Command {
 				}
 				if err := c.FixWork(cmd.Context(), row.Key, note); err != nil {
 					if msg, ok := already(err); ok {
-						return usageErr("%s", msg)
+						fmt.Fprintln(io.Out, msg)
+						return nil
 					}
 					return workErr(err)
 				}
@@ -304,7 +309,8 @@ func newResolve(io IO) *cobra.Command {
 			}
 			if err := c.ResolveIncident(cmd.Context(), args[0], note); err != nil {
 				if msg, ok := already(err); ok {
-					return usageErr("%s", msg)
+					fmt.Fprintln(io.Out, msg)
+					return nil
 				}
 				return incidentErr(err)
 			}

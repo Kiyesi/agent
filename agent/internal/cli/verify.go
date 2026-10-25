@@ -78,7 +78,9 @@ func newVerify(io IO) *cobra.Command {
 				plural(b.Critical, "critical finding", "critical findings"), plural(b.Warnings, "warning", "warnings"))
 			fmt.Fprintf(out, "  Break-in check: %s\n", b.BreakIn)
 			fmt.Fprintf(out, "  Scanned %s, issued %s\n", b.ScannedAt.UTC().Format("2 Jan 2006 15:04 UTC"), date(b.IssuedAt))
-			fmt.Fprintln(out, render.Grey("\n  Signature checked with Kiyesi's key "+keyFrom+"."))
+			// The blank line outside the style, which would pad it with spaces.
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, render.Grey("  Signature checked with Kiyesi's key "+keyFrom+"."))
 			if !online {
 				fmt.Fprintln(out, render.Grey("  Whether it was revoked is known only to the service: kiyesi verify "+b.ID))
 			}

@@ -157,6 +157,21 @@ func TestRealDatabases(t *testing.T) {
 	if !strings.Contains(f.Error, "refused the read-only user") || strings.Contains(f.Error, "wrong") {
 		t.Errorf("wrong password: %q", f.Error)
 	}
+	// The docs' MongoDB user lives in admin: an address that does not say
+	// so is told how, and one for another engine is not.
+	noSource := strings.Replace(urls["mongodb"], "authSource=admin&", "", 1)
+	f = r.Read(context.Background(), Config{Name: "x", URL: noSource}, time.Now())
+	if !strings.Contains(f.Error, "needs ?authSource=admin") {
+		t.Errorf("mongodb without authSource: %q", f.Error)
+	}
+	if strings.Contains(r.Read(context.Background(), Config{Name: "x", URL: bad}, time.Now()).Error, "authSource") {
+		t.Error("the authSource hint shown for PostgreSQL")
+	}
+	// An empty MySQL database is 0 bytes, as the other engines say, not unknown.
+	f = r.Read(context.Background(), Config{Name: "x", URL: os.Getenv("KIYESI_DB_MYSQL_EMPTY")}, time.Now())
+	if f.Error != "" || f.SizeBytes == nil || *f.SizeBytes != 0 {
+		t.Errorf("empty mysql: %+v", f)
+	}
 }
 
 func fmtFigures(f Figures) string {

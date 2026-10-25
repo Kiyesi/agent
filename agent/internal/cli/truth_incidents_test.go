@@ -68,17 +68,19 @@ func TestAckAndResolveSayWhenItWasAlreadyDone(t *testing.T) {
 		"/v1/incidents/INC-11/fix": reply(409, `{"error":"already_fixed","message":"INC-11 was already fixed by Amaka Obi; your note was not saved.","state":{"status":"fixed","by":"Amaka Obi","at":"2026-10-10T10:00:00Z"}}`),
 		"/v1/work/ack":             reply(409, `{"error":"already_acknowledged","message":"It is already acknowledged by Amaka Obi.","state":{"status":"acknowledged","by":"Amaka Obi","at":"2026-10-10T10:00:00Z"}}`),
 	})
+	// Already true: said, with who, and the command succeeds; it never
+	// claims to have done it.
 	code, out, errOut := runCLI(t, "ack", "INC-11")
-	if code != ExitUsage || errOut == "" || !strings.Contains(errOut, "INC-11 is already fixed by Amaka Obi.") || strings.Contains(out, "Acknowledged") {
+	if code != ExitOK || !strings.Contains(out, "INC-11 is already fixed by Amaka Obi.") || strings.Contains(out, "Acknowledged") {
 		t.Errorf("ack: %d %q %q", code, out, errOut)
 	}
 	code, out, errOut = runCLI(t, "resolve", "INC-11", "--note", "Rolled back")
-	if code != ExitUsage || !strings.Contains(errOut, "INC-11 was already fixed by Amaka Obi; your note was not saved.") || strings.Contains(out, "Marked") {
+	if code != ExitOK || !strings.Contains(out, "INC-11 was already fixed by Amaka Obi; your note was not saved.") || strings.Contains(out, "Marked") {
 		t.Errorf("resolve: %d %q %q", code, out, errOut)
 	}
-	code, _, errOut = runCLI(t, "ack", "job-a7b8c9")
-	if code != ExitUsage || !strings.Contains(errOut, "job-a7b8c9 is already acknowledged by Amaka Obi.") {
-		t.Errorf("work ack: %d %q", code, errOut)
+	code, out, _ = runCLI(t, "ack", "job-a7b8c9")
+	if code != ExitOK || !strings.Contains(out, "job-a7b8c9 is already acknowledged by Amaka Obi.") || strings.Contains(out, "Acknowledged job") {
+		t.Errorf("work ack: %d %q", code, out)
 	}
 }
 

@@ -132,6 +132,12 @@ func (r *Reader) Read(ctx context.Context, c Config, now time.Time) Figures {
 	}
 	if err != nil {
 		f.Error = plainError(err)
+		// The read-only user is made in the admin database, which a
+		// mongodb:// address uses only when it says so (mongodb+srv does).
+		if f.Engine == "mongodb" && u.Scheme == "mongodb" && u.Query().Get("authSource") == "" &&
+			strings.HasPrefix(f.Error, "It refused the read-only user") {
+			f.Error += " A user made in the admin database needs ?authSource=admin at the end of the address."
+		}
 	}
 	if limit, perr := ParseLimit(c.Limit); perr == nil && limit > 0 {
 		f.LimitBytes, f.LimitSource = &limit, "plan"

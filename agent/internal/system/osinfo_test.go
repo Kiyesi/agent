@@ -12,6 +12,7 @@ func TestReadOS(t *testing.T) {
 	}{
 		{"NAME=\"Ubuntu\"\nVERSION_ID=\"22.04\"\nID=ubuntu\nPRETTY_NAME=\"Ubuntu 22.04.5 LTS\"\n", "Ubuntu 22.04", true},
 		{"NAME=\"Ubuntu\"\nVERSION_ID=\"26.04\"\nID=ubuntu\n", "Ubuntu 26.04", true},
+		{"PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"13\"\nID=debian\n", "Debian 13", true},
 		{"PRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"12\"\nID=debian\n", "Debian 12", false},
 		{"NAME=\"Ubuntu\"\nVERSION_ID=\"20.04\"\nID=ubuntu\n", "Ubuntu 20.04", false},
 	} {

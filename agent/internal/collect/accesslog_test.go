@@ -309,3 +309,60 @@ func TestEndpointStatsSendsTheSiteOnlyWhenKnown(t *testing.T) {
 		t.Errorf("without a site: %s", without)
 	}
 }
+
+// Lines as Caddy wrote them on Kiyesi's own server: scanners asking it to
+// pass traffic on (CONNECT), old domains still pointed at its address that
+// it only redirects to https://, and the one site it serves. Only that one
+// is a site; the rest are still counted, under no site.
+func TestOnlyNamesTheServerAnswersAreSites(t *testing.T) {
+	lines := []string{
+		`{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"35.231.112.57","proto":"HTTP/1.1","method":"CONNECT","host":"api.ipify.org:443","uri":"api.ipify.org:443"},"duration":0.0001,"size":0,"status":308}`,
+		`{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"172.70.1.2","proto":"HTTP/1.1","method":"GET","host":"casinoprospin.us","uri":"/"},"duration":0.0001,"size":0,"status":308}`,
+		`{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"172.70.1.3","proto":"HTTP/1.1","method":"GET","host":"britbetsonline.uk","uri":"/wp-login.php"},"duration":0.0001,"size":0,"status":308}`,
+		`{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"105.112.1.1","proto":"HTTP/2.0","method":"GET","host":"api.kiyesi.dev","uri":"/health"},"duration":0.004,"size":11,"status":200}`,
+		`{"level":"info","logger":"http.log.access","msg":"handled request","request":{"remote_ip":"105.112.1.1","proto":"HTTP/1.1","method":"GET","host":"api.kiyesi.dev","uri":"/"},"duration":0.0001,"size":0,"status":308}`,
+	}
+	if r, _ := ParseAccessLine(lines[0]); r.Host != "" {
+		t.Errorf("a CONNECT named the site %q", r.Host)
+	}
+	var reqs Requests
+	for _, l := range lines {
+		r, ok := ParseAccessLine(l)
+		if !ok {
+			t.Fatalf("not read: %s", l)
+		}
+		reqs.Add(r)
+	}
+	sites := map[string]int{}
+	total := 0
+	for _, e := range reqs.Stats() {
+		sites[e.Site] += e.Requests
+		total += e.Requests
+	}
+	if len(sites) != 2 || sites["api.kiyesi.dev"] != 2 || sites[""] != 3 || total != len(lines) {
+		t.Errorf("sites = %v, %d requests", sites, total)
+	}
+}
+
+// nginx's own way to turn a name away, and a real site's temporary
+// redirect, which is an answer.
+func TestRefusalsAndTemporaryRedirects(t *testing.T) {
+	var reqs Requests
+	for _, l := range []string{
+		`old-domain.example 203.0.113.9 - - [24/Oct/2026:10:00:00 +0000] "GET / HTTP/1.1" 444 0 "-" "bot"`,
+		`app.example.com 203.0.113.9 - - [24/Oct/2026:10:00:01 +0000] "GET /dashboard HTTP/1.1" 302 0 "-" "Mozilla"`,
+	} {
+		r, ok := ParseAccessLine(l)
+		if !ok {
+			t.Fatalf("not read: %s", l)
+		}
+		reqs.Add(r)
+	}
+	sites := map[string]bool{}
+	for _, e := range reqs.Stats() {
+		sites[e.Site] = true
+	}
+	if !sites["app.example.com"] || sites["old-domain.example"] {
+		t.Errorf("sites = %v", sites)
+	}
+}

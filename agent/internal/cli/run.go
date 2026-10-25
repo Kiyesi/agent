@@ -22,7 +22,7 @@ func newRun(io IO) *cobra.Command {
 			"and exit code. Each run's start, end, exit code and last lines of output are\n" +
 			"recorded, and the agent sends them. Put it in front of the command in your\n" +
 			"crontab or systemd timer; Kiyesi reads the schedule from there.",
-		Example: "  0 4 * * * kiyesi run --name nightly-backup -- /opt/scripts/backup.sh",
+		Example: "  0 4 * * * /usr/local/bin/kiyesi run --name nightly-backup -- /opt/scripts/backup.sh",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if cmd.ArgsLenAtDash() < 0 || len(args) == 0 {
 				return usageErr("Put the command after --, such as: kiyesi run --name nightly-backup -- /opt/scripts/backup.sh")

@@ -49,7 +49,7 @@ func ParseAccessLine(line string) (Request, bool) {
 		if json.Unmarshal([]byte(line), &c) != nil || c.Request == nil || c.Status == 0 {
 			return Request{}, false
 		}
-		r := Request{Method: c.Request.Method, Path: c.Request.URI, Status: c.Status, Ms: -1, Host: Site(c.Request.Host)}
+		r := Request{Method: c.Request.Method, Path: c.Request.URI, Status: c.Status, Ms: -1, Host: requestSite(c.Request.Method, c.Request.Host)}
 		if c.Duration != nil {
 			r.Ms = *c.Duration * 1000
 		}
@@ -60,13 +60,35 @@ func ParseAccessLine(line string) (Request, bool) {
 		return Request{}, false
 	}
 	status, _ := strconv.Atoi(m[4])
-	r := Request{Method: m[2], Path: m[3], Status: status, Ms: -1, Host: Site(m[1])}
+	r := Request{Method: m[2], Path: m[3], Status: status, Ms: -1, Host: requestSite(m[2], m[1])}
 	if t := requestTime.FindStringSubmatch(m[5]); t != nil {
 		if s, err := strconv.ParseFloat(t[1], 64); err == nil {
 			r.Ms = s * 1000
 		}
 	}
 	return r, true
+}
+
+// requestSite is the site a request was for. A CONNECT asks the server to
+// pass traffic on to another address, which is how scanners look for open
+// proxies: the address it names is never a site of this server.
+func requestSite(method, host string) string {
+	if method == "CONNECT" {
+		return ""
+	}
+	return Site(host)
+}
+
+// refused says the server turned a request away rather than answering it
+// as a site: a permanent redirect (how Caddy and most nginx setups answer a
+// name they do not serve, sending it to https://) or a refusal. A name the
+// server only ever turns away is not one of its sites.
+func refused(status int) bool {
+	switch status {
+	case 301, 308, 421, 444:
+		return true
+	}
+	return false
 }
 
 var siteName = regexp.MustCompile(`^[a-z0-9_]([a-z0-9_.-]*[a-z0-9_])?$`)
@@ -200,6 +222,9 @@ func (a *endpointAcc) add(b *endpointAcc) {
 type siteAcc struct {
 	by    map[string]*endpointAcc
 	other *endpointAcc
+	// answered is whether any request was answered rather than turned
+	// away; a site that was only turned away is counted under no site.
+	answered bool
 }
 
 // Requests adds up a minute of requests by site and endpoint.
@@ -226,6 +251,9 @@ func (r *Requests) Add(req Request) {
 		if site != "" {
 			r.named++
 		}
+	}
+	if !refused(req.Status) {
+		s.answered = true
 	}
 	ep := Endpoint(req.Method, req.Path)
 	a := s.by[ep]
@@ -293,6 +321,33 @@ func busiest(list []namedAcc) {
 // first, and within each site the busiest endpoint first and "other" last,
 // within the limits above. It empties the counts.
 func (r *Requests) Stats() []EndpointStats {
+	// A name the server only turned away this minute, such as a scanner's
+	// made-up Host or an old domain still pointed at this address, is not
+	// a site: its requests are counted under no site.
+	for site, s := range r.sites {
+		if site == "" || s.answered {
+			continue
+		}
+		none := r.sites[""]
+		if none == nil {
+			none = &siteAcc{by: map[string]*endpointAcc{}}
+			r.sites[""] = none
+		}
+		for ep, a := range s.by {
+			if b := none.by[ep]; b != nil {
+				b.add(a)
+			} else {
+				none.by[ep] = a
+			}
+		}
+		if s.other != nil {
+			if none.other == nil {
+				none.other = &endpointAcc{}
+			}
+			none.other.add(s.other)
+		}
+		delete(r.sites, site)
+	}
 	var kept []namedAcc
 	others := map[string]*endpointAcc{}
 	fold := func(site string, a *endpointAcc) {

@@ -101,7 +101,7 @@ func newJobs(io IO) *cobra.Command {
 				return render.JSON(io.Out, list)
 			}
 			if len(list) == 0 {
-				fmt.Fprintln(io.Out, "No jobs watched yet. Put kiyesi run in front of a job's command:\n\n  0 4 * * * kiyesi run --name nightly-backup -- /opt/scripts/backup.sh")
+				fmt.Fprintln(io.Out, "No jobs watched yet. Put kiyesi run in front of a job's command:\n\n  0 4 * * * /usr/local/bin/kiyesi run --name nightly-backup -- /opt/scripts/backup.sh")
 				return nil
 			}
 			tw := tabwriter.NewWriter(io.Out, 0, 0, 3, ' ', 0)

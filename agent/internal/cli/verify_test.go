@@ -43,6 +43,12 @@ func TestVerifyAFileOffline(t *testing.T) {
 			t.Errorf("out lacks %q:\n%s", want, out)
 		}
 	}
+	// A blank line is empty: never a row of spaces from a style.
+	for i, l := range strings.Split(out, "\n") {
+		if l != "" && strings.TrimSpace(l) == "" {
+			t.Errorf("line %d is only spaces:\n%s", i+1, out)
+		}
+	}
 	verifyNow = func() time.Time { return time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC) }
 	if code, out, _ := runCLI(t, "verify", path); code != ExitFindings || !strings.Contains(out, "expired on 23 Nov 2026") {
 		t.Fatalf("expired: %d\n%s", code, out)

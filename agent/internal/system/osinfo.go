@@ -8,7 +8,7 @@ import (
 )
 
 // tested lists the systems the pipeline runs the whole scan on.
-var tested = map[string]bool{"ubuntu 22.04": true, "ubuntu 24.04": true, "ubuntu 26.04": true}
+var tested = map[string]bool{"ubuntu 22.04": true, "ubuntu 24.04": true, "ubuntu 26.04": true, "debian 13": true}
 
 // ReadOS reads etc/os-release from fsys.
 func ReadOS(fsys fs.FS) OSInfo {

@@ -128,11 +128,29 @@ func keyChangeSignins(ctx context.Context, sys *system.System, r scan.Report) ma
 					l += " (" + n + ")"
 				}
 			} else {
-				l += ", with " + s.Method
+				l += ", with " + signinMethod(s.Method)
 			}
 			lines = append(lines, l)
 		}
 		out[i] = lines
 	}
 	return out
+}
+
+// signinMethod says how someone signed in, in words, from SSH's own name
+// for it; the service's alerts and the dashboard use the same words.
+func signinMethod(m string) string {
+	switch m {
+	case "publickey":
+		return "a key"
+	case "password":
+		return "a password"
+	case "keyboard-interactive":
+		return "a password or one-time code"
+	case "hostbased":
+		return "the host's key"
+	case "gssapi-with-mic":
+		return "Kerberos"
+	}
+	return m
 }

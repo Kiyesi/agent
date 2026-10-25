@@ -900,7 +900,7 @@
     "use": "kiyesi run --name <job> -- <command> [flags]",
     "short": "Run a timed job and record it, so a failed or missed run alerts you",
     "long": "Runs the command exactly as it would run without Kiyesi: the same output\nand exit code. Each run's start, end, exit code and last lines of output are\nrecorded, and the agent sends them. Put it in front of the command in your\ncrontab or systemd timer; Kiyesi reads the schedule from there.",
-    "example": "  0 4 * * * kiyesi run --name nightly-backup -- /opt/scripts/backup.sh",
+    "example": "  0 4 * * * /usr/local/bin/kiyesi run --name nightly-backup -- /opt/scripts/backup.sh",
     "flags": [
       {
         "name": "name",
