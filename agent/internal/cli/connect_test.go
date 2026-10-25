@@ -468,3 +468,78 @@ func TestAgentLoopWaitsAsLongAsTheServiceAsks(t *testing.T) {
 	clock.add(21 * time.Second)
 	waitFor(t, "sending after the pause", func() bool { return out.Len() == 0 && api.count() > 0 })
 }
+
+// slowAPI takes 10 s of the test's clock for each batch, and refuses the
+// fifth with 429 and Retry-After: 30.
+type slowAPI struct {
+	clock *fakeClock
+	mu    sync.Mutex
+	calls int
+	got   int
+}
+
+func (s *slowAPI) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clock.add(10 * time.Second)
+	s.calls++
+	if s.calls == 5 {
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+		return
+	}
+	s.got++
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (s *slowAPI) count() (calls, got int) { s.mu.Lock(); defer s.mu.Unlock(); return s.calls, s.got }
+
+// The pause the service asks for is counted from when it asked, not from
+// when that round of sending began; and the log says plainly that it was
+// a pause, with every batch kept.
+func TestAgentLoopCountsThePauseFromTheRefusal(t *testing.T) {
+	clock := &fakeClock{t: time.Date(2026, 10, 25, 14, 0, 0, 0, time.UTC)}
+	api := &slowAPI{clock: clock}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	out := send.Outbox{Dir: t.TempDir(), MaxBytes: 1 << 30}
+	for i := range 6 {
+		_ = out.Put(send.Heartbeat(clock.t), clock.t.Add(time.Duration(i)*time.Millisecond))
+	}
+	var log syncBuffer
+	a := agentLoop{
+		client: send.NewClient(srv.URL, goodToken), outbox: out,
+		scan:      func(context.Context) (scan.Report, error) { return scan.Report{}, nil },
+		beatEvery: time.Hour, now: clock.now, log: &log,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { a.run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+
+	// The round began at 14:00:00 and was refused at 14:00:50.
+	waitFor(t, "the refusal", func() bool { c, _ := api.count(); return c == 5 })
+	if !strings.Contains(log.String(), "the service asked for a pause: too many batches from this server this minute.") || !strings.Contains(log.String(), "waiting, all kept; sending again in 30s") {
+		t.Errorf("log: %q", log.String())
+	}
+	clock.add(25 * time.Second) // 14:01:15: 30 s from the round's start, not from the refusal
+	time.Sleep(1500 * time.Millisecond)
+	if c, _ := api.count(); c != 5 {
+		t.Fatalf("sent again %d s after the refusal, inside the 30 s asked for", 25)
+	}
+	clock.add(6 * time.Second) // 14:01:21
+	waitFor(t, "sending after the pause", func() bool { return out.Len() == 0 })
+}
+
+// syncBuffer is a bytes.Buffer safe for the loop and the test at once.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+func (s *syncBuffer) String() string { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }

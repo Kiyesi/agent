@@ -427,3 +427,48 @@ func TestTheServiceCanAskForASlowerPace(t *testing.T) {
 		}
 	}
 }
+
+// After time without the service, the newest scan goes first, so the
+// dashboard shows the server as it is now; the rest follow oldest first,
+// and a limit counts the scan among the batches it allows.
+func TestFlushSendsTheNewestScanFirst(t *testing.T) {
+	api := &fakeAPI{answers: []int{202}}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	out := Outbox{Dir: t.TempDir(), MaxBytes: 1 << 20}
+	start := time.Date(2026, 10, 23, 14, 0, 0, 0, time.UTC)
+	scanAt := func(at time.Time) Batch {
+		r := report()
+		r.StartedAt = at
+		return Scan(r, at)
+	}
+	waiting := []Batch{Heartbeat(start), scanAt(start.Add(time.Minute)), Heartbeat(start.Add(2 * time.Minute)), scanAt(start.Add(3 * time.Minute)), Heartbeat(start.Add(4 * time.Minute))}
+	for i, b := range waiting {
+		if err := out.Put(b, start.Add(time.Duration(i)*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	order := func() []string {
+		var ids []string
+		for _, raw := range api.bodies {
+			var got Batch
+			_ = json.Unmarshal(raw, &got)
+			ids = append(ids, got.BatchID)
+		}
+		return ids
+	}
+	c := NewClient(srv.URL, "t")
+	if sent, err := out.FlushUpTo(context.Background(), c, 2, nil); err != nil || sent != 2 {
+		t.Fatalf("sent %d, %v", sent, err)
+	}
+	if got := order(); got[0] != waiting[3].BatchID || got[1] != waiting[0].BatchID {
+		t.Fatalf("first two sent %v, want the newest scan then the oldest heartbeat", got)
+	}
+	if sent, err := out.Flush(context.Background(), c); err != nil || sent != 3 {
+		t.Fatalf("sent %d, %v", sent, err)
+	}
+	want := []string{waiting[3].BatchID, waiting[0].BatchID, waiting[1].BatchID, waiting[2].BatchID, waiting[4].BatchID}
+	if got := order(); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("sent %v, want %v", got, want)
+	}
+}

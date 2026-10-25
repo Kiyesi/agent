@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -380,8 +381,18 @@ func (a agentLoop) run(ctx context.Context) {
 					wait = busy.Wait
 				}
 				failures++
-				fmt.Fprintf(a.log, "cannot send results (%v); trying again in %s\n", err, wait.Round(time.Second))
-				nextSend = now.Add(wait)
+				left := a.outbox.Len()
+				switch {
+				case busy != nil && busy.Status == http.StatusTooManyRequests:
+					fmt.Fprintf(a.log, "the service asked for a pause: too many batches from this server this minute. %d waiting, all kept; sending again in %s\n", left, wait.Round(time.Second))
+				case busy != nil:
+					fmt.Fprintf(a.log, "the service is catching up. %d waiting, all kept; sending again in %s\n", left, wait.Round(time.Second))
+				default:
+					fmt.Fprintf(a.log, "cannot send results (%v); %d waiting, all kept; trying again in %s\n", err, left, wait.Round(time.Second))
+				}
+				// From now, not from when this round of sending began, which
+				// may be a while ago with many batches waiting.
+				nextSend = a.now().Add(wait)
 			}
 		}
 		select {

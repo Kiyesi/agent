@@ -415,7 +415,16 @@ func (o Outbox) Put(b Batch, now time.Time) error {
 	if err := os.MkdirAll(o.Dir, 0o700); err != nil {
 		return err
 	}
-	name := fmt.Sprintf("%020d-%s.json.gz", now.UnixNano(), b.BatchID)
+	// A batch with a scan is marked, so after time without the service its
+	// newest scan can go first.
+	kind := ""
+	for _, it := range b.Items {
+		if it.Kind == "scan" {
+			kind = ".scan"
+			break
+		}
+	}
+	name := fmt.Sprintf("%020d-%s%s.json.gz", now.UnixNano(), b.BatchID, kind)
 	tmp := filepath.Join(o.Dir, "."+name)
 	if err := os.WriteFile(tmp, body, 0o600); err != nil {
 		return err
@@ -467,9 +476,10 @@ func (o Outbox) Len() int {
 	return len(files)
 }
 
-// Flush sends waiting batches, oldest first, until one fails. A batch the
-// service refuses for good is dropped, and reported through dropped; any
-// other failure stops the flush and leaves the batch for next time.
+// Flush sends waiting batches, the newest scan then the rest oldest first,
+// until one fails. A batch the service refuses for good is dropped, and
+// reported through dropped; any other failure stops the flush and leaves
+// the batch for next time.
 func (o Outbox) Flush(ctx context.Context, c *Client) (sent int, err error) {
 	return o.FlushReporting(ctx, c, nil)
 }
@@ -489,6 +499,17 @@ func (o Outbox) FlushUpTo(ctx context.Context, c *Client, max int, dropped func(
 			return 0, nil
 		}
 		return 0, err
+	}
+	// The newest scan goes first, so the dashboard shows the server as it
+	// is now while the older batches follow; the service keeps an older
+	// scan as history, never as the server's state.
+	for i := len(files) - 1; i > 0; i-- {
+		if strings.HasSuffix(files[i].Name(), ".scan.json.gz") {
+			newest := files[i]
+			copy(files[1:i+1], files[:i])
+			files[0] = newest
+			break
+		}
 	}
 	if max > 0 && len(files) > max {
 		files = files[:max]
