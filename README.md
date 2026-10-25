@@ -3,13 +3,13 @@
 This is the code that runs on your machines when you use [Kiyesi](https://kiyesi.dev),
 published so you can read what it does before you install it.
 
-- `agent/`: the `kiyesi` program. It scans a Linux server with 23 read-only checks,
+- `agent/`: the `kiyesi` program. It scans a Linux server with 25 read-only checks,
   runs as the agent that sends results, and is the command line you use from a laptop.
   It only reads, opens no port, and masks passwords and tokens before anything leaves
   the server. [What it reads and sends](https://docs.kiyesi.dev/reference/agent-reads-and-sends/).
 - `snippet/`: the browser snippet that reports errors from your website's visitors.
 
-Version 0.39.4, from commit 2026b77 of Kiyesi's own repository. Each release is
+Version 0.39.5, from commit d8c5369 of Kiyesi's own repository. Each release is
 copied here whole, as one commit with its tag.
 
 ## Install

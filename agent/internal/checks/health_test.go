@@ -3,6 +3,7 @@ package checks
 import (
 	"errors"
 	"io/fs"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -112,6 +113,20 @@ func TestOOM(t *testing.T) {
 	wantStatus(t, run(t, oomCheck{}, quiet), StatusPass)
 }
 
+// Kills made by the kiyesi service's own memory limit (apt-get run by a
+// check, or the agent itself) do not count against the server; a
+// container's own limit still does.
+func TestOOMLeavesOutKiyesisOwnLimit(t *testing.T) {
+	e := newTestEnv().saved(t, "proc/meminfo", "meminfo-1gb-noswap").command("journalctl -k --since -24h --no-pager -q -o short-iso", mustRead(t, "journal-k-own-limit.txt"))
+	r := run(t, oomCheck{}, e)
+	wantStatus(t, r, StatusFail, "killed-no-swap")
+	if len(r.Findings) != 1 || r.Findings[0].Vars["process"] != "node" {
+		t.Errorf("findings = %+v", r.Findings)
+	}
+	only := strings.Join(strings.Split(mustRead(t, "journal-k-own-limit.txt"), "\n")[:5], "\n")
+	wantStatus(t, run(t, oomCheck{}, newTestEnv().command("journalctl -k --since -24h --no-pager -q -o short-iso", only)), StatusPass)
+}
+
 func mustRead(tb testing.TB, name string) string {
 	tb.Helper()
 	e := newTestEnv().saved(tb, "x", name)
@@ -158,6 +173,30 @@ func TestUpdatesRemembersWhenEachWasFirstSeen(t *testing.T) {
 	}
 	if r := run(t, updatesCheck{}, newTestEnv()); r.SkipKey != "no-apt" {
 		t.Errorf("no apt: %+v", r)
+	}
+}
+
+// Under the old 64 MB service limit apt-get is never started: the kernel
+// would kill it. 256 MB, no limit, or a limit that cannot be read all run it.
+func TestUpdatesWaitsForRoomForApt(t *testing.T) {
+	apt := mustRead(t, "apt-upgrade-security.txt")
+	limited := func(max string) *testEnv {
+		return newTestEnv().command("apt-get -s -o Debug::NoLocking=1 upgrade", apt).
+			file("proc/self/cgroup", "0::/system.slice/kiyesi.service\n").
+			file("sys/fs/cgroup/system.slice/kiyesi.service/memory.max", max+"\n")
+	}
+	if r := run(t, updatesCheck{}, limited("67108864")); r.SkipKey != "memory-limit" {
+		t.Errorf("64 MB: %+v", r)
+	}
+	for _, e := range []*testEnv{
+		limited("268435456"),
+		limited("max"),
+		newTestEnv().command("apt-get -s -o Debug::NoLocking=1 upgrade", apt),
+		newTestEnv().command("apt-get -s -o Debug::NoLocking=1 upgrade", apt).file("proc/self/cgroup", "0::/user.slice\n"),
+	} {
+		if r := run(t, updatesCheck{}, e); r.Status != StatusPass {
+			t.Errorf("should run apt: %+v", r)
+		}
 	}
 }
 

@@ -20,6 +20,12 @@ func (oomCheck) ID() string { return "oom" }
 // for the whole server and for a container's memory limit.
 var killedRE = regexp.MustCompile(`Killed process (\d+) \(([^)]+)\)`)
 
+// ownLimitRE matches the kernel's line just before a kill made by a
+// service's own memory limit, naming that limit's control group and the
+// process: "oom-kill:constraint=CONSTRAINT_MEMCG,...,
+// oom_memcg=/system.slice/kiyesi.service,...,task=apt-get,pid=4211,...".
+var ownLimitRE = regexp.MustCompile(`oom-kill:.*oom_memcg=[^,]*/kiyesi\.service,.*pid=(\d+)`)
+
 type kill struct {
 	process string
 	at      time.Time
@@ -80,14 +86,22 @@ func (oomCheck) Run(ctx context.Context, env *Env) Result {
 
 // parseKernelLog finds kills in the last 24 hours. It reads journalctl's
 // short-iso lines and rsyslog's lines, which start with an RFC 3339 time.
+// A kill made by the kiyesi service's own memory limit (the agent, or a
+// program one of its checks ran) is Kiyesi's problem, not the server's,
+// so it is left out.
 func parseKernelLog(data []byte, now time.Time) []kill {
 	var out []kill
+	own := map[string]bool{}
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 64*1024), 1024*1024)
 	for sc.Scan() {
 		line := sc.Text()
+		if m := ownLimitRE.FindStringSubmatch(line); m != nil {
+			own[m[1]] = true
+			continue
+		}
 		m := killedRE.FindStringSubmatch(line)
-		if m == nil {
+		if m == nil || own[m[1]] {
 			continue
 		}
 		stamp, _, _ := strings.Cut(line, " ")

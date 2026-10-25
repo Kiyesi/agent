@@ -397,3 +397,28 @@ func TestLaptopViewShowsTheAgentsVersionAndTheScanTime(t *testing.T) {
 		t.Errorf("a 3-day-old scan:\n%s", got)
 	}
 }
+
+// The server view offers root login apart: kiyesi fix leaves it to anyone
+// signed in as root, so it is not counted among what Kiyesi can fix.
+func TestServerViewOffersRootLoginApart(t *testing.T) {
+	root := finding(t, "ssh", "root", "", nil)
+	if root.AutoFix != "ssh-root" {
+		t.Fatalf("the pack's ssh root finding has no ssh-root fix: %+v", root)
+	}
+	view := func(fs ...scan.Finding) string {
+		r := scan.Report{StartedAt: time.Now().Add(-time.Hour), Checks: []scan.CheckResult{{ID: "ssh", Status: "fail", Findings: fs}}}
+		var b bytes.Buffer
+		if err := Stored(&colorprofile.Writer{Forward: &b, Profile: colorprofile.NoTTY}, r, "web-1"); err != nil {
+			t.Fatal(err)
+		}
+		return b.String()
+	}
+	only := view(root)
+	if strings.Contains(only, "Kiyesi can fix") || !strings.Contains(only, "Root login: sudo kiyesi fix ssh-root, signed in as your own user with sudo, not as root\n") {
+		t.Errorf("root login alone:\n%s", only)
+	}
+	both := view(root, finding(t, "ssh", "password", "", nil))
+	if !strings.Contains(both, "Kiyesi can fix 1 thing on the server: sudo kiyesi fix\nRoot login: sudo kiyesi fix ssh-root") {
+		t.Errorf("root login with another fix:\n%s", both)
+	}
+}

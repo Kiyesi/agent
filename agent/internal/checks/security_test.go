@@ -98,6 +98,23 @@ func TestDockerFirewall(t *testing.T) {
 	wantStatus(t, run(t, dockerFirewallCheck{}, noUFW), StatusPass)
 }
 
+// ufw allowing only SSH, with Caddy publishing 80 and 443: those are a
+// website's ports, so they are worth a look (info, no points) and never
+// get "bind it to 127.0.0.1", which would take the site offline. Another
+// port still costs points.
+func TestDockerFirewallWebPortsAreInfo(t *testing.T) {
+	sshOnly := "Status: active\n\nTo                         Action      From\n--                         ------      ----\n22/tcp                     ALLOW IN    Anywhere\n"
+	caddy := system.Container{ID: "c", Name: "appstack-caddy-1", Status: "running", ComposeService: "caddy",
+		Ports: []system.PublishedPort{{HostIP: "0.0.0.0", HostPort: 80, Proto: "tcp"}, {HostIP: "0.0.0.0", HostPort: 443, Proto: "tcp"}, {HostIP: "0.0.0.0", HostPort: 8080, Proto: "tcp"}}}
+	e := newTestEnv().file("etc/ufw/ufw.conf", "ENABLED=yes\n").command("ufw status verbose", sshOnly)
+	e.docker = fakeDocker{cs: []system.Container{caddy}}
+	r := run(t, dockerFirewallCheck{}, e)
+	wantStatus(t, r, StatusFail, "web", "web", "bypass")
+	if r.Findings[0].Vars["port"] != "80" || r.Findings[1].Vars["port"] != "443" || r.Findings[2].Vars["port"] != "8080" || r.Findings[0].Vars["service"] != "caddy" {
+		t.Errorf("findings = %+v", r.Findings)
+	}
+}
+
 func TestSSH(t *testing.T) {
 	ubuntu := func() *testEnv {
 		return newTestEnv().saved(t, "etc/ssh/sshd_config", "sshd_config-ubuntu")

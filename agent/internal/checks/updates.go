@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"io/fs"
 	"slices"
 	"sort"
 	"strconv"
@@ -15,12 +16,47 @@ type updatesCheck struct{}
 
 func (updatesCheck) ID() string { return "updates" }
 
+// aptNeeds is the memory limit under which apt-get is not started.
+const aptNeeds = 192 << 20
+
+// ownMemoryLimit is the memory limit of this program's own control group,
+// such as the agent's service, or 0 when there is none or it cannot be read.
+func ownMemoryLimit(fsys fs.FS) int64 {
+	data, err := fs.ReadFile(fsys, "proc/self/cgroup")
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		// cgroup v2 has one line, "0::/system.slice/kiyesi.service".
+		path, ok := strings.CutPrefix(line, "0::/")
+		if !ok {
+			continue
+		}
+		raw, err := fs.ReadFile(fsys, strings.TrimSuffix("sys/fs/cgroup/"+path, "/")+"/memory.max")
+		if err != nil {
+			return 0
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
+		if err != nil {
+			return 0 // "max": no limit
+		}
+		return n
+	}
+	return 0
+}
+
 // statePrefix marks the update dates in the scan's state file.
 const statePrefix = "security-update/"
 
 func (updatesCheck) Run(ctx context.Context, env *Env) Result {
 	if !env.Sys.Exec.Has("apt-get") {
 		return Skip("no-apt", nil)
+	}
+	// apt-get needs about 120 MB. Under the 64 MB limit of agents set up
+	// before 0.39.5, the kernel kills it or it runs out of time, so the
+	// check says how to raise the limit instead of starting it.
+	if limit := ownMemoryLimit(env.Sys.FS); limit > 0 && limit < aptNeeds {
+		return Skip("memory-limit", nil)
 	}
 	// -s simulates: apt prints what it would install and changes nothing.
 	out, err := env.Sys.Exec.Run(ctx, "apt-get", "-s", "-o", "Debug::NoLocking=1", "upgrade")

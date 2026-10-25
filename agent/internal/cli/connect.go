@@ -171,7 +171,7 @@ func hasTrivy() bool {
 }
 
 func unitFileFor(exe string, trivy bool) string {
-	memory := "64M"
+	memory := "256M"
 	if trivy {
 		memory = "640M"
 	}
@@ -187,7 +187,9 @@ RestartSec=30
 Nice=10
 IOSchedulingClass=idle
 CPUQuota=20%
-# 64 MB for the agent; 640 MB when Trivy is installed, which runs inside it.
+# 256 MB for the agent and the programs its checks run (apt-get alone needs
+# about 120 MB); 640 MB when Trivy is installed, which runs inside it. A
+# limit, not a reservation: the agent itself uses far less.
 MemoryMax=` + memory + `
 TasksMax=64
 NoNewPrivileges=yes

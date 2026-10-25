@@ -91,12 +91,26 @@ func Stored(w io.Writer, r scan.Report, name string) error {
 	}
 	b.WriteString("\n" + grey.Render(head) + "\n")
 	body(&b, r)
-	switch n := fixable(r); {
+	// Root login is fixed only by someone signed in as their own user, as
+	// kiyesi fix says to anyone signed in as root, so it is offered apart.
+	n, root := fixable(r), offers(r, "ssh-root")
+	if root {
+		n--
+	}
+	switch {
 	case !r.StartedAt.IsZero() && age > 24*time.Hour:
 		b.WriteString(amber.Render("This scan is "+howLong(age)+" old, so it may no longer be true.") +
 			" Is the agent running? sudo systemctl status kiyesi\n\n")
-	case n > 0:
-		b.WriteString(bold.Render("Kiyesi can fix "+plural(n, "thing", "things")+" on the server:") + " sudo kiyesi fix\n\n")
+	default:
+		if n > 0 {
+			b.WriteString(bold.Render("Kiyesi can fix "+plural(n, "thing", "things")+" on the server:") + " sudo kiyesi fix\n")
+		}
+		if root {
+			b.WriteString(bold.Render("Root login:") + " sudo kiyesi fix ssh-root, signed in as your own user with sudo, not as root\n")
+		}
+		if n > 0 || root {
+			b.WriteString("\n")
+		}
 	}
 	b.WriteString(grey.Render("Every fix command: kiyesi server "+name+" --json, or the dashboard.") + "\n\n")
 	_, err := io.WriteString(w, b.String())
@@ -185,6 +199,18 @@ func fixLines(f scan.Finding, width int) []string {
 // count against the grade: one fix for three secret files is one. Optional
 // clean-ups (info) are not offered here: at A 100 the report says nothing
 // about fixing, so nobody is left wondering what is wrong.
+// offers says whether the report offers the named kiyesi fix.
+func offers(r scan.Report, name string) bool {
+	for _, c := range r.Checks {
+		for _, f := range c.Findings {
+			if f.AutoFix == name && f.Severity != "info" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func fixable(r scan.Report) int {
 	names := map[string]bool{}
 	for _, c := range r.Checks {

@@ -304,6 +304,8 @@ func (a agentLoop) run(ctx context.Context) {
 	var lastScan, lastBeat time.Time
 	nextSend := a.now()
 	failures := 0
+	// paced is a backlog going out at sendPerMinute: the rest waits a minute.
+	paced := false
 	tick := time.NewTicker(min(a.beatEvery, time.Second))
 	defer tick.Stop()
 	for {
@@ -329,7 +331,10 @@ func (a agentLoop) run(ctx context.Context) {
 			} else if err := a.outbox.Put(send.Scan(r, now), now); err != nil {
 				fmt.Fprintf(a.log, "cannot keep the scan for sending: %v\n", err)
 			}
-			nextSend = now
+			// Sent at once, unless the service asked for a pause.
+			if failures == 0 && !paced {
+				nextSend = now
+			}
 		}
 		if lastBeat.IsZero() || now.Sub(lastBeat) >= beatEvery {
 			lastBeat = now
@@ -350,10 +355,18 @@ func (a agentLoop) run(ctx context.Context) {
 			}
 		}
 		if !now.Before(nextSend) && a.outbox.Len() > 0 {
-			_, err := a.outbox.FlushReporting(ctx, a.client, func(name string) {
+			sent, err := a.outbox.FlushUpTo(ctx, a.client, sendPerMinute, func(name string) {
 				fmt.Fprintf(a.log, "the service refused batch %s as malformed or too large, so it was dropped: update the agent\n", name)
 			})
+			paced = false
+			var busy *send.BusyError
 			switch {
+			case err == nil && sent >= sendPerMinute && a.outbox.Len() > 0:
+				// A backlog, after time without the service: the rest
+				// goes out a minute at a time, under the service's limit.
+				failures = 0
+				paced = true
+				nextSend = now.Add(time.Minute)
 			case err == nil:
 				failures = 0
 				nextSend = now
@@ -362,6 +375,10 @@ func (a agentLoop) run(ctx context.Context) {
 				nextSend = now.Add(15 * time.Minute)
 			default:
 				wait := send.Backoff(failures, 5*time.Second, 5*time.Minute)
+				if errors.As(err, &busy) && busy.Wait > wait {
+					// The service said how long: never sooner.
+					wait = busy.Wait
+				}
 				failures++
 				fmt.Fprintf(a.log, "cannot send results (%v); trying again in %s\n", err, wait.Round(time.Second))
 				nextSend = now.Add(wait)
@@ -374,6 +391,11 @@ func (a agentLoop) run(ctx context.Context) {
 		}
 	}
 }
+
+// sendPerMinute is the most batches the agent sends in a minute, under
+// the service's 120 a minute for each server, so a backlog after time
+// without the service goes out without being refused.
+const sendPerMinute = 100
 
 // How often the databases in the settings are read.
 const dbReadEvery = 5 * time.Minute

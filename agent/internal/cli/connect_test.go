@@ -142,7 +142,7 @@ func TestUnitFileMakesRoomForTrivy(t *testing.T) {
 
 func TestUnitFileTakesPrivilegesAway(t *testing.T) {
 	u := unitFileFor("/usr/local/bin/kiyesi", false)
-	for _, want := range []string{"ExecStart=/usr/local/bin/kiyesi agent", "NoNewPrivileges=yes", "ProtectSystem=strict", "MemoryMax=64M", "CPUQuota=20%", "CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_NET_ADMIN", "RestrictSUIDSGID=yes", "UMask=0077"} {
+	for _, want := range []string{"ExecStart=/usr/local/bin/kiyesi agent", "NoNewPrivileges=yes", "ProtectSystem=strict", "MemoryMax=256M", "CPUQuota=20%", "CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_NET_ADMIN", "RestrictSUIDSGID=yes", "UMask=0077"} {
 		if !strings.Contains(u, want) {
 			t.Errorf("unit file lacks %q", want)
 		}
@@ -330,4 +330,141 @@ func TestAgentLoopKeepsTheFreePlansSlowerPace(t *testing.T) {
 	if got := api.count("job"); got != n || n < 10 {
 		t.Errorf("took %d job runs, sent %d", n, got)
 	}
+}
+
+// fakeClock is a clock the test moves by hand.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) now() time.Time { c.mu.Lock(); defer c.mu.Unlock(); return c.t }
+func (c *fakeClock) add(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
+}
+
+// pacedAPI counts batches, and answers the first `refuse` with 429 and a
+// Retry-After.
+type pacedAPI struct {
+	mu      sync.Mutex
+	got     int
+	refused int
+	refuse  int
+	after   string
+}
+
+func (p *pacedAPI) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.refused < p.refuse {
+		p.refused++
+		w.Header().Set("Retry-After", p.after)
+		w.WriteHeader(http.StatusTooManyRequests)
+		return
+	}
+	p.got++
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (p *pacedAPI) count() int { p.mu.Lock(); defer p.mu.Unlock(); return p.got }
+
+// waitFor polls until cond holds, or fails after a few seconds.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if cond() {
+			return
+		}
+	}
+	t.Fatal(what)
+}
+
+// After time without the service, the waiting batches go out at most
+// sendPerMinute a minute, under the service's limit of 120 a minute for
+// each server, instead of all at once and refused.
+func TestAgentLoopSendsABacklogAMinuteAtATime(t *testing.T) {
+	api := &pacedAPI{}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	clock := &fakeClock{t: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)}
+	out := send.Outbox{Dir: t.TempDir(), MaxBytes: 1 << 30}
+	for i := range 250 {
+		if err := out.Put(send.Heartbeat(clock.t), clock.t.Add(time.Duration(i)*time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := agentLoop{
+		client: send.NewClient(srv.URL, goodToken), outbox: out,
+		scan:      func(context.Context) (scan.Report, error) { return scan.Report{}, nil },
+		beatEvery: 20 * time.Millisecond, now: clock.now, log: io.Discard,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { a.run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+
+	waitFor(t, "the first minute's batches", func() bool { return api.count() == sendPerMinute })
+	time.Sleep(200 * time.Millisecond)
+	if n := api.count(); n != sendPerMinute {
+		t.Fatalf("sent %d in the first minute, want %d", n, sendPerMinute)
+	}
+	clock.add(30 * time.Second)
+	time.Sleep(200 * time.Millisecond)
+	if n := api.count(); n != sendPerMinute {
+		t.Fatalf("sent %d within the minute, want %d", n, sendPerMinute)
+	}
+	clock.add(31 * time.Second)
+	waitFor(t, "the second minute's batches", func() bool { return api.count() == 2*sendPerMinute })
+	clock.add(61 * time.Second)
+	waitFor(t, "the rest", func() bool { return out.Len() == 0 })
+	// The 250 waiting, and a heartbeat each time the clock moved.
+	if n := api.count(); n != 254 {
+		t.Errorf("sent %d, want 254", n)
+	}
+}
+
+// A 429 with Retry-After is a pause the agent keeps: neither its own
+// shorter wait nor a scan finishing sends anything sooner.
+func TestAgentLoopWaitsAsLongAsTheServiceAsks(t *testing.T) {
+	api := &pacedAPI{refuse: 1, after: "120"}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	clock := &fakeClock{t: time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)}
+	out := send.Outbox{Dir: t.TempDir(), MaxBytes: 1 << 30}
+	scans := 0
+	var mu sync.Mutex
+	a := agentLoop{
+		client: send.NewClient(srv.URL, goodToken), outbox: out,
+		scan: func(context.Context) (scan.Report, error) {
+			mu.Lock()
+			scans++
+			mu.Unlock()
+			return scan.Report{Schema: scan.Schema, StartedAt: clock.now()}, nil
+		},
+		scanEvery: 30 * time.Second, beatEvery: 20 * time.Millisecond, now: clock.now, log: io.Discard,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { a.run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+
+	waitFor(t, "the refusal", func() bool { api.mu.Lock(); defer api.mu.Unlock(); return api.refused == 1 })
+	// 100 seconds on, a scan every 30: past any backoff of the agent's
+	// own, and three scans finished, but inside the 120 s asked for.
+	for range 10 {
+		clock.add(10 * time.Second)
+		time.Sleep(30 * time.Millisecond)
+	}
+	if n := api.count(); n != 0 {
+		t.Fatalf("sent %d batches inside the service's 120 s", n)
+	}
+	mu.Lock()
+	if scans < 3 {
+		t.Errorf("scanned %d times; the test needs scans finishing during the pause", scans)
+	}
+	mu.Unlock()
+	clock.add(21 * time.Second)
+	waitFor(t, "sending after the pause", func() bool { return out.Len() == 0 && api.count() > 0 })
 }

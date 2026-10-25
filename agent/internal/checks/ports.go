@@ -157,7 +157,14 @@ func (dockerFirewallCheck) Run(ctx context.Context, env *Env) Result {
 			if vars["service"] == "" {
 				vars["service"] = p.Container.Name
 			}
-			found = append(found, Found("bypass", vars))
+			// 80 and 443 are a website's ports, public on purpose: worth a
+			// look, never a lost point, and never "bind it to 127.0.0.1",
+			// which would take the site offline.
+			key := "bypass"
+			if p.Port == 80 || p.Port == 443 {
+				key = "web"
+			}
+			found = append(found, Found(key, vars))
 		}
 	}
 	if len(found) > 0 {

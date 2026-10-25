@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -323,9 +324,30 @@ func (c *Client) deliver(ctx context.Context, body []byte) error {
 		return ErrNotAllowed
 	case resp.StatusCode == http.StatusRequestEntityTooLarge, resp.StatusCode == http.StatusBadRequest:
 		return ErrRejected
+	case resp.StatusCode == http.StatusTooManyRequests, resp.StatusCode == http.StatusServiceUnavailable:
+		return &BusyError{Status: resp.StatusCode, Wait: retryAfter(resp.Header.Get("Retry-After"))}
 	default:
 		return fmt.Errorf("the service answered %d", resp.StatusCode)
 	}
+}
+
+// BusyError is the service asking for a pause: too many batches from this
+// server in a minute (429), or catching up (503). Wait is how long it
+// asked for, or 0 when it did not say.
+type BusyError struct {
+	Status int
+	Wait   time.Duration
+}
+
+func (e *BusyError) Error() string { return fmt.Sprintf("the service answered %d", e.Status) }
+
+// retryAfter reads a Retry-After of whole seconds, up to an hour.
+func retryAfter(v string) time.Duration {
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return time.Duration(min(n, 3600)) * time.Second
 }
 
 // hearHome passes on the team's home country when the reply names it.
@@ -455,12 +477,21 @@ func (o Outbox) Flush(ctx context.Context, c *Client) (sent int, err error) {
 // FlushReporting is Flush, calling dropped with each batch file the
 // service refused for good.
 func (o Outbox) FlushReporting(ctx context.Context, c *Client, dropped func(name string)) (sent int, err error) {
+	return o.FlushUpTo(ctx, c, 0, dropped)
+}
+
+// FlushUpTo is FlushReporting sending at most max batches (0: all), so a
+// backlog goes out at a pace the service takes.
+func (o Outbox) FlushUpTo(ctx context.Context, c *Client, max int, dropped func(name string)) (sent int, err error) {
 	files, err := o.files()
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return 0, nil
 		}
 		return 0, err
+	}
+	if max > 0 && len(files) > max {
+		files = files[:max]
 	}
 	for _, f := range files {
 		path := filepath.Join(o.Dir, f.Name())

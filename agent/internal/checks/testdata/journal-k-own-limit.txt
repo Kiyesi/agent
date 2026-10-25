@@ -1,0 +1,7 @@
+2026-10-08T09:22:01+0000 web-1 kernel: apt-get invoked oom-killer: gfp_mask=0xcc0(GFP_KERNEL), order=0, oom_score_adj=0
+2026-10-08T09:22:01+0000 web-1 kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=/,mems_allowed=0,oom_memcg=/system.slice/kiyesi.service,task_memcg=/system.slice/kiyesi.service,task=apt-get,pid=4211,uid=0
+2026-10-08T09:22:01+0000 web-1 kernel: Memory cgroup out of memory: Killed process 4211 (apt-get) total-vm:120240kB, anon-rss:61440kB, file-rss:6972kB, shmem-rss:0kB, UID:0 pgtables:124kB oom_score_adj:0
+2026-10-08T09:38:12+0000 web-1 kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=/,mems_allowed=0,oom_memcg=/system.slice/kiyesi.service,task_memcg=/system.slice/kiyesi.service,task=kiyesi,pid=4102,uid=0
+2026-10-08T09:38:12+0000 web-1 kernel: Memory cgroup out of memory: Killed process 4102 (kiyesi) total-vm:1263000kB, anon-rss:58000kB, file-rss:4000kB, shmem-rss:0kB, UID:0 pgtables:200kB oom_score_adj:0
+2026-10-08T10:05:44+0000 web-1 kernel: oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=docker-7f3a.scope,mems_allowed=0,oom_memcg=/system.slice/docker-7f3a.scope,task_memcg=/system.slice/docker-7f3a.scope,task=node,pid=48211,uid=1000
+2026-10-08T10:05:44+0000 web-1 kernel: Memory cgroup out of memory: Killed process 48211 (node) total-vm:1834448kB, anon-rss:612340kB, file-rss:0kB, shmem-rss:0kB, UID:1000 pgtables:1912kB

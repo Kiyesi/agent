@@ -236,6 +236,7 @@ checks:
     passed: "No security update has waited more than {limit} days"
     skips:
       no-apt: "needs apt, so it runs on Debian and Ubuntu only"
+      memory-limit: "the agent's service has too little memory for apt (an older setting). Raise it with: sudo kiyesi update"
     findings:
       waiting:
         severity: warning
@@ -354,6 +355,14 @@ checks:
           ufw says this port is closed, but Docker opens it anyway, so it can be reached from
           the internet.
         fix: "bind the port to 127.0.0.1 in docker-compose.yml, then\ndocker compose up -d {service}"
+      web:
+        severity: info
+        sentence: "Docker publishes web port {port} past the firewall"
+        why: >-
+          ufw says port {port} is closed, but Docker opens it anyway. For a website that is
+          what you want, so it costs no points, but the firewall's rules no longer say what is
+          open. Never bind it to 127.0.0.1 if it serves your site: the site would go offline.
+        fix: "If {service} serves your website, allow the port in the firewall too, so its rules say what is open:\nsudo ufw allow {port}/tcp\nIf it should not be public, bind it to 127.0.0.1 in docker-compose.yml, then\ndocker compose up -d {service}"
 
   - id: ssh
     area: security
