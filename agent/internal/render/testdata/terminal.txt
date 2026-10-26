@@ -23,8 +23,5 @@ DATA LOCATION
  Database   redis (this server)          confirmed   outside Nigeria
  Database   checkout-db-prod:5432        likely      outside Nigeria
 
-Kiyesi can fix 2 things for you: sudo kiyesi fix
-It says what it will change, and asks first.
-
 Full report with every fix command: /var/lib/kiyesi/report-2026-10-08.txt
 

@@ -18,8 +18,8 @@ func newFindings(io IO) *cobra.Command {
 		Use:   "findings [server]",
 		Short: "Every finding on your servers, worst first, with the command that fixes it",
 		Long: "The problems the latest scans found, each in one sentence with why it\n" +
-			"matters and the fix. The agent never runs a fix by itself: run sudo kiyesi fix\n" +
-			"on the server where one is offered, or run the command yourself.",
+			"matters and the commands that fix it. Kiyesi never changes a server: review\n" +
+			"each command and run it yourself, on the server.",
 		Example: "  kiyesi findings\n  kiyesi findings checkout-api-prod --severity critical",
 		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -78,16 +78,11 @@ func newFindings(io IO) *cobra.Command {
 					likely = " · likely"
 				}
 				fmt.Fprintf(io.Out, "%-8s  %s%s\n          %s · %s\n          %s\n", label, f.Sentence, likely, f.Server.Name, f.CheckName, f.Why)
-				first, byHand := render.FixLines(strings.TrimSpace(f.Fix), autoFixOf(f.AutoFix))
+				// Only the commands a person reviews and runs, never kiyesi
+				// fix, even when an agent before 0.40.0 named one.
 				fmt.Fprintln(io.Out, "          Fix:")
-				for _, line := range strings.Split(first, "\n") {
+				for _, line := range strings.Split(strings.TrimSpace(f.Fix), "\n") {
 					fmt.Fprintf(io.Out, "            %s\n", line)
-				}
-				if byHand != "" {
-					fmt.Fprintln(io.Out, "          By hand:")
-					for _, line := range strings.Split(byHand, "\n") {
-						fmt.Fprintf(io.Out, "            %s\n", line)
-					}
 				}
 			}
 			return nil
@@ -140,12 +135,4 @@ func noFindings(servers []api.Server, severity string, named bool) string {
 		return fmt.Sprintf("No findings on the latest scans. %s not sent a scan yet.", plural(waiting, "server has", "servers have"))
 	}
 	return "No findings: every check passed on the latest scans."
-}
-
-// autoFixOf is the kiyesi fix a finding names, or "" when it names none.
-func autoFixOf(name *string) string {
-	if name == nil {
-		return ""
-	}
-	return *name
 }

@@ -292,7 +292,9 @@ func writeMap(t *testing.T, dir, name string, size int) string {
 	return p
 }
 
-func TestSourcemapsDeleteRemovesOnlyTheMapsThatWereSent(t *testing.T) {
+// --delete prints the command that removes only the maps the service has:
+// a skipped one is never in it. Kiyesi itself deletes nothing.
+func TestSourcemapsDeleteNamesOnlyTheMapsThatWereSent(t *testing.T) {
 	t.Setenv("KIYESI_ETC", t.TempDir())
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusCreated) }))
 	t.Cleanup(srv.Close)
@@ -305,20 +307,21 @@ func TestSourcemapsDeleteRemovesOnlyTheMapsThatWereSent(t *testing.T) {
 	if code != ExitOK || !strings.Contains(out, "Uploaded 1 source map") || !strings.Contains(out, "Skipped 1 larger than 20 MB, still in the folder") {
 		t.Errorf("mixed: %d %q %q", code, out, errOut)
 	}
-	if _, err := os.Stat(small); err == nil {
-		t.Error("the sent map was left")
+	if !strings.Contains(out, "  rm "+small) || strings.Contains(out, big) {
+		t.Errorf("the command should name the sent map only: %q", out)
 	}
-	if _, err := os.Stat(big); err != nil {
-		t.Error("the skipped map was deleted though it was never sent")
+	for _, f := range []string{small, big} {
+		if _, err := os.Stat(f); err != nil {
+			t.Errorf("%s was deleted", f)
+		}
 	}
 
-	// Nothing sent: nothing removed, and not a success.
-	code, out, errOut = runCLIEnv(t, token, "sourcemaps", "upload", "--version", "1", "--delete", "--api", srv.URL, dist)
-	if code != ExitUsage || strings.Contains(out, "Uploaded") || !strings.Contains(errOut, "None were removed") {
+	// Nothing sent: no command, and not a success.
+	only := t.TempDir()
+	writeMap(t, only, "assets/big.js.map", maxMap+1)
+	code, out, errOut = runCLIEnv(t, token, "sourcemaps", "upload", "--version", "1", "--delete", "--api", srv.URL, only)
+	if code != ExitUsage || strings.Contains(out, "Uploaded") || strings.Contains(out, "rm ") || !strings.Contains(errOut, "No source maps were uploaded") {
 		t.Errorf("none sent: %d %q %q", code, out, errOut)
-	}
-	if _, err := os.Stat(big); err != nil {
-		t.Error("deleted a map that was not sent")
 	}
 }
 

@@ -13,8 +13,8 @@ import (
 )
 
 // A signed-in person's token lives in the system keychain: the macOS
-// Keychain through `security`, or the Secret Service through `secret-tool`
-// on Linux desktops. Where neither exists, such as on a server, it goes in
+// Keychain through `security`, Windows Credential Manager, or the Secret
+// Service through `secret-tool` on Linux desktops. Where neither exists, such as on a server, it goes in
 // a file only the user can read. The token is never put on a command line,
 // where other users could see it in the process list.
 
@@ -53,6 +53,8 @@ func (systemKeychain) available() bool {
 		}
 		// Without a desktop session there is no Secret Service to talk to.
 		return os.Getenv("DBUS_SESSION_BUS_ADDRESS") != ""
+	case "windows":
+		return winCredAvailable()
 	}
 	return false
 }
@@ -65,6 +67,8 @@ func (systemKeychain) set(account, token string) error {
 		cmd := exec.Command("security", "-i")
 		cmd.Stdin = strings.NewReader(fmt.Sprintf("add-generic-password -U -a %q -s %q -w %q\n", account, keychainService, token))
 		return cmd.Run()
+	case "windows":
+		return winCredSet(account, token)
 	default:
 		cmd := exec.Command("secret-tool", "store", "--label=Kiyesi", "service", keychainService, "account", account) // #nosec G204 -- a fixed tool; account is the API address, passed as one argument with no shell
 		cmd.Stdin = strings.NewReader(token)
@@ -78,6 +82,8 @@ func (systemKeychain) get(account string) (string, error) {
 	switch runtime.GOOS {
 	case "darwin":
 		out, err = exec.Command("security", "find-generic-password", "-a", account, "-s", keychainService, "-w").Output() // #nosec G204 -- a fixed tool; account is the API address, passed as one argument with no shell
+	case "windows":
+		return winCredGet(account)
 	default:
 		out, err = exec.Command("secret-tool", "lookup", "service", keychainService, "account", account).Output() // #nosec G204 -- a fixed tool; account is the API address, passed as one argument with no shell
 	}
@@ -88,6 +94,8 @@ func (systemKeychain) remove(account string) error {
 	switch runtime.GOOS {
 	case "darwin":
 		return exec.Command("security", "delete-generic-password", "-a", account, "-s", keychainService).Run() // #nosec G204 -- a fixed tool; account is the API address, passed as one argument with no shell
+	case "windows":
+		return winCredRemove(account)
 	default:
 		return exec.Command("secret-tool", "clear", "service", keychainService, "account", account).Run() // #nosec G204 -- a fixed tool; account is the API address, passed as one argument with no shell
 	}

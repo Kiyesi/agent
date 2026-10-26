@@ -1,28 +1,28 @@
-// Package jobs watches timed jobs (PRD feature 23): kiyesi run records each
-// run, and the agent finds each job's schedule and sends both.
+// Package jobs watches timed jobs (PRD feature 23): the job runs on its own,
+// from cron or a systemd timer, kiyesi job done records how each run went,
+// and the agent finds each job's schedule and sends both. Kiyesi never
+// starts a job.
 package jobs
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
-	"os/exec"
-	"os/signal"
 	"os/user"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
+
+	"github.com/kiyesi/kiyesi/agent/internal/osfile"
 )
 
-// Run is one run of a job, as kiyesi run records it: a start, and later an
-// end with the exit code, how long it took and its last lines of output.
+// Run is one run of a job, as kiyesi job done records it: when it started and
+// ended, and its exit code. Agents before 0.40.0 (kiyesi run) also recorded a
+// start of its own and the last lines of output.
 type Run struct {
 	Name       string   `json:"name"`
 	RunID      string   `json:"run_id"`
@@ -38,126 +38,30 @@ type Run struct {
 // and underscores.
 var NamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$`)
 
-const (
-	keepLines   = 20
-	maxLineSize = 500
-)
-
-// tail keeps the last lines written to it.
-type tail struct {
-	mu      sync.Mutex
-	partial []byte
-	lines   []string
+// RecordStart notes that a job just started on its own, from its crontab or
+// timer, so a run that never starts is called missed and one still going
+// long after its usual time is called running long. It starts nothing.
+func RecordStart(spool, name string, now time.Time, newID func() string) error {
+	run := Run{Name: name, RunID: newID(), StartedAt: now.UTC().Format(time.RFC3339Nano), User: os.Getenv("USER")}
+	return write(spool, run.RunID+".start.json", run)
 }
 
-func (t *tail) Write(p []byte) (int, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.partial = append(t.partial, p...)
-	for {
-		i := bytes.IndexByte(t.partial, '\n')
-		if i < 0 {
-			break
-		}
-		t.add(string(t.partial[:i]))
-		t.partial = t.partial[i+1:]
+// Record notes one finished run of a job: the job itself ran on its own,
+// from its crontab or timer, and Kiyesi only writes down how it went, in the
+// spool folder for the agent to send. It never starts anything. started is
+// when the job began, when known; otherwise the run is noted at its end, and
+// the service joins it to the job's start that kiyesi job start noted.
+func Record(spool, name string, code int, started, ended time.Time, newID func() string) error {
+	if started.IsZero() || started.After(ended) {
+		started = ended
 	}
-	// A very long line without an end is kept in part.
-	if len(t.partial) > 64*1024 {
-		t.add(string(t.partial[:maxLineSize]))
-		t.partial = t.partial[:0]
-	}
-	return len(p), nil
-}
-
-func (t *tail) add(line string) {
-	line = strings.TrimRight(line, "\r")
-	if len(line) > maxLineSize {
-		line = line[:maxLineSize] + "…"
-	}
-	t.lines = append(t.lines, line)
-	if len(t.lines) > keepLines {
-		t.lines = t.lines[len(t.lines)-keepLines:]
-	}
-}
-
-func (t *tail) last() []string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if len(t.partial) > 0 {
-		t.add(string(t.partial))
-		t.partial = nil
-	}
-	return append([]string(nil), t.lines...)
-}
-
-// Execute runs the command as it would run without Kiyesi: the same input,
-// output and exit code, signals passed on. It records the start and the end
-// in the spool folder for the agent to send. Recording never fails or slows
-// the job: when the folder cannot be written, the run is not recorded, and
-// one line on stderr says so. An empty spool records nothing, silently: the
-// caller has said why.
-func Execute(spool, name string, args []string, stdin io.Reader, stdout, stderr io.Writer, newID func() string, now func() time.Time) int {
-	id := newID()
-	started := now()
-	user := ""
-	if u := os.Getenv("USER"); u != "" {
-		user = u
-	}
-	run := Run{Name: name, RunID: id, StartedAt: started.UTC().Format(time.RFC3339Nano), User: user}
-	record := func(file string) {
-		if spool == "" {
-			return
-		}
-		if err := write(spool, file, run); err != nil {
-			_, _ = io.WriteString(stderr, "kiyesi run: this run is not recorded, so Kiyesi will not see it ("+err.Error()+"). Is the agent running? sudo systemctl status kiyesi\n")
-			spool = "" // said once is enough
-		}
-	}
-	record(id + ".start.json")
-
-	out := &tail{}
-	cmd := exec.Command(args[0], args[1:]...) // #nosec G204 -- the command is the user's own job, as they wrote it
-	cmd.Stdin = stdin
-	cmd.Stdout = io.MultiWriter(stdout, out)
-	cmd.Stderr = io.MultiWriter(stderr, out)
-	code := 0
-	if err := cmd.Start(); err != nil {
-		code = 127
-		if errors.Is(err, os.ErrPermission) {
-			code = 126
-		}
-		_, _ = io.WriteString(stderr, "kiyesi run: "+err.Error()+"\n")
-		out.add(err.Error())
-	} else {
-		sigs := make(chan os.Signal, 4)
-		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
-		go func() {
-			for s := range sigs {
-				_ = cmd.Process.Signal(s)
-			}
-		}()
-		err := cmd.Wait()
-		signal.Stop(sigs)
-		close(sigs)
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			code = exit.ExitCode()
-			if code < 0 {
-				code = 128 + int(exit.Sys().(syscall.WaitStatus).Signal())
-			}
-		} else if err != nil {
-			code = 1
-		}
-	}
-	ended := now()
 	ms := ended.Sub(started).Milliseconds()
-	run.EndedAt = ended.UTC().Format(time.RFC3339Nano)
-	run.ExitCode = &code
-	run.DurationMs = &ms
-	run.LastLines = out.last()
-	record(id + ".end.json")
-	return code
+	run := Run{
+		Name: name, RunID: newID(),
+		StartedAt: started.UTC().Format(time.RFC3339Nano), EndedAt: ended.UTC().Format(time.RFC3339Nano),
+		ExitCode: &code, DurationMs: &ms, User: os.Getenv("USER"),
+	}
+	return write(spool, run.RunID+".end.json", run)
 }
 
 // write puts a record in the spool atomically: a hidden file, then renamed.
@@ -184,7 +88,7 @@ func write(spool, file string, r Run) error {
 	return nil
 }
 
-// PrepareSpool makes the folder kiyesi run writes to: anyone may add a file,
+// PrepareSpool makes the folder kiyesi job done writes to: anyone may add a file,
 // nobody may list it or remove another's file. Its parent becomes passable
 // (not readable) so jobs running as other users can reach it. Only the agent,
 // as root, calls it.
@@ -264,7 +168,7 @@ func Take(spool string) []Run {
 // link, as a user could point one at a file only root reads, and never
 // waits on a pipe.
 func readSmall(p string) ([]byte, uint32, error) {
-	f, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0) // #nosec G304 -- a file in the agent's own spool folder
+	f, err := os.OpenFile(p, osfile.NoFollow, 0) // #nosec G304 -- a file in the agent's own spool folder
 	if err != nil {
 		return nil, 0, err
 	}
@@ -290,11 +194,8 @@ func ownerOf(e os.DirEntry) (uint32, bool) {
 }
 
 func ownerOfInfo(info os.FileInfo) (uint32, bool) {
-	st, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || st == nil {
-		return 0, false
-	}
-	return st.Uid, true
+	uid, _, _, ok := osfile.Owner(info)
+	return uid, ok
 }
 
 // userName is the login name of uid, or the number when it has none.

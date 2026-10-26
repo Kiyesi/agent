@@ -4,7 +4,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
+
+	"github.com/kiyesi/kiyesi/agent/internal/osfile"
 )
 
 // RootFS is the machine's files from a folder, usually /, as os.DirFS gives
@@ -49,7 +50,7 @@ func (r RootFS) OpenNoFollow(name string) (fs.File, error) {
 	if !fs.ValidPath(name) {
 		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrInvalid}
 	}
-	f, err := os.OpenFile(filepath.Join(r.Dir, filepath.FromSlash(name)), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0) // #nosec G304 -- a path the scan found, opened read-only without following a link
+	f, err := os.OpenFile(filepath.Join(r.Dir, filepath.FromSlash(name)), osfile.NoFollow, 0) // #nosec G304 -- a path the scan found, opened read-only without following a link
 	if err != nil {
 		return nil, err
 	}

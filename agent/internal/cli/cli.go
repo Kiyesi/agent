@@ -51,7 +51,13 @@ func Execute(args []string, io IO) int {
 	}
 	defer spin.stop()
 	root := newRoot(io)
-	root.PersistentPreRun = func(cmd *cobra.Command, args []string) { spin.spinFor(cmd, args) }
+	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if err := serverOnlyHere(cmd); err != nil {
+			return err
+		}
+		spin.spinFor(cmd, args)
+		return nil
+	}
 	root.SetArgs(args)
 	err := root.Execute()
 	spin.stop()
@@ -76,8 +82,8 @@ func newRoot(io IO) *cobra.Command {
 		Short: "Server health and security, with the fix for every problem",
 		Long: "Kiyesi checks a Linux server's health and security and prints each problem\n" +
 			"in one sentence with the command that fixes it. The scan and the agent only\n" +
-			"read: they never change a file, a setting or a container. Only sudo kiyesi fix,\n" +
-			"which you run and answer yourself, makes a change, and most can be undone.\n\n" +
+			"read: Kiyesi never changes a file, a setting or a container. It only suggests:\n" +
+			"you review each command and run it yourself.\n\n" +
 			"Alone, kiyesi shows what needs you now and the next command to run.",
 		Example:       "  kiyesi              what needs you now, and the next command\n  sudo kiyesi scan    this server's report; nothing leaves it",
 		Args:          cobra.NoArgs,
@@ -98,7 +104,7 @@ func newRoot(io IO) *cobra.Command {
 	listFilter.project, listFilter.env = "", ""
 	root.PersistentFlags().StringVar(&listFilter.project, "project", "", "show only this project, by name, in any list")
 	root.PersistentFlags().StringVar(&listFilter.env, "env", "", "show only production or staging, in any list")
-	root.AddCommand(newScan(io), newBreachCheck(io), newFix(io), newKeys(io), newGuard(io), newCompare(io), newVerify(io), newMCP(io), newConnect(io), newAgent(io), newLogin(io), newLogout(io), newServers(io), newServer(io), newAlerts(io), newMute(io), newUptime(io), newRenewals(io), newMetrics(io), newHistory(io), newLogs(io), newErrors(io), newTraces(io), newTrace(io), newIncidents(io), newIncident(io), newAck(io), newResolve(io), newMine(io), newAssign(io), newTeam(io), newActivity(io), newWhoami(io), newRun(io), newJobs(io), newDatabases(io), newCosts(io), newSourcemaps(io), newDeploy(io), newUninstall(io), newDeploys(io), newPlatforms(io), newDatamap(io), newTips(io), newAdvisories(io), newStatus(io), newReports(io), newReport(io), newProjects(io), newSessions(io), newCredit(io), newFindings(io), newOpen(io), newUpdate(io), newWatch(io), newPreflight(io), newExplain(io), newDrill(io), newPassport(io), newBadge(io), newVersion(io))
+	root.AddCommand(newScan(io), newBreachCheck(io), newFix(io), newKeys(io), newGuard(io), newCompare(io), newVerify(io), newMCP(io), newConnect(io), newAgent(io), newLogin(io), newLogout(io), newServers(io), newServer(io), newAlerts(io), newMute(io), newUptime(io), newRenewals(io), newMetrics(io), newHistory(io), newLogs(io), newErrors(io), newTraces(io), newTrace(io), newIncidents(io), newIncident(io), newAck(io), newResolve(io), newMine(io), newAssign(io), newTeam(io), newActivity(io), newWhoami(io), newJob(io), newJobs(io), newDatabases(io), newCosts(io), newSourcemaps(io), newDeploy(io), newUninstall(io), newDeploys(io), newPlatforms(io), newDatamap(io), newTips(io), newAdvisories(io), newStatus(io), newReports(io), newReport(io), newProjects(io), newSessions(io), newCredit(io), newFindings(io), newOpen(io), newUpdate(io), newWatch(io), newPreflight(io), newExplain(io), newDrill(io), newPassport(io), newBadge(io), newVersion(io))
 	addCompletion(root)
 	return root
 }

@@ -194,7 +194,7 @@ func isTerminal(w io.Writer) bool {
 // at once: no animation.
 var noSpinner = map[string]bool{
 	"kiyesi login": true, "kiyesi logout": true, "kiyesi watch": true, "kiyesi agent": true,
-	"kiyesi connect": true, "kiyesi run": true, "kiyesi uninstall": true, "kiyesi version": true,
+	"kiyesi connect": true, "kiyesi job done": true, "kiyesi job start": true, "kiyesi uninstall": true, "kiyesi version": true,
 	"kiyesi help": true, "kiyesi completion": true, "kiyesi __complete": true, "kiyesi __completeNoDesc": true,
 	"kiyesi open": true, "kiyesi fix undo": true, "kiyesi mcp": true, "kiyesi credit topup": true, "kiyesi team use": true,
 }
@@ -203,7 +203,7 @@ var noSpinner = map[string]bool{
 var spinWords = map[string]string{
 	"kiyesi":             "Looking at what needs you",
 	"kiyesi scan":        "Checking this server",
-	"kiyesi fix":         "Checking what Kiyesi can fix",
+	"kiyesi fix":         "Checking what needs fixing",
 	"kiyesi servers":     "Reading your servers",
 	"kiyesi server":      "Reading %s",
 	"kiyesi findings":    "Reading findings",

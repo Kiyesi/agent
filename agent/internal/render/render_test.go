@@ -214,38 +214,6 @@ func TestExampleForTheDocs(t *testing.T) {
 	golden(t, "terminal-example.txt", terminal(t, r, colorprofile.NoTTY))
 }
 
-// Two of the design's findings (the certificate and SSH passwords) are
-// ones kiyesi fix can make, so the report says so, and the saved report
-// leads each one's fix with it, the change by hand after.
-func TestReportsOfferKiyesiFix(t *testing.T) {
-	r := designReport(t)
-	if got := terminal(t, r, colorprofile.NoTTY); !strings.Contains(got, "Kiyesi can fix 2 things for you: sudo kiyesi fix\nIt says what it will change, and asks first.\n") {
-		t.Errorf("no kiyesi fix line in:\n%s", got)
-	}
-	file := File(r, ByScan)
-	for _, want := range []string{"Fix: sudo kiyesi fix ssh-password\n       By hand: ", "Fix: sudo kiyesi fix certificates\n       By hand: "} {
-		if !strings.Contains(file, want) {
-			t.Errorf("missing %q in the saved report", want)
-		}
-	}
-	if strings.Count(file, "Fix: sudo kiyesi fix") != 2 {
-		t.Errorf("a finding kiyesi fix cannot make was offered:\n%s", file)
-	}
-	var b bytes.Buffer
-	if err := Stored(&colorprofile.Writer{Forward: &b, Profile: colorprofile.NoTTY}, r, "checkout-api-prod"); err != nil || !strings.Contains(b.String(), "Kiyesi can fix 2 things on the server: sudo kiyesi fix") {
-		t.Errorf("laptop view: %v\n%s", err, b.String())
-	}
-	// None to offer, no line.
-	for i := range r.Checks {
-		for j := range r.Checks[i].Findings {
-			r.Checks[i].Findings[j].AutoFix = ""
-		}
-	}
-	if got := terminal(t, r, colorprofile.NoTTY); strings.Contains(got, "kiyesi fix") {
-		t.Errorf("offered kiyesi fix with nothing to fix:\n%s", got)
-	}
-}
-
 func TestTerminalMarksAnUntestedSystem(t *testing.T) {
 	r := designReport(t)
 	r.Host.OS, r.Host.Tested = "Debian 12", false
@@ -330,8 +298,8 @@ func TestReportFileNamesOptionalCleanUps(t *testing.T) {
 	if at < 0 || at < strings.Index(got, "WARNING") || at > strings.Index(got, "DATA LOCATION") {
 		t.Fatalf("no INFO section between WARNING and DATA LOCATION:\n%s", got)
 	}
-	if !strings.Contains(got[at:], "Fix: sudo kiyesi fix docker-cleanup") || !strings.Contains(got[at:], "Why: ") {
-		t.Errorf("the clean-up has no why or kiyesi fix line:\n%s", got[at:])
+	if !strings.Contains(got[at:], "Fix: ") || strings.Contains(got[at:], "kiyesi fix") || !strings.Contains(got[at:], "Why: ") {
+		t.Errorf("the clean-up has no why or fix line, or offers kiyesi fix:\n%s", got[at:])
 	}
 	if !strings.Contains(got, " PASS  Leftovers: passed, with an optional clean-up above\n") {
 		t.Errorf("Leftovers is counted as passed but not listed:\n%s", got)
@@ -360,19 +328,6 @@ func TestReportFileSaysWhoWroteIt(t *testing.T) {
 	}
 }
 
-// One fix for three secret files is one thing to fix, as kiyesi fix says.
-func TestReportsCountFixesNotFindings(t *testing.T) {
-	r := designReport(t)
-	var secrets []scan.Finding
-	for _, p := range []string{"/srv/a/.env", "/srv/b/.env", "/srv/c/.env"} {
-		secrets = append(secrets, finding(t, "secrets-in-files", "world-readable", "", map[string]string{"path": p}))
-	}
-	r.Checks = []scan.CheckResult{{ID: "secrets-in-files", Name: "Secrets", Status: "fail", Findings: secrets}}
-	if got := terminal(t, r, colorprofile.NoTTY); !strings.Contains(got, "Kiyesi can fix 1 thing for you: sudo kiyesi fix") {
-		t.Errorf("counted findings, not fixes:\n%s", got)
-	}
-}
-
 // The laptop view shows the agent's version and when it scanned, and a
 // scan over a day old offers no fix: it says how old it is instead.
 func TestLaptopViewShowsTheAgentsVersionAndTheScanTime(t *testing.T) {
@@ -398,27 +353,28 @@ func TestLaptopViewShowsTheAgentsVersionAndTheScanTime(t *testing.T) {
 	}
 }
 
-// The server view offers root login apart: kiyesi fix leaves it to anyone
-// signed in as root, so it is not counted among what Kiyesi can fix.
-func TestServerViewOffersRootLoginApart(t *testing.T) {
-	root := finding(t, "ssh", "root", "", nil)
-	if root.AutoFix != "ssh-root" {
-		t.Fatalf("the pack's ssh root finding has no ssh-root fix: %+v", root)
-	}
-	view := func(fs ...scan.Finding) string {
-		r := scan.Report{StartedAt: time.Now().Add(-time.Hour), Checks: []scan.CheckResult{{ID: "ssh", Status: "fail", Findings: fs}}}
-		var b bytes.Buffer
-		if err := Stored(&colorprofile.Writer{Forward: &b, Profile: colorprofile.NoTTY}, r, "web-1"); err != nil {
-			t.Fatal(err)
+// No report offers kiyesi fix: the terminal, the saved report and the
+// server view give only the commands a person reviews and runs, even for a
+// report an agent before 0.40.0 sent with its fixes named.
+func TestReportsNeverOfferKiyesiFix(t *testing.T) {
+	r := designReport(t)
+	for i := range r.Checks {
+		for j := range r.Checks[i].Findings {
+			r.Checks[i].Findings[j].AutoFix = "ssh-password"
 		}
-		return b.String()
 	}
-	only := view(root)
-	if strings.Contains(only, "Kiyesi can fix") || !strings.Contains(only, "Root login: sudo kiyesi fix ssh-root, signed in as your own user with sudo, not as root\n") {
-		t.Errorf("root login alone:\n%s", only)
+	r.StartedAt = time.Now().Add(-time.Hour)
+	var stored bytes.Buffer
+	if err := Stored(&colorprofile.Writer{Forward: &stored, Profile: colorprofile.NoTTY}, r, "web-1"); err != nil {
+		t.Fatal(err)
 	}
-	both := view(root, finding(t, "ssh", "password", "", nil))
-	if !strings.Contains(both, "Kiyesi can fix 1 thing on the server: sudo kiyesi fix\nRoot login: sudo kiyesi fix ssh-root") {
-		t.Errorf("root login with another fix:\n%s", both)
+	for name, got := range map[string]string{
+		"terminal":    terminal(t, r, colorprofile.NoTTY),
+		"report file": File(r, ByScan),
+		"server view": stored.String(),
+	} {
+		if strings.Contains(got, "kiyesi fix") || strings.Contains(got, "Kiyesi can fix") || strings.Contains(got, "By hand:") {
+			t.Errorf("%s offers kiyesi fix:\n%s", name, got)
+		}
 	}
 }

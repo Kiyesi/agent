@@ -86,11 +86,12 @@ func TestSourcemapsUploadSendsEachMapGzipped(t *testing.T) {
 		got["storefront-web|2.14.0|assets/vendor-aa11.js.map"] == "" {
 		t.Errorf("sent %v with %q", got, auth)
 	}
-	if !strings.Contains(out, "Uploaded 3 source maps for version 2.14.0") || !strings.Contains(out, "Removed them from the folder") {
+	// Kiyesi deletes nothing: --delete prints the command that would.
+	if !strings.Contains(out, "Uploaded 3 source maps for version 2.14.0") || !strings.Contains(out, "To remove the uploaded maps from the folder, run:\n  rm ") || !strings.Contains(out, filepath.Join(dist, "assets/index-3f9a.js.map")) {
 		t.Errorf("out = %q", out)
 	}
-	if _, err := os.Stat(filepath.Join(dist, "assets/index-3f9a.js.map")); err == nil {
-		t.Error("--delete left the map in the folder")
+	if _, err := os.Stat(filepath.Join(dist, "assets/index-3f9a.js.map")); err != nil {
+		t.Error("--delete removed the map itself")
 	}
 	if _, err := os.Stat(filepath.Join(dist, "assets/index-3f9a.js")); err != nil {
 		t.Error("--delete removed the script")

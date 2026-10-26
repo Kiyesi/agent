@@ -76,7 +76,7 @@ func TestUninstallRemovesTheServiceAndItsFiles(t *testing.T) {
 	// Without yes, nothing happens.
 	if code, _, errOut := runCLIInput(t, "no\n", "uninstall"); code != ExitUsage || !strings.Contains(errOut, "Nothing was removed") {
 		t.Fatalf("declined: %d %q", code, errOut)
-	} else if !strings.Contains(errOut, "Changes made by kiyesi fix stay, and can no longer be undone with kiyesi. To put one back first: sudo kiyesi fix undo") {
+	} else if !strings.Contains(errOut, "Changes kiyesi fix made before 0.40.0 stay, and can no longer be undone with kiyesi. To put one back first: sudo kiyesi fix undo") {
 		// The undo records go with /var/lib/kiyesi: the question says so.
 		t.Errorf("the question does not say kiyesi fix's changes stay: %q", errOut)
 	}

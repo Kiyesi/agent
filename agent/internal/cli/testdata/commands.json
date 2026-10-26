@@ -3,7 +3,7 @@
     "path": "kiyesi",
     "use": "kiyesi [flags]",
     "short": "Server health and security, with the fix for every problem",
-    "long": "Kiyesi checks a Linux server's health and security and prints each problem\nin one sentence with the command that fixes it. The scan and the agent only\nread: they never change a file, a setting or a container. Only sudo kiyesi fix,\nwhich you run and answer yourself, makes a change, and most can be undone.\n\nAlone, kiyesi shows what needs you now and the next command to run.",
+    "long": "Kiyesi checks a Linux server's health and security and prints each problem\nin one sentence with the command that fixes it. The scan and the agent only\nread: Kiyesi never changes a file, a setting or a container. It only suggests:\nyou review each command and run it yourself.\n\nAlone, kiyesi shows what needs you now and the next command to run.",
     "example": "  kiyesi              what needs you now, and the next command\n  sudo kiyesi scan    this server's report; nothing leaves it",
     "flags": [
       {
@@ -71,7 +71,7 @@
       },
       {
         "name": "container",
-        "usage": "run beside a managed service (Render, Heroku, Fly.io, …): no scan and no host figures; the databases in the settings and the runs of kiyesi run. Reads KIYESI_API and KIYESI_TOKEN"
+        "usage": "run beside a managed service (Render, Heroku, Fly.io, …): no scan and no host figures; the databases in the settings and the runs kiyesi job done records. Reads KIYESI_API and KIYESI_TOKEN"
       }
     ]
   },
@@ -386,7 +386,7 @@
     "path": "kiyesi findings",
     "use": "kiyesi findings [server] [flags]",
     "short": "Every finding on your servers, worst first, with the command that fixes it",
-    "long": "The problems the latest scans found, each in one sentence with why it\nmatters and the fix. The agent never runs a fix by itself: run sudo kiyesi fix\non the server where one is offered, or run the command yourself.",
+    "long": "The problems the latest scans found, each in one sentence with why it\nmatters and the commands that fix it. Kiyesi never changes a server: review\neach command and run it yourself, on the server.",
     "example": "  kiyesi findings\n  kiyesi findings checkout-api-prod --severity critical",
     "flags": [
       {
@@ -402,9 +402,9 @@
   {
     "path": "kiyesi fix",
     "use": "kiyesi fix [name...] [flags]",
-    "short": "Fix what Kiyesi can fix on this server, after you say yes (needs sudo)",
-    "long": "Lists the findings Kiyesi can fix for you, says in plain words what each fix\nchanges, and asks. After you say yes it makes the changes, checks the server\nagain and shows the new grade. Every change that can be undone is kept:\nkiyesi fix undo lists them. Before a fix changes a file it saves it, and a fix\nthat fails halfway is put back at once. Three cannot be undone: installing\nupdates (updates), renewing certificates (certificates) and removing unused\nDocker images and build cache (docker-cleanup).\n\nOnly you run this, at this server's terminal. The agent's service never runs\nit, and the dashboard cannot ask for it. To forbid it on a server, set\nfix: off in /etc/kiyesi/config.yaml. Names: certificates, docker-cleanup, firewall, login-protection, secret-files, ssh-password, ssh-root, updates.",
-    "example": "  sudo kiyesi fix                 the list, then asks\n  sudo kiyesi fix ssh-password    one fix\n  sudo kiyesi fix --dry-run       only show what it would change\n  sudo kiyesi fix undo            what can be undone",
+    "short": "List what to fix on this server, with the commands to review and run (needs sudo)",
+    "long": "Scans this server, then lists each problem with the commands that fix it, worst\nfirst, for you to review and run yourself. Kiyesi never changes the server: not\nthis command, not the agent, not the dashboard. Names narrow the list to what\nthose fixes cover: certificates, docker-cleanup, firewall, login-protection, secret-files, ssh-password, ssh-root, updates.\n\nChanges made by kiyesi fix before 0.40.0 can still be listed and put back:\nsudo kiyesi fix undo.",
+    "example": "  sudo kiyesi fix                 every problem, with its commands\n  sudo kiyesi fix ssh-password    only what that fix covers\n  sudo kiyesi fix --json          the same, as JSON",
     "flags": [
       {
         "name": "config",
@@ -412,25 +412,16 @@
         "default": "/etc/kiyesi/config.yaml"
       },
       {
-        "name": "dry-run",
-        "usage": "only show what each fix would change; change nothing"
-      },
-      {
         "name": "json",
-        "usage": "print the plan, or what changed, as JSON (with --dry-run or --yes)"
-      },
-      {
-        "name": "yes",
-        "short": "y",
-        "usage": "make every change without asking, for a script you have read"
+        "usage": "print the list as JSON"
       }
     ]
   },
   {
     "path": "kiyesi fix undo",
     "use": "kiyesi fix undo [id] [flags]",
-    "short": "List what kiyesi fix changed, or put one change back (needs sudo)",
-    "long": "Alone, lists every change kiyesi fix made on this server, newest first, with\nits id. With an id, puts that change back as it was: the files it changed are\nrestored and the service it touched is reloaded. Three fixes cannot be\nundone: installing updates (updates), renewing certificates (certificates)\nand removing unused Docker images and build cache (docker-cleanup).",
+    "short": "List what kiyesi fix changed before 0.40.0, and the commands that put one back (needs sudo)",
+    "long": "Before 0.40.0, kiyesi fix could make a change after a yes, and kept a record of\neach. Alone, this lists those changes, newest first, with their ids. With an id,\nit prints the commands that put that change back as it was, for you to review\nand run. Kiyesi changes nothing.",
     "example": "  sudo kiyesi fix undo\n  sudo kiyesi fix undo 7f3a",
     "flags": [
       {
@@ -440,25 +431,20 @@
       },
       {
         "name": "json",
-        "usage": "print the list, or what was undone, as JSON"
-      },
-      {
-        "name": "yes",
-        "short": "y",
-        "usage": "undo without asking"
+        "usage": "print the list, or the commands, as JSON"
       }
     ]
   },
   {
     "path": "kiyesi guard",
     "use": "kiyesi guard -- <command> [flags]",
-    "short": "A seatbelt for a risky change: save the settings, run a command, check again, offer to put them back",
-    "long": "Before the command runs, saves a copy of /etc and notes what works: the grade,\nthe services, the containers, and the server's own sites. After, it checks again\nand says what changed. If a service failed, a site stopped answering, a container\nstopped or the grade fell, it offers to put the settings back and restart what\nfailed. Package upgrades are listed with the command to go back, never undone by\nthemselves. Password hashes and private keys are never copied. The copy stays on\nthis server, for root only; the last 5 are kept.",
+    "short": "The safe way to make a risky change: what works now, and each step to review and run",
+    "long": "Kiyesi changes nothing and runs nothing. It reads how this server is now: the\ngrade, the failed services, the containers, and whether the server's own sites\nanswer. Then it prints the safe way to make your change, step by step, for you\nto review and run: keep a copy of /etc and the package list, make the change,\ncheck the same things again, and if something broke, see what changed, put back\nthe settings you choose and restart what failed.",
     "example": "  sudo kiyesi guard -- apt-get upgrade\n  sudo kiyesi guard --check http://127.0.0.1:3000/health -- ./deploy.sh\n  sudo kiyesi guard list\n  sudo kiyesi guard undo 7f3a",
     "flags": [
       {
         "name": "check",
-        "usage": "an address on this server to ask before and after, such as http://127.0.0.1:3000/health (repeat for more)"
+        "usage": "an address on this server to check now and after, such as http://127.0.0.1:3000/health (repeat for more)"
       },
       {
         "name": "config",
@@ -467,11 +453,7 @@
       },
       {
         "name": "no-restore",
-        "usage": "never put the settings back; only say what broke"
-      },
-      {
-        "name": "restore",
-        "usage": "put the settings back without asking when something broke"
+        "usage": "leave out the steps that put the settings back"
       }
     ]
   },
@@ -490,19 +472,14 @@
   {
     "path": "kiyesi guard undo",
     "use": "kiyesi guard undo <id> [flags]",
-    "short": "Put /etc back as it was before one guarded run, after a yes",
-    "long": "Puts back every settings file that changed since that run began: changed and\nremoved files from its copy, and files added since taken away. That includes\nchanges made after it, so it lists them first and asks.",
+    "short": "Show how to put /etc back as it was before one guarded run",
+    "long": "Lists every settings file that changed since that run began, including\nchanges made after it, and the commands that put each back from guard's copy,\nfor you to review and run. Kiyesi changes nothing.",
     "example": "  sudo kiyesi guard undo 7f3a",
     "flags": [
       {
         "name": "config",
         "usage": "the settings file",
         "default": "/etc/kiyesi/config.yaml"
-      },
-      {
-        "name": "yes",
-        "short": "y",
-        "usage": "put them back without asking"
       }
     ]
   },
@@ -558,10 +535,49 @@
     ]
   },
   {
+    "path": "kiyesi job",
+    "use": "kiyesi job",
+    "short": "Tell Kiyesi how a timed job went, so a failed or missed run alerts you"
+  },
+  {
+    "path": "kiyesi job done",
+    "use": "kiyesi job done --name <job> --exit <code> [flags]",
+    "short": "Record that a timed job just ran, with its exit code",
+    "long": "Put it after the job's command in your crontab or systemd timer, with kiyesi\njob start before it. The job runs on its own, as it always did; this only\nrecords how it went, and the agent sends it. Kiyesi never starts the job. It\nfinds the schedule from the same line, so a run that does not come in time is\ncalled missed. The run is joined to the start kiyesi job start noted, for its\nlength; --started (seconds since 1970, from date +%s) gives it instead.",
+    "example": "  0 4 * * * /usr/local/bin/kiyesi job start --name nightly-backup; /opt/scripts/backup.sh; /usr/local/bin/kiyesi job done --name nightly-backup --exit $?\n  ExecStopPost=/usr/local/bin/kiyesi job done --name nightly-backup --exit $EXIT_STATUS",
+    "flags": [
+      {
+        "name": "exit",
+        "usage": "the job's exit code: $? right after its command, or $EXIT_STATUS in ExecStopPost"
+      },
+      {
+        "name": "name",
+        "usage": "the job's name, such as nightly-backup"
+      },
+      {
+        "name": "started",
+        "usage": "when the job began, in seconds since 1970 (date +%s)"
+      }
+    ]
+  },
+  {
+    "path": "kiyesi job start",
+    "use": "kiyesi job start --name <job> [flags]",
+    "short": "Record that a timed job is starting, before its command",
+    "long": "Put it before the job's command in your crontab or systemd timer, and kiyesi\njob done after it. It only records the start, so a run that does not start in\ntime is called missed, and one still going long after its usual time is called\nrunning long. Kiyesi never starts the job.",
+    "example": "  0 4 * * * /usr/local/bin/kiyesi job start --name nightly-backup; /opt/scripts/backup.sh; /usr/local/bin/kiyesi job done --name nightly-backup --exit $?\n  ExecStartPre=/usr/local/bin/kiyesi job start --name nightly-backup",
+    "flags": [
+      {
+        "name": "name",
+        "usage": "the job's name, such as nightly-backup"
+      }
+    ]
+  },
+  {
     "path": "kiyesi jobs",
     "use": "kiyesi jobs [name] [flags]",
     "short": "Scheduled jobs with their last run and status",
-    "long": "Lists the timed jobs wrapped with kiyesi run: when each runs, its last run,\nhow long it took, when it is next expected, and whether it failed, ran long or\ndid not run. Give a job's name to see its recent runs.",
+    "long": "Lists the timed jobs that call kiyesi job done: when each runs, its last run,\nhow long it took, when it is next expected, and whether it failed, ran long or\ndid not run. Give a job's name to see its recent runs.",
     "example": "  kiyesi jobs\n  kiyesi jobs nightly-backup",
     "flags": [
       {
@@ -573,9 +589,9 @@
   {
     "path": "kiyesi keys",
     "use": "kiyesi keys [flags]",
-    "short": "List who can sign in to this server with an SSH key, and remove a key",
+    "short": "List who can sign in to this server with an SSH key, and how to take one out",
     "long": "Lists every SSH key that opens this server, by account: its fingerprint,\ntype and comment, and when its file last changed. The keys themselves are never\nshown or sent. On a connected server the same list feeds the dashboard's\nAccess map, which shows each key across all your servers.",
-    "example": "  sudo kiyesi keys\n  sudo kiyesi keys remove SHA256:JQ6b…   # from every account on this server, after a yes",
+    "example": "  sudo kiyesi keys\n  sudo kiyesi keys remove SHA256:JQ6b…   # where it is, and the commands to take it out",
     "flags": [
       {
         "name": "json",
@@ -586,8 +602,8 @@
   {
     "path": "kiyesi keys remove",
     "use": "kiyesi keys remove <fingerprint> [flags]",
-    "short": "Take one SSH key out of every account on this server, after a yes",
-    "long": "Takes the key with this fingerprint out of every authorized_keys file on this\nserver, after saying where it is and asking. Each file is changed with its own\naccount's rights, and the lines are kept, so sudo kiyesi fix undo <id> puts\nthem back. The key you are signed in with is never the last one taken away.",
+    "short": "Show where one SSH key is on this server, and the commands to take it out",
+    "long": "Finds the key with this fingerprint in every authorized_keys file on this\nserver and prints, for each file, the command that takes its line out, for\nyou to review and run. Kiyesi changes nothing. It warns when the key is the\nlast one you sign in with.",
     "example": "  sudo kiyesi keys remove SHA256:JQ6bTs0Wp5uD9IhzbSPDx3VfmHmzSj0Ep0e2p8KQhXk",
     "flags": [
       {
@@ -597,12 +613,7 @@
       },
       {
         "name": "json",
-        "usage": "print what was removed as JSON (needs --yes)"
-      },
-      {
-        "name": "yes",
-        "short": "y",
-        "usage": "remove without asking"
+        "usage": "print where the key is, and the commands, as JSON"
       }
     ]
   },
@@ -896,19 +907,6 @@
     ]
   },
   {
-    "path": "kiyesi run",
-    "use": "kiyesi run --name <job> -- <command> [flags]",
-    "short": "Run a timed job and record it, so a failed or missed run alerts you",
-    "long": "Runs the command exactly as it would run without Kiyesi: the same output\nand exit code. Each run's start, end, exit code and last lines of output are\nrecorded, and the agent sends them. Put it in front of the command in your\ncrontab or systemd timer; Kiyesi reads the schedule from there.",
-    "example": "  0 4 * * * /usr/local/bin/kiyesi run --name nightly-backup -- /opt/scripts/backup.sh",
-    "flags": [
-      {
-        "name": "name",
-        "usage": "the job's name, such as nightly-backup"
-      }
-    ]
-  },
-  {
     "path": "kiyesi scan",
     "use": "kiyesi scan [flags]",
     "short": "Scan this server and print the report. Nothing leaves the server",
@@ -1036,7 +1034,7 @@
     "path": "kiyesi sourcemaps upload",
     "use": "kiyesi sourcemaps upload <build folder> [flags]",
     "short": "Upload every .map file in a build folder, for one version",
-    "long": "Run it in your build step, after building, with the same version as the\nsnippet's data-version. In CI, set KIYESI_DEPLOY_TOKEN. Add --delete to remove\nthe maps from the folder afterwards, so they are not published with the site.",
+    "long": "Run it in your build step, after building, with the same version as the\nsnippet's data-version. In CI, set KIYESI_DEPLOY_TOKEN. The maps stay in the\nfolder: Kiyesi never deletes a file. Add --delete to print the command that\nremoves the uploaded ones, so they are not published with the site.",
     "example": "  kiyesi sourcemaps upload --version 2.14.0 ./dist\n  KIYESI_DEPLOY_TOKEN=kdp_... kiyesi sourcemaps upload --frontend storefront-web --version $GIT_SHA --delete ./dist",
     "flags": [
       {
@@ -1046,7 +1044,7 @@
       },
       {
         "name": "delete",
-        "usage": "delete each map from the folder once uploaded, so it is not published"
+        "usage": "print the command that removes the uploaded maps from the folder"
       },
       {
         "name": "frontend",
@@ -1247,7 +1245,7 @@
     "path": "kiyesi uninstall",
     "use": "kiyesi uninstall [flags]",
     "short": "Remove the agent and its files from this server",
-    "long": "Stops and removes the kiyesi service, the server token and settings in\n/etc/kiyesi, the results waiting in /var/lib/kiyesi, and the kiyesi program.\nWhat the server already sent stays in the dashboard: there, disconnect the\nserver to keep it until it expires, or delete it to erase it.\n\nChanges made by kiyesi fix stay on the server, but their undo records go\nwith /var/lib/kiyesi, so kiyesi can no longer put them back. To put one back\nfirst: sudo kiyesi fix undo",
+    "long": "Stops and removes the kiyesi service, the server token and settings in\n/etc/kiyesi, the results waiting in /var/lib/kiyesi, and the kiyesi program.\nWhat the server already sent stays in the dashboard: there, disconnect the\nserver to keep it until it expires, or delete it to erase it.\n\nChanges kiyesi fix made before 0.40.0 stay on the server, but their undo\nrecords go with /var/lib/kiyesi, so kiyesi can no longer put them back. To\nput one back first: sudo kiyesi fix undo",
     "example": "  sudo kiyesi uninstall",
     "flags": [
       {

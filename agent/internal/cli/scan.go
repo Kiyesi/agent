@@ -114,24 +114,11 @@ func scanWithEnv(ctx context.Context, configPath string, reuseSlowFor time.Durat
 	env = checks.NewEnv(sys, cfg)
 	env.ReuseSlowFor = reuseSlowFor
 	r = scan.Run(ctx, env, checks.Default(), pack)
-	if !fixWorksHere(cfg, sys.OS.ID) {
-		// kiyesi fix would refuse here, so no report offers it.
-		for i := range r.Checks {
-			for j := range r.Checks[i].Findings {
-				r.Checks[i].Findings[j].AutoFix = ""
-			}
-		}
-	}
-	if by == render.ByScan && root && os.Getenv("SUDO_USER") == "" {
-		// A person signed in as root, not through sudo: kiyesi fix always
-		// leaves root login to them then, so this scan does not offer it.
-		// The agent's own scans keep it, for the dashboard.
-		for i := range r.Checks {
-			for j := range r.Checks[i].Findings {
-				if r.Checks[i].Findings[j].AutoFix == "ssh-root" {
-					r.Checks[i].Findings[j].AutoFix = ""
-				}
-			}
+	// Kiyesi only suggests: no report offers kiyesi fix, only the commands a
+	// person reviews and runs.
+	for i := range r.Checks {
+		for j := range r.Checks[i].Findings {
+			r.Checks[i].Findings[j].AutoFix = ""
 		}
 	}
 	path, saveErr := report.Save(dir, sys.Now(), render.File(r, by))

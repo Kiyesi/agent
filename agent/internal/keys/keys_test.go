@@ -2,7 +2,6 @@ package keys
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -113,86 +112,5 @@ func TestPlanFindsEveryFile(t *testing.T) {
 	plan := Plan(fsys, edFP)
 	if len(plan) != 2 || plan[0].Account.Name != "root" || plan[1].Path != "/home/ada/.ssh/authorized_keys2" || plan[1].Lines[0] != `from="1.2.3.4" `+ed {
 		t.Fatalf("plan = %+v", plan)
-	}
-}
-
-func TestEditRemovesOnlyThoseLines(t *testing.T) {
-	data := []byte("# keys\nssh-ed25519 AAAA a\nssh-rsa BBBB b\r\nssh-ed25519 AAAA a\n")
-	got := string(Edit(data, []string{"ssh-ed25519 AAAA a", "ssh-rsa BBBB b"}, nil))
-	if got != "# keys\n" {
-		t.Fatalf("got %q", got)
-	}
-	got = string(Edit([]byte("# keys\n"), nil, []string{"ssh-rsa BBBB b", "ssh-rsa BBBB b"}))
-	if got != "# keys\nssh-rsa BBBB b\n" {
-		t.Fatalf("adding back: %q", got)
-	}
-	if got := string(Edit([]byte("x\n"), nil, []string{"x"})); got != "x\n" {
-		t.Fatalf("a line already there is not added twice: %q", got)
-	}
-}
-
-func TestEditOwnChangesOnlyAPlainFileItOwns(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("runs as an ordinary account")
-	}
-	dir := filepath.Join(t.TempDir(), ".ssh")
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	p := filepath.Join(dir, "authorized_keys")
-	if err := os.WriteFile(p, []byte("ssh-ed25519 AAAA a\nssh-rsa BBBB b\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := EditOwn(p, []string{"ssh-rsa BBBB b"}, nil); err != nil {
-		t.Fatal(err)
-	}
-	if data, _ := os.ReadFile(p); string(data) != "ssh-ed25519 AAAA a\n" {
-		t.Fatalf("file = %q", data)
-	}
-	if info, _ := os.Stat(p); info.Mode().Perm() != 0o600 {
-		t.Errorf("mode = %v, want 0600 kept", info.Mode().Perm())
-	}
-
-	// A link is left alone, and its target is untouched.
-	target := filepath.Join(t.TempDir(), "elsewhere")
-	if err := os.WriteFile(target, []byte("ssh-rsa BBBB b\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_ = os.Remove(p)
-	if err := os.Symlink(target, p); err != nil {
-		t.Fatal(err)
-	}
-	if err := EditOwn(p, []string{"ssh-rsa BBBB b"}, nil); err == nil || !strings.Contains(err.Error(), "link") {
-		t.Fatalf("err = %v, want a link refused", err)
-	}
-	if data, _ := os.ReadFile(target); string(data) != "ssh-rsa BBBB b\n" {
-		t.Fatal("the link's target changed")
-	}
-
-	// A folder others can write to is refused.
-	_ = os.Remove(p)
-	if err := os.WriteFile(p, []byte("x\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(dir, 0o777); err != nil {
-		t.Fatal(err)
-	}
-	if err := EditOwn(p, []string{"x"}, nil); err == nil || !strings.Contains(err.Error(), "others can write") {
-		t.Fatalf("err = %v", err)
-	}
-	_ = os.Chmod(dir, 0o700)
-
-	// Only authorized_keys files.
-	if err := EditOwn(filepath.Join(dir, "config"), nil, []string{"x"}); err == nil {
-		t.Fatal("a file other than authorized_keys was changed")
-	}
-}
-
-func TestEditOwnFromRefusesRoot(t *testing.T) {
-	if os.Geteuid() != 0 {
-		t.Skip("needs root to show it refuses root")
-	}
-	if err := EditOwnFrom(strings.NewReader(`{}`)); err == nil {
-		t.Fatal("ran as root")
 	}
 }

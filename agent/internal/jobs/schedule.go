@@ -13,7 +13,7 @@ import (
 )
 
 // Schedule is when a job is expected to run, as found in a crontab or a
-// systemd timer that calls kiyesi run.
+// systemd timer that calls kiyesi job done.
 type Schedule struct {
 	Name     string `json:"name"`
 	Source   string `json:"source"` // "cron" or "systemd"
@@ -21,8 +21,8 @@ type Schedule struct {
 	NextAt   string `json:"next_at,omitempty"`
 }
 
-// The name kiyesi run is given in a command line.
-var runName = regexp.MustCompile(`kiyesi\s+run\s+(?:.*?\s)?--name(?:=|\s+)["']?([A-Za-z0-9][A-Za-z0-9._-]{0,79})`)
+// The name kiyesi job done is given in a command line.
+var runName = regexp.MustCompile(`kiyesi\s+job\s+done\s+(?:.*?\s)?--name(?:=|\s+)["']?([A-Za-z0-9][A-Za-z0-9._-]{0,79})`)
 
 // Cron is a parsed five-field schedule.
 type Cron struct {
@@ -151,7 +151,7 @@ func (c Cron) Next(t time.Time) time.Time {
 	return time.Time{}
 }
 
-// FromCrontab finds the jobs a crontab runs with kiyesi run. withUser says
+// FromCrontab finds the jobs in a crontab that call kiyesi job done. withUser says
 // whether lines carry a user field, as /etc/crontab and /etc/cron.d do.
 func FromCrontab(text string, withUser bool, now time.Time) []Schedule {
 	var out []Schedule
@@ -191,7 +191,7 @@ type Runner interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
 }
 
-// Find looks for jobs run with kiyesi run in the crontabs and in the
+// Find looks for jobs that call kiyesi job done in the crontabs and in the
 // systemd services started by a timer, and works out when each runs next.
 func Find(ctx context.Context, fsys fs.FS, run Runner, now time.Time) []Schedule {
 	var out []Schedule
@@ -221,8 +221,8 @@ func Find(ctx context.Context, fsys fs.FS, run Runner, now time.Time) []Schedule
 			}
 		}
 	}
-	// systemd: a service in /etc/systemd/system whose ExecStart uses kiyesi
-	// run, started by the timer of the same name.
+	// systemd: a service in /etc/systemd/system that calls kiyesi job done,
+	// started by the timer of the same name.
 	if entries, err := fs.ReadDir(fsys, "etc/systemd/system"); err == nil && run != nil && run.Has("systemctl") {
 		for _, e := range entries {
 			if !strings.HasSuffix(e.Name(), ".service") {
@@ -231,7 +231,8 @@ func Find(ctx context.Context, fsys fs.FS, run Runner, now time.Time) []Schedule
 			unit := read(path.Join("etc/systemd/system", e.Name()))
 			var name string
 			for _, l := range strings.Split(unit, "\n") {
-				if strings.HasPrefix(strings.TrimSpace(l), "ExecStart=") {
+				// The job's own ExecStart= runs it; ExecStopPost= tells Kiyesi.
+				if t := strings.TrimSpace(l); strings.HasPrefix(t, "ExecStopPost=") || strings.HasPrefix(t, "ExecStart=") {
 					if m := runName.FindStringSubmatch(l); m != nil {
 						name = m[1]
 					}

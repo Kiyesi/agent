@@ -40,7 +40,7 @@ func newJobs(io IO) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "jobs [name]",
 		Short: "Scheduled jobs with their last run and status",
-		Long: "Lists the timed jobs wrapped with kiyesi run: when each runs, its last run,\n" +
+		Long: "Lists the timed jobs that call kiyesi job done: when each runs, its last run,\n" +
 			"how long it took, when it is next expected, and whether it failed, ran long or\n" +
 			"did not run. Give a job's name to see its recent runs.",
 		Example: "  kiyesi jobs\n  kiyesi jobs nightly-backup",
@@ -101,7 +101,7 @@ func newJobs(io IO) *cobra.Command {
 				return render.JSON(io.Out, list)
 			}
 			if len(list) == 0 {
-				fmt.Fprintln(io.Out, "No jobs watched yet. Put kiyesi run in front of a job's command:\n\n  0 4 * * * /usr/local/bin/kiyesi run --name nightly-backup -- /opt/scripts/backup.sh")
+				fmt.Fprintf(io.Out, "%s\n", "No jobs watched yet. Put kiyesi job done after a job's command:\n\n  0 4 * * * S=$(date +%s); /opt/scripts/backup.sh; /usr/local/bin/kiyesi job done --name nightly-backup --exit $? --started $S")
 				return nil
 			}
 			tw := tabwriter.NewWriter(io.Out, 0, 0, 3, ' ', 0)

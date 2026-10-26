@@ -22,16 +22,14 @@ CRITICAL
 WARNING
  WARN  SSL certificate for api.example.com expires in 9 days
        Why: When it expires, browsers and apps will refuse to connect.
-       Fix: sudo kiyesi fix certificates
-       By hand: sudo certbot renew
+       Fix: sudo certbot renew
 
  WARN  SSH allows password login
        Why: Passwords can be guessed by automated attacks. Keys cannot. Check
             that your key works before you turn passwords off.
-       Fix: sudo kiyesi fix ssh-password
-       By hand: echo "PasswordAuthentication no" |
-                sudo tee /etc/ssh/sshd_config.d/00-kiyesi-no-password.conf &&
-                sudo systemctl reload ssh
+       Fix: echo "PasswordAuthentication no" |
+            sudo tee /etc/ssh/sshd_config.d/00-kiyesi-no-password.conf &&
+            sudo systemctl reload ssh
 
  WARN  Newest backup is 31 hours old
        Why: Backups are expected every 24 hours. The last one was written on

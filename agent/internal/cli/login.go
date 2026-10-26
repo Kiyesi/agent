@@ -16,12 +16,17 @@ import (
 
 // openBrowser opens the approval page. Tests replace it.
 var openBrowser = func(url string) {
-	name := "xdg-open"
-	if runtime.GOOS == "darwin" {
+	name, args := "xdg-open", []string{url}
+	switch runtime.GOOS {
+	case "darwin":
 		name = "open"
+	case "windows":
+		// Windows' own handler for a web address; no shell, so & in the
+		// address is not read as a command.
+		name, args = "rundll32", []string{"url.dll,FileProtocolHandler", url}
 	}
 	if path, err := exec.LookPath(name); err == nil {
-		_ = exec.Command(path, url).Start() // #nosec G204 -- the system's own opener; url is one argument, no shell
+		_ = exec.Command(path, args...).Start() // #nosec G204 -- the system's own opener; url is one argument, no shell
 	}
 }
 

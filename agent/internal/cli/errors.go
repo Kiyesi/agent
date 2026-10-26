@@ -206,8 +206,9 @@ func newSourcemaps(io IO) *cobra.Command {
 		Use:   "upload <build folder>",
 		Short: "Upload every .map file in a build folder, for one version",
 		Long: "Run it in your build step, after building, with the same version as the\n" +
-			"snippet's data-version. In CI, set KIYESI_DEPLOY_TOKEN. Add --delete to remove\n" +
-			"the maps from the folder afterwards, so they are not published with the site.",
+			"snippet's data-version. In CI, set KIYESI_DEPLOY_TOKEN. The maps stay in the\n" +
+			"folder: Kiyesi never deletes a file. Add --delete to print the command that\n" +
+			"removes the uploaded ones, so they are not published with the site.",
 		Example: "  kiyesi sourcemaps upload --version 2.14.0 ./dist\n" +
 			"  KIYESI_DEPLOY_TOKEN=kdp_... kiyesi sourcemaps upload --frontend storefront-web --version $GIT_SHA --delete ./dist",
 		Args: cobra.ExactArgs(1),
@@ -257,34 +258,29 @@ func newSourcemaps(io IO) *cobra.Command {
 				bytesSent += int64(gz.Len())
 			}
 			if len(sent) == 0 {
-				return usageErr("No source maps were uploaded: every map in %s is larger than 20 MB. None were removed.", root)
-			}
-			// Only the maps the service has: a skipped one stays, so it is not lost.
-			if remove {
-				for _, f := range sent {
-					if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
-						return err
-					}
-				}
+				return usageErr("No source maps were uploaded: every map in %s is larger than 20 MB.", root)
 			}
 			fmt.Fprintf(io.Out, "Uploaded %s for version %s (%s) in %s.", plural(len(sent), "source map", "source maps"), ver, byteSize(bytesSent), time.Since(start).Round(time.Second))
-			if remove {
-				fmt.Fprint(io.Out, " Removed them from the folder.")
-			}
 			if skipped > 0 {
-				fmt.Fprintf(io.Out, " Skipped %d larger than 20 MB", skipped)
-				if remove {
-					fmt.Fprint(io.Out, ", still in the folder: delete them before you publish")
-				}
-				fmt.Fprint(io.Out, ".")
+				fmt.Fprintf(io.Out, " Skipped %d larger than 20 MB, still in the folder: delete them before you publish.", skipped)
 			}
 			fmt.Fprintln(io.Out)
+			// Kiyesi never deletes a file: only the maps the service has, as
+			// one command to run, so a skipped one is never lost.
+			if remove {
+				var words []string
+				for _, f := range sent {
+					words = append(words, shellWord(f))
+				}
+				fmt.Fprintln(io.Out, "To remove the uploaded maps from the folder, run:")
+				fmt.Fprintln(io.Out, "  rm "+strings.Join(words, " "))
+			}
 			return nil
 		},
 	}
 	upload.Flags().StringVar(&frontend, "frontend", "", "the frontend, as named in Settings (not needed when the team has only one)")
 	upload.Flags().StringVar(&ver, "version", "", "the version the snippet reports, as in data-version")
-	upload.Flags().BoolVar(&remove, "delete", false, "delete each map from the folder once uploaded, so it is not published")
+	upload.Flags().BoolVar(&remove, "delete", false, "print the command that removes the uploaded maps from the folder")
 	upload.Flags().StringVar(&apiURL, "api", envOr("KIYESI_API", DefaultAPI), "the service address, with a deploy token")
 	upload.SetContext(context.Background())
 	cmd.AddCommand(upload)

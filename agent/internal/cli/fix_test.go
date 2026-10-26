@@ -2,12 +2,9 @@ package cli
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
-	"errors"
 	"hash/fnv"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -19,8 +16,6 @@ import (
 
 	"github.com/kiyesi/kiyesi/agent/internal/fix"
 	"github.com/kiyesi/kiyesi/agent/internal/render"
-	"github.com/kiyesi/kiyesi/agent/internal/scan"
-	"github.com/kiyesi/kiyesi/agent/internal/send"
 	"github.com/kiyesi/kiyesi/agent/internal/system"
 )
 
@@ -127,9 +122,9 @@ func fixServer(t *testing.T) *cliHost {
 		s.OS.ID = "ubuntu"
 		return s
 	}
-	oldHost, oldDir, oldRoot, oldTerm := fixHost, fixStoreDir, fixAsRoot, fixTerminal
-	t.Cleanup(func() { fixHost, fixStoreDir, fixAsRoot, fixTerminal = oldHost, oldDir, oldRoot, oldTerm })
-	fixHost, fixStoreDir = h, t.TempDir()
+	oldDir, oldRoot, oldTerm := fixStoreDir, fixAsRoot, fixTerminal
+	t.Cleanup(func() { fixStoreDir, fixAsRoot, fixTerminal = oldDir, oldRoot, oldTerm })
+	fixStoreDir = t.TempDir()
 	fixAsRoot = func() bool { return true }
 	fixTerminal = func(IO) bool { return true }
 	t.Setenv("KIYESI_ETC", t.TempDir())
@@ -145,218 +140,57 @@ func runFixCLI(t *testing.T, input string, args ...string) (int, string, string)
 	return code, out.String(), errOut.String()
 }
 
-func TestFixListsAsksFixesAndShowsTheGradeMove(t *testing.T) {
+// kiyesi fix undo lists the changes kiyesi fix made before 0.40.0 and, for
+// one, prints the commands that put it back, for a person to review and
+// run: it changes nothing, with --yes too.
+func TestFixUndoPrintsTheCommandsAndChangesNothing(t *testing.T) {
 	h := fixServer(t)
-	code, out, errOut := runFixCLI(t, "y\n", "fix")
+	if code, out, _ := runFixCLI(t, "", "fix", "undo"); code != ExitOK || !strings.Contains(out, "kiyesi fix has not changed anything on this server.") {
+		t.Fatalf("%d %s", code, out)
+	}
+	// A record as kiyesi fix kept it before 0.40.0: a file it added, a file
+	// it rewrote, a mode it changed, a key it took out, and SSH reloaded.
+	rec := fix.Record{ID: "7f3a", Fix: "ssh-password", Done: "SSH password login off", User: "ada", At: time.Now(), CanUndo: true,
+		Files: []fix.Saved{
+			{Path: "/etc/ssh/sshd_config.d/00-kiyesi-no-password.conf"},
+			{Path: "/etc/fail2ban/jail.d/kiyesi.conf", Existed: true, Mode: 0o644, Content: []byte("[sshd]\nenabled = false\n")},
+			{Path: "/srv/app/.env", Existed: true, Mode: 0o644, ModeOnly: true},
+		},
+		Keys: []fix.KeyLines{{User: "ada", Path: "/home/ada/.ssh/authorized_keys", Lines: []string{"ssh-ed25519 AAAAC3Nza old@laptop"}}},
+		Then: [][]string{{"systemctl", "reload", "ssh"}},
+	}
+	data, _ := json.Marshal(rec)
+	if err := os.MkdirAll(filepath.Join(fixStoreDir, rec.ID), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fixStoreDir, rec.ID, "record.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, out, _ := runFixCLI(t, "", "fix", "undo")
+	if !strings.Contains(out, "SSH password login off") || !strings.Contains(out, "how to put it back: sudo kiyesi fix undo 7f3a") {
+		t.Fatalf("list:\n%s", out)
+	}
+	files := len(h.files)
+	code, out, errOut := runFixCLI(t, "", "fix", "undo", "7f3a", "--yes")
 	if code != ExitOK {
-		t.Fatalf("exit %d\n%s\n%s", code, out, errOut)
+		t.Fatalf("%d\n%s\n%s", code, out, errOut)
 	}
 	for _, want := range []string{
-		"Kiyesi can fix 3 things for you:",
-		"1. SSH allows password login (ssh-password)",
-		"Turns SSH password login off. ada has an SSH key here, so you stay in.",
-		"Skipped if ssh-password turns password login off first.",
-		// Not needed once passwords are off.
-		"– login-protection: Not needed: with SSH password login off, there is no password to guess.",
-		"/srv/app/.env holds secrets and every user on this server can read it (secret-files)",
-		"✓ SSH password login off  (undo: sudo kiyesi fix undo ",
-		"✓ Secret files closed to other users  (undo: sudo kiyesi fix undo ",
-		"Checking again…",
+		"Kiyesi changes nothing on this server. It only suggests: you review each command and run it yourself.",
+		`To put back "SSH password login off", made by ada`,
+		"First: Check /srv/app/.env is still the file you expect",
+		"sudo chmod 0644 /srv/app/.env",
+		"sudo tee /etc/fail2ban/jail.d/kiyesi.conf >/dev/null <<'KIYESI_EOF'\n    [sshd]\n    enabled = false\n    KIYESI_EOF",
+		"sudo rm -f /etc/ssh/sshd_config.d/00-kiyesi-no-password.conf",
+		"echo 'ssh-ed25519 AAAAC3Nza old@laptop' | sudo tee -a /home/ada/.ssh/authorized_keys >/dev/null",
+		"sudo systemctl reload ssh",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(errOut, "Fix all 3? [y/N/choose]") {
-		t.Errorf("not asked: %q", errOut)
-	}
-	// The grade moved up, seen by the scan after the fix.
-	var before, after int
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "→") {
-			f := strings.Fields(line)
-			// GRADE  X  NN  →  Y  NN/100
-			_ = json.Unmarshal([]byte(f[2]), &before)
-			_ = json.Unmarshal([]byte(strings.TrimSuffix(f[5], "/100")), &after)
-		}
-	}
-	if before == 0 || after <= before {
-		t.Errorf("grade did not go up (%d → %d):\n%s", before, after, out)
-	}
-	if h.modes["/srv/app/.env"] != 0o640 {
-		t.Errorf(".env mode = %o", h.modes["/srv/app/.env"])
-	}
-	// Not connected: nothing waits to be sent.
-	if entries, _ := os.ReadDir(outboxDir()); len(entries) != 0 {
-		t.Errorf("an unconnected server queued %d batches", len(entries))
-	}
-}
-
-func TestFixNoMeansNothingChanges(t *testing.T) {
-	h := fixServer(t)
-	code, out, _ := runFixCLI(t, "\n", "fix")
-	if code != ExitOK || !strings.Contains(out, "Nothing was changed.") {
-		t.Fatalf("%d %s", code, out)
-	}
-	if len(h.ran) > 2 || h.modes["/srv/app/.env"] != 0o644 {
-		t.Errorf("changed something: %v %o", h.ran, h.modes["/srv/app/.env"])
-	}
-	for _, c := range h.ran {
-		if !strings.HasPrefix(c, "sshd -T") && !strings.HasPrefix(c, "systemctl is-active") {
-			t.Errorf("ran %q before anyone said yes", c)
-		}
-	}
-}
-
-func TestFixChooseOneByOne(t *testing.T) {
-	h := fixServer(t)
-	code, out, _ := runFixCLI(t, "choose\nn\nn\ny\n", "fix")
-	if code != ExitOK || strings.Contains(out, "✓ SSH password login off") || strings.Contains(out, "fail2ban on") || !strings.Contains(out, "✓ Secret files closed") {
-		t.Fatalf("%d\n%s", code, out)
-	}
-	if _, ok := h.files["/etc/ssh/sshd_config.d/00-kiyesi-no-password.conf"]; ok {
-		t.Error("SSH was changed after a no")
-	}
-}
-
-func TestFixDryRunAndJSONChangeNothing(t *testing.T) {
-	h := fixServer(t)
-	code, out, _ := runFixCLI(t, "", "fix", "--dry-run")
-	if code != ExitOK || !strings.Contains(out, "Nothing was changed. To make these changes: sudo kiyesi fix") {
-		t.Fatalf("%d\n%s", code, out)
-	}
-	code, out, _ = runFixCLI(t, "", "fix", "--dry-run", "--json")
-	var plan []fixJSON
-	if code != ExitOK || json.Unmarshal([]byte(out), &plan) != nil || len(plan) != 3 || plan[0].Name != "ssh-password" || !plan[0].Undoable {
-		t.Fatalf("%d %s", code, out)
-	}
-	if h.modes["/srv/app/.env"] != 0o644 || len(h.files) != 4 {
-		t.Error("a dry run changed something")
-	}
-	if code, _, errOut := runFixCLI(t, "", "fix", "--json"); code != ExitUsage || !strings.Contains(errOut, "add --dry-run") {
-		t.Errorf("--json alone: %d %q", code, errOut)
-	}
-}
-
-func TestFixOneByName(t *testing.T) {
-	h := fixServer(t)
-	code, out, errOut := runFixCLI(t, "y\n", "fix", "secret-files")
-	if code != ExitOK || strings.Contains(out, "ssh-password") || h.modes["/srv/app/.env"] != 0o640 {
-		t.Fatalf("%d\n%s\n%s", code, out, errOut)
-	}
-	if !strings.Contains(errOut, "Make this change? [y/N]") {
-		t.Errorf("asked %q", errOut)
-	}
-	code, out, _ = runFixCLI(t, "", "fix", "certificates")
-	if code != ExitOK || !strings.Contains(out, "Nothing to fix for certificates: it passed, or does not apply here.") {
-		t.Errorf("%d %s", code, out)
-	}
-	if code, _, errOut := runFixCLI(t, "", "fix", "everything"); code != ExitUsage || !strings.Contains(errOut, `There is no fix called "everything". The fixes are: certificates, docker-cleanup, firewall,`) {
-		t.Errorf("%d %q", code, errOut)
-	}
-}
-
-func TestFixRefusals(t *testing.T) {
-	fixServer(t)
-	fixAsRoot = func() bool { return false }
-	if code, _, errOut := runFixCLI(t, "", "fix"); code != ExitNoAccess || !strings.Contains(errOut, "Run it with sudo: sudo kiyesi fix") {
-		t.Errorf("without root: %d %q", code, errOut)
-	}
-	fixAsRoot = func() bool { return true }
-	fixTerminal = func(IO) bool { return false }
-	if code, _, errOut := runFixCLI(t, "", "fix"); code != ExitUsage || !strings.Contains(errOut, "Run it in a terminal, or add --yes") {
-		t.Errorf("no terminal: %d %q", code, errOut)
-	}
-	// A team whose rules allow no tool to change a server.
-	if err := os.WriteFile(configFlag, []byte("fix: off\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if code, _, errOut := runFixCLI(t, "", "fix", "--yes"); code != ExitNoAccess || !strings.Contains(errOut, "kiyesi fix is turned off on this server (fix: off in") {
-		t.Errorf("fix off: %d %q", code, errOut)
-	}
-	if err := os.WriteFile(configFlag, []byte("fix: on\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	base := newSystem
-	newSystem = func(root bool, dir string) *system.System {
-		s := base(root, dir)
-		s.OS = system.OSInfo{ID: "rocky", Name: "Rocky Linux 9"}
-		return s
-	}
-	if code, _, errOut := runFixCLI(t, "", "fix", "--yes"); code != ExitUsage || !strings.Contains(errOut, "works on Debian and Ubuntu for now, and this is Rocky Linux 9") {
-		t.Errorf("other system: %d %q", code, errOut)
-	}
-}
-
-// On a connected server the new scan and what changed wait in the outbox,
-// for the agent's service to send within a minute.
-func TestFixLeavesTheScanAndTheChangesForTheService(t *testing.T) {
-	fixServer(t)
-	if err := os.WriteFile(agentConfPath(), []byte("api: https://api.kiyesi.dev\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(tokenPath(), []byte("ksv_test\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	code, out, _ := runFixCLI(t, "", "fix", "ssh-password", "--yes")
-	if code != ExitOK || !strings.Contains(out, "The dashboard shows the new grade within a minute.") {
-		t.Fatalf("%d\n%s", code, out)
-	}
-	entries, _ := os.ReadDir(outboxDir())
-	if len(entries) != 1 {
-		t.Fatalf("outbox has %d batches", len(entries))
-	}
-	f, _ := os.Open(filepath.Join(outboxDir(), entries[0].Name()))
-	defer func() { _ = f.Close() }()
-	zr, err := gzip.NewReader(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := io.ReadAll(zr)
-	var b send.Batch
-	if err := json.Unmarshal(raw, &b); err != nil {
-		t.Fatal(err)
-	}
-	if len(b.Items) != 2 || b.Items[0].Kind != "scan" || b.Items[1].Kind != "fixed" {
-		t.Fatalf("items = %+v", b.Items)
-	}
-	if fx := b.Items[1].Fixed; fx.Fix != "ssh-password" || fx.User != "ada" || fx.Done != "SSH password login off" || fx.Undo {
-		t.Errorf("fixed = %+v", fx)
-	}
-	for _, c := range b.Items[0].Report.Checks {
-		if c.ID == "ssh" && c.Status != "pass" {
-			t.Errorf("the scan sent is from before the fix: %+v", c)
-		}
-	}
-}
-
-func TestFixUndoListsAndPutsBack(t *testing.T) {
-	h := fixServer(t)
-	if code, out, _ := runFixCLI(t, "", "fix", "undo"); code != ExitOK || !strings.Contains(out, "kiyesi fix has not changed anything on this server.") {
-		t.Fatalf("%d %s", code, out)
-	}
-	if code, _, _ := runFixCLI(t, "", "fix", "--yes"); code != ExitOK {
-		t.Fatal("fix failed")
-	}
-	_, out, _ := runFixCLI(t, "", "fix", "undo")
-	if !strings.Contains(out, "SSH password login off") || !strings.Contains(out, "(ada · undo: sudo kiyesi fix undo ") {
-		t.Fatalf("list:\n%s", out)
-	}
-	var id string
-	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "SSH password login off") {
-			id = strings.Fields(line)[0]
-		}
-	}
-	code, out, errOut := runFixCLI(t, "y\n", "fix", "undo", id)
-	if code != ExitOK || !strings.Contains(out, "✓ Undone: SSH password login off") || !strings.Contains(errOut, `Undo "SSH password login off", made by ada`) {
-		t.Fatalf("%d\n%s\n%s", code, out, errOut)
-	}
-	if _, ok := h.files["/etc/ssh/sshd_config.d/00-kiyesi-no-password.conf"]; ok {
-		t.Error("not put back")
-	}
-	if _, out, _ := runFixCLI(t, "", "fix", "undo"); !strings.Contains(out, "undone ") {
-		t.Errorf("not marked undone:\n%s", out)
+	if len(h.files) != files || len(h.ran) != 0 {
+		t.Errorf("something changed or ran: %v", h.ran)
 	}
 	if code, _, errOut := runFixCLI(t, "", "fix", "undo", "nope"); code != ExitUsage || !strings.Contains(errOut, "is not a fix id") {
 		t.Errorf("%d %q", code, errOut)
@@ -389,103 +223,57 @@ func TestScanUsesTheTeamsHomeCountry(t *testing.T) {
 	}
 }
 
-// After a failed fix the line says "Nothing was changed" only when that is
-// true: the fix was put back, or never started.
-func TestAFailedFixSaysWhatMayHaveChanged(t *testing.T) {
-	for _, c := range []struct {
-		name string
-		err  error
-		want string
-	}{
-		{"ssh-password", &fix.Failed{Err: errors.New("x")}, "Nothing was changed."},
-		{"updates", &fix.Failed{Err: errors.New("x")}, "Nothing was changed."},
-		{"updates", &fix.Failed{Err: errors.New("x"), Changed: true}, "Some updates may have installed before it stopped."},
-		{"certificates", &fix.Failed{Err: errors.New("x"), Changed: true}, "Some certificates may have been renewed before it stopped."},
-		{"docker-cleanup", &fix.Failed{Err: errors.New("x"), Changed: true}, "Some unused images or build cache may have been removed before it stopped."},
-		{"firewall", &fix.Failed{Err: errors.New("x; putting it back also failed"), Changed: true}, "Part of it may still be changed."},
-	} {
-		if got := afterFailure(c.name, c.err); got != c.want {
-			t.Errorf("%s %v: %q, want %q", c.name, c.err, got, c.want)
-		}
-	}
-}
-
-// A fix that fails is put back, and says so.
-func TestAFixPutBackSaysNothingChanged(t *testing.T) {
+// kiyesi fix changes nothing and runs nothing: it scans and lists each
+// finding with its commands, for the person to review and run, with --yes
+// and --dry-run too, and as JSON.
+func TestFixOnlySuggests(t *testing.T) {
 	h := fixServer(t)
-	h.chmodErr = errors.New("read-only file system")
-	code, out, _ := runFixCLI(t, "", "fix", "secret-files", "--yes")
-	if code != ExitFindings || !strings.Contains(out, "✗ secret-files: read-only file system. Nothing was changed.") {
-		t.Fatalf("%d\n%s", code, out)
-	}
-}
-
-// The scan offers kiyesi fix only where it would run: not with fix: off,
-// and not on a system it does not know. The saved report says the same.
-func TestScanOffersKiyesiFixOnlyWhereItRuns(t *testing.T) {
-	fixServer(t)
-	report := func(out string) string {
-		_, path, ok := strings.Cut(out, "Full report with every fix command: ")
-		if !ok {
-			t.Fatalf("no report path in:\n%s", out)
+	files := len(h.files)
+	for _, args := range [][]string{{"fix"}, {"fix", "--yes"}, {"fix", "--dry-run"}} {
+		code, out, errOut := runFixCLI(t, "", args...)
+		if code != ExitOK {
+			t.Fatalf("%v: %d %q %q", args, code, out, errOut)
 		}
-		data, err := os.ReadFile(strings.TrimSpace(strings.SplitN(path, "\n", 2)[0]))
-		if err != nil {
-			t.Fatal(err)
+		for _, want := range []string{
+			"Kiyesi changes nothing on this server. It only suggests: you review each command and run it yourself.",
+			"What to do, for you to review and run yourself:",
+			"SSH allows password login",
+			"Read each command before you run it. It changes your server, and you are the one who runs it.",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%v: missing %q in:\n%s", args, want, out)
+			}
 		}
-		return string(data)
+		if strings.Contains(out, "sudo kiyesi fix ") {
+			t.Errorf("%v offered kiyesi fix:\n%s", args, out)
+		}
 	}
-	_, out, _ := runCLI(t, "scan")
-	// ssh-password, login-protection and secret-files.
-	if !strings.Contains(out, "Kiyesi can fix 3 things for you: sudo kiyesi fix") || !strings.Contains(report(out), "Fix: sudo kiyesi fix secret-files") {
-		t.Fatalf("fix allowed, not offered:\n%s", out)
+	if len(h.files) != files || len(h.ran) != 0 {
+		t.Errorf("something changed or ran: files %d→%d, ran %v", files, len(h.files), h.ran)
 	}
-	if err := os.WriteFile(configFlag, []byte("fix: off\n"), 0o600); err != nil {
-		t.Fatal(err)
+	code, out, _ := runFixCLI(t, "", "fix", "--json")
+	var got struct {
+		Changed     bool `json:"changed"`
+		Suggestions []struct{ Check, Severity, Sentence, Commands string }
 	}
-	_, out, _ = runCLI(t, "scan")
-	if strings.Contains(out, "kiyesi fix") || strings.Contains(report(out), "kiyesi fix") {
-		t.Errorf("fix: off, still offered:\n%s\n%s", out, report(out))
-	}
-	if err := os.WriteFile(configFlag, []byte("fix: on\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	base := newSystem
-	newSystem = func(root bool, dir string) *system.System {
-		s := base(root, dir)
-		s.OS = system.OSInfo{ID: "rocky", Name: "Rocky Linux 9"}
-		return s
-	}
-	_, out, _ = runCLI(t, "scan")
-	if strings.Contains(out, "kiyesi fix") || strings.Contains(report(out), "kiyesi fix") {
-		t.Errorf("another system, still offered:\n%s\n%s", out, report(out))
+	if err := json.Unmarshal([]byte(out), &got); err != nil || code != ExitOK || got.Changed || len(got.Suggestions) == 0 {
+		t.Errorf("json: %d %v %+v\n%s", code, err, got, out)
 	}
 }
 
-// Saying no to ssh-password keeps the passwords, so login-protection, planned
-// as not needed, runs after all.
-func TestLoginProtectionRunsWhenPasswordsStayOn(t *testing.T) {
+// A fix's name narrows the list to the checks it covers; an unknown name,
+// or running it without sudo, says so.
+func TestFixNamesAndRefusals(t *testing.T) {
 	fixServer(t)
-	code, out, _ := runFixCLI(t, "choose\nn\ny\nn\n", "fix")
-	if code != ExitOK || strings.Contains(out, "✓ SSH password login off") || !strings.Contains(out, "✓ fail2ban on") || strings.Contains(out, "Not needed") {
-		t.Fatalf("%d\n%s", code, out)
+	code, out, _ := runFixCLI(t, "", "fix", "firewall")
+	if code != ExitOK || strings.Contains(out, "SSH allows password login") {
+		t.Errorf("firewall only: %d\n%s", code, out)
 	}
-}
-
-// A grade that does not move after a real fix is not called a clean-up:
-// the line names what is still there.
-func TestAGradeThatDidNotMoveSaysWhy(t *testing.T) {
-	ssh := &planned{findings: []scan.Finding{{Severity: "warning", Sentence: "SSH allows password login"}}}
-	clean := &planned{findings: []scan.Finding{{Severity: "info", Sentence: "Docker keeps 2 GB"}}}
-	before := scan.Report{Checks: []scan.CheckResult{{Findings: []scan.Finding{{Severity: "warning", Sentence: "SSH allows password login"}}}}}
-	after := scan.Report{Checks: []scan.CheckResult{{Findings: []scan.Finding{
-		{Severity: "warning", Sentence: "SSH allows password login"},
-		{Severity: "warning", Sentence: "Port 8080 is open on a public address"},
-	}}}}
-	if onlyCleanUps([]*planned{ssh, clean}) || !onlyCleanUps([]*planned{clean}) {
-		t.Error("onlyCleanUps")
+	if code, _, errOut := runFixCLI(t, "", "fix", "nope"); code != ExitUsage || !strings.Contains(errOut, `There is no fix called "nope"`) {
+		t.Errorf("unknown: %d %q", code, errOut)
 	}
-	if got := notBetter(before, after, []*planned{ssh}); got != "Still there: SSH allows password login. New: Port 8080 is open on a public address." {
-		t.Errorf("got %q", got)
+	fixAsRoot = func() bool { return false }
+	if code, _, errOut := runFixCLI(t, "", "fix"); code != ExitNoAccess || !strings.Contains(errOut, "Run it with sudo") {
+		t.Errorf("not root: %d %q", code, errOut)
 	}
 }

@@ -219,16 +219,19 @@ func TestEmptyFindingsSayWhy(t *testing.T) {
 	}
 }
 
-func TestFindingsOfferKiyesiFixAndHelpSaysItExists(t *testing.T) {
+// kiyesi findings gives only the commands a person reviews and runs, never
+// kiyesi fix, even when the service still has a finding an agent before
+// 0.40.0 named one for; the help says Kiyesi never changes a server.
+func TestFindingsNeverOfferKiyesiFix(t *testing.T) {
 	signInWith(t, map[string]func(http.ResponseWriter, *http.Request){
 		"/v1/findings": say(`{"findings":[{"server":{"id":"s1","name":"web"},"check":"ssh","checkName":"SSH settings","severity":"warning","sentence":"SSH allows password login","why":"w","fix":"edit sshd_config","autoFix":"ssh-password","scannedAt":"2026-10-20T10:00:00Z"}]}`),
 	})
 	code, out, _ := runCLI(t, "findings")
-	if code != ExitOK || !strings.Contains(out, "Fix:\n            sudo kiyesi fix ssh-password\n          By hand:") {
+	if code != ExitOK || !strings.Contains(out, "Fix:\n            edit sshd_config\n") || strings.Contains(out, "kiyesi fix") {
 		t.Errorf("%d %q", code, out)
 	}
 	_, help, _ := runCLI(t, "findings", "--help")
-	if strings.Contains(help, "Kiyesi never runs a fix") || !strings.Contains(help, "sudo kiyesi fix") {
+	if !strings.Contains(help, "Kiyesi never changes a server") || strings.Contains(help, "sudo kiyesi fix") {
 		t.Errorf("help: %s", help)
 	}
 }

@@ -72,7 +72,7 @@ func newAgent(io IO) *cobra.Command {
 			col := &collect.Collector{Sys: newSystem(os.Geteuid() == 0, stateDir())}
 			docker := col.Sys.Docker
 			applied := false
-			// The folder kiyesi run drops its records in. Only as root, as the service runs.
+			// The folder kiyesi job done drops its records in. Only as root, as the service runs.
 			spool := ""
 			if os.Geteuid() == 0 {
 				if s, err := jobs.PrepareSpool(stateDir()); err == nil {
@@ -90,7 +90,7 @@ func newAgent(io IO) *cobra.Command {
 					// logs section applies without a restart.
 					applyLogSettings(col, docker, configPath, &applied, io.Err)
 					m, ev := col.Collect(ctx)
-					// Timed jobs: the runs kiyesi run recorded, and every 15
+					// Timed jobs: the runs kiyesi job done recorded, and every 15
 					// minutes the schedules, from crontabs and systemd timers.
 					var schedules []jobs.Schedule
 					if now := time.Now(); now.Sub(lastJobScan) >= scanEvery {
@@ -157,7 +157,7 @@ func newAgent(io IO) *cobra.Command {
 	cmd.Flags().BoolVar(&noScan, "no-scan", false, "send figures and logs only, never a scan")
 	_ = cmd.Flags().MarkHidden("no-scan")
 	cmd.Flags().BoolVar(&container, "container", false,
-		"run beside a managed service (Render, Heroku, Fly.io, …): no scan and no host figures; the databases in the settings and the runs of kiyesi run. Reads KIYESI_API and KIYESI_TOKEN")
+		"run beside a managed service (Render, Heroku, Fly.io, …): no scan and no host figures; the databases in the settings and the runs kiyesi job done records. Reads KIYESI_API and KIYESI_TOKEN")
 	return cmd
 }
 
@@ -165,7 +165,7 @@ func newAgent(io IO) *cobra.Command {
 // runs the machine: there is nothing to scan and the machine's figures are
 // the platform's, not the app's. It sends a heartbeat each minute, the
 // databases in the settings every 5 minutes, and each run of a job wrapped
-// with kiyesi run. The address and token come from the environment.
+// with kiyesi job done. The address and token come from the environment.
 func runContainer(cmd *cobra.Command, io IO, configPath string, minute time.Duration) error {
 	api := strings.TrimSpace(os.Getenv("KIYESI_API"))
 	if api == "" {

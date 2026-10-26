@@ -134,7 +134,7 @@ func (s Source) Fetch(ctx context.Context) (Release, []byte, error) {
 	if err := Verify(s.Key, Namespace, sums, sig); err != nil {
 		return Release{}, nil, fmt.Errorf("%w. Nothing was changed. Tell security@kiyesi.dev", err)
 	}
-	file := fmt.Sprintf("kiyesi-%s-%s", s.OS, s.Arch)
+	file := AssetName(s.OS, s.Arch)
 	signed, want := ParseSums(sums, file)
 	if signed == "" {
 		return Release{}, nil, errors.New("the release does not name its version in its signed list. Nothing was changed. Tell security@kiyesi.dev")
@@ -216,13 +216,23 @@ func Replace(exe string, bin []byte) error {
 	if err := os.Chmod(tmp.Name(), 0o755); err != nil { // #nosec G302 -- a program everyone runs, as install.sh makes it
 		return err
 	}
-	if err := os.Rename(tmp.Name(), exe); err != nil {
+	if err := swap(tmp.Name(), exe); err != nil {
 		if errors.Is(err, os.ErrPermission) {
 			return ErrPermission
 		}
 		return err
 	}
 	return nil
+}
+
+// AssetName is a release's file for a system and processor, such as
+// kiyesi-linux-amd64, or kiyesi-windows-amd64.exe on Windows.
+func AssetName(goos, goarch string) string {
+	name := fmt.Sprintf("kiyesi-%s-%s", goos, goarch)
+	if goos == "windows" {
+		name += ".exe"
+	}
+	return name
 }
 
 // Newer says whether version a is newer than b (both like 0.22.0).

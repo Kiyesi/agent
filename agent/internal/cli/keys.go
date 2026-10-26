@@ -1,50 +1,37 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"io/fs"
 	"os"
 	"strings"
 	"text/tabwriter"
-	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/kiyesi/kiyesi/agent/internal/config"
-	"github.com/kiyesi/kiyesi/agent/internal/fix"
 	"github.com/kiyesi/kiyesi/agent/internal/keys"
 	"github.com/kiyesi/kiyesi/agent/internal/render"
-	"github.com/kiyesi/kiyesi/agent/internal/send"
 	"github.com/kiyesi/kiyesi/agent/internal/system"
 )
 
-// keysFS, keysWriter and keysAsRoot are the server as kiyesi keys sees it.
-// Tests replace them.
+// keysFS and keysAsRoot are the server as kiyesi keys sees it. Tests
+// replace them.
 var (
-	keysFS                 = func() system.RootFS { return system.NewRootFS("/") }
-	keysWriter keys.Writer = keys.RealWriter{}
-	keysAsRoot             = func() bool { return os.Geteuid() == 0 }
-	keysStore              = func() *fix.Store { return &fix.Store{Dir: fix.DefaultDir} }
+	keysFS     = func() system.RootFS { return system.NewRootFS("/") }
+	keysAsRoot = func() bool { return os.Geteuid() == 0 }
 )
-
-func init() {
-	// Undo of a key removal puts the lines back with the user's own rights.
-	fix.RestoreKeys = func(ctx context.Context, k fix.KeyLines) error {
-		return keysWriter.Edit(ctx, keys.Account{Name: k.User, UID: k.UID, GID: k.GID, Home: k.Home}, k.Path, nil, k.Lines)
-	}
-}
 
 func newKeys(io IO) *cobra.Command {
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "keys",
-		Short: "List who can sign in to this server with an SSH key, and remove a key",
+		Short: "List who can sign in to this server with an SSH key, and how to take one out",
 		Long: "Lists every SSH key that opens this server, by account: its fingerprint,\n" +
 			"type and comment, and when its file last changed. The keys themselves are never\n" +
 			"shown or sent. On a connected server the same list feeds the dashboard's\n" +
 			"Access map, which shows each key across all your servers.",
-		Example: "  sudo kiyesi keys\n  sudo kiyesi keys remove SHA256:JQ6b…   # from every account on this server, after a yes",
+		Example: "  sudo kiyesi keys\n  sudo kiyesi keys remove SHA256:JQ6b…   # where it is, and the commands to take it out",
 		Args:    cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if !keysAsRoot() {
@@ -72,12 +59,12 @@ func newKeys(io IO) *cobra.Command {
 			}
 			out := render.NewWriter(io.Out, io.Environ)
 			fmt.Fprintln(out)
-			fmt.Fprintln(out, render.Grey("Remove one everywhere on this server: sudo kiyesi keys remove <KEY>"))
+			fmt.Fprintln(out, render.Grey("How to take one out, everywhere on this server: sudo kiyesi keys remove <KEY>"))
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the keys as JSON")
-	cmd.AddCommand(newKeysRemove(io), newKeysEditOwn(io))
+	cmd.AddCommand(newKeysRemove(io))
 	return cmd
 }
 
@@ -86,11 +73,11 @@ func newKeysRemove(io IO) *cobra.Command {
 	var configPath string
 	cmd := &cobra.Command{
 		Use:   "remove <fingerprint>",
-		Short: "Take one SSH key out of every account on this server, after a yes",
-		Long: "Takes the key with this fingerprint out of every authorized_keys file on this\n" +
-			"server, after saying where it is and asking. Each file is changed with its own\n" +
-			"account's rights, and the lines are kept, so sudo kiyesi fix undo <id> puts\n" +
-			"them back. The key you are signed in with is never the last one taken away.",
+		Short: "Show where one SSH key is on this server, and the commands to take it out",
+		Long: "Finds the key with this fingerprint in every authorized_keys file on this\n" +
+			"server and prints, for each file, the command that takes its line out, for\n" +
+			"you to review and run. Kiyesi changes nothing. It warns when the key is the\n" +
+			"last one you sign in with.",
 		Example: "  sudo kiyesi keys remove SHA256:JQ6bTs0Wp5uD9IhzbSPDx3VfmHmzSj0Ep0e2p8KQhXk",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -99,119 +86,75 @@ func newKeysRemove(io IO) *cobra.Command {
 				return usageErr("%q is not a key's fingerprint. They look like SHA256:JQ6bTs0Wp5uD9IhzbSPDx3VfmHmzSj0Ep0e2p8KQhXk; see them with sudo kiyesi keys", fp)
 			}
 			if !keysAsRoot() {
-				return &exitError{code: ExitNoAccess, msg: "Run it with sudo: sudo kiyesi keys remove " + fp}
+				return &exitError{code: ExitNoAccess, msg: "Run it with sudo, so every account's keys can be read: sudo kiyesi keys remove " + fp}
 			}
-			if asJSON && !yes {
-				return usageErr("--json needs --yes, as nobody is there to answer")
-			}
-			if changesOff(configPath) {
-				return &exitError{code: ExitNoAccess, msg: "Kiyesi does not change this server (fix: off in " + configPath + ").\n" +
-					"Take the key out by hand: its lines are in the files sudo kiyesi keys lists."}
-			}
-			out := render.NewWriter(io.Out, io.Environ)
 			fsys := keysFS()
 			plan := keys.Plan(fsys, fp)
 			if len(plan) == 0 {
 				return &exitError{code: ExitUsage, msg: "No account on this server has the key " + fp + ". See the keys with: sudo kiyesi keys"}
 			}
-			me := sudoUser(io.Environ)
-			if who, last := lastKeyOf(fsys, plan, me); last {
-				return &exitError{code: ExitUsage, msg: fmt.Sprintf(
-					"This is the only key %s signs in with here, so taking it away could lock you out.\n"+
-						"Add the new key first (ssh-copy-id from your computer), then run this again.", who)}
-			}
-			var where []string
-			for _, r := range plan {
-				where = append(where, fmt.Sprintf("%s (%s)", r.Account.Name, r.Path))
-			}
 			label := fp
 			if k, ok := keys.ParseLine(plan[0].Lines[0]); ok && k.Comment != "" {
 				label = fp + " (" + k.Comment + ")"
 			}
-			if !asJSON {
-				fmt.Fprintf(out, "\n  Takes the key %s out of:\n", label)
-				for _, w := range where {
-					fmt.Fprintf(out, "    %s\n", w)
-				}
-				fmt.Fprintln(out, render.Grey("  Whoever holds it can no longer sign in as these accounts. Sessions open now stay open."))
-				fmt.Fprintln(out)
+			type step struct {
+				Account string `json:"account"`
+				File    string `json:"file"`
+				Command string `json:"command"`
 			}
-			if !yes {
-				if a := strings.ToLower(strings.TrimSpace(ask(io, "Remove it? [y/N] "))); a != "y" && a != "yes" {
-					fmt.Fprintln(out, "Nothing changed.")
-					return nil
-				}
-			}
-			done := "Removed login key " + label + " from " + accountsOf(plan)
-			store := keysStore()
-			rec, err := store.Begin("keys", truncate(done, 280), me, true)
-			if err != nil {
-				return &exitError{code: ExitFindings, msg: "Nothing changed: the undo record could not be made: " + err.Error()}
-			}
-			ctx := cmd.Context()
-			var failed []string
+			var steps []step
 			for _, r := range plan {
-				if err := keysWriter.Edit(ctx, r.Account, r.Path, r.Lines, nil); err != nil {
-					failed = append(failed, err.Error())
-					continue
-				}
-				rec.Keys = append(rec.Keys, fix.KeyLines{User: r.Account.Name, UID: r.Account.UID, GID: r.Account.GID, Home: r.Account.Home, Path: r.Path, Lines: r.Lines})
-				if err := store.Save(rec); err != nil {
-					failed = append(failed, "the undo record: "+err.Error())
+				for _, line := range r.Lines {
+					steps = append(steps, step{Account: r.Account.Name, File: r.Path, Command: removeLineCommand(line, r.Path)})
 				}
 			}
-			if len(rec.Keys) == 0 {
-				return &exitError{code: ExitFindings, msg: "Not removed: " + strings.Join(failed, "; ")}
-			}
+			me := sudoUser(io.Environ)
+			who, last := lastKeyOf(fsys, plan, me)
 			if asJSON {
-				return render.JSON(io.Out, map[string]any{"removed": fp, "undo_id": rec.ID, "accounts": accountsOf(plan), "problems": failed})
+				return render.JSON(io.Out, map[string]any{"changed": false, "key": fp, "last_key_of": map[bool]string{true: who}[last], "steps": steps})
 			}
-			fmt.Fprintf(out, "  %s %s%s\n", render.Green("✓"), rec.Done, render.Grey("  (undo: sudo kiyesi fix undo "+rec.ID+")"))
-			for _, f := range failed {
-				fmt.Fprintf(out, "  %s %s\n", render.Red("✗"), f)
+			out := render.NewWriter(io.Out, io.Environ)
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, render.Bold("Kiyesi changes nothing on this server.")+" "+neverRuns)
+			fmt.Fprintf(out, "\nThe key %s opens:\n", label)
+			for _, st := range steps {
+				fmt.Fprintf(out, "  %s (%s)\n", st.Account, st.File)
 			}
-			// A connected server tells the dashboard now, not in 15 minutes.
-			if _, _, err := loadConnection(); err == nil {
-				now := time.Now()
-				b := send.Items(now,
-					send.Item{Kind: "fixed", At: now.UTC().Format(time.RFC3339), Fixed: &send.Fixed{ID: rec.ID, Fix: rec.Fix, Done: rec.Done, User: me}},
-					send.Access(now, keys.Read(fsys)),
-				)
-				ob := send.Outbox{Dir: outboxDir(), MaxBytes: outboxBytes}
-				if ob.Put(b, now) == nil {
-					fmt.Fprintln(out, render.Grey("  The Access map shows it within a minute."))
-				}
+			if last {
+				fmt.Fprintf(out, "\n%s It is the only key %s signs in with here: add your new key first (ssh-copy-id from your computer), or you could lock yourself out.\n", render.Amber("Careful."), who)
 			}
-			if len(failed) > 0 {
-				return &exitError{code: ExitFindings}
+			fmt.Fprintln(out, "\nTo take it out, review and run:")
+			for _, st := range steps {
+				fmt.Fprintf(out, "  %s\n", st.Command)
 			}
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, render.Grey("Whoever holds the key can no longer sign in as these accounts. Sessions open now stay open."))
 			return nil
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "remove without asking")
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print what was removed as JSON (needs --yes)")
+	// Kept so scripts written before 0.40.0 still run; they change nothing now.
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "ignored: Kiyesi never changes anything")
+	_ = cmd.Flags().MarkHidden("yes")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print where the key is, and the commands, as JSON")
 	cmd.Flags().StringVar(&configPath, "config", config.DefaultPath, "the settings file")
 	return cmd
 }
 
-// newKeysEditOwn is the hidden helper kiyesi keys remove and its undo start
-// as a user, to change that user's own file with that user's rights.
-func newKeysEditOwn(io IO) *cobra.Command {
-	return &cobra.Command{
-		Use:    "edit-own",
-		Hidden: true,
-		Args:   cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			in := io.In
-			if in == nil {
-				in = os.Stdin
-			}
-			if err := keys.EditOwnFrom(in); err != nil {
-				return &exitError{code: ExitUsage, msg: err.Error()}
-			}
-			return nil
-		},
+// removeLineCommand is the command that takes one key's line out of an
+// authorized_keys file, matched by the key itself: the long base64 part,
+// which holds no | and is the same in no other key.
+func removeLineCommand(line, path string) string {
+	body := ""
+	for _, f := range strings.Fields(line) {
+		if strings.HasPrefix(f, "AAAA") {
+			body = f
+			break
+		}
 	}
+	if body == "" {
+		return "sudo nano " + path + "   (delete the line with this key)"
+	}
+	return "sudo sed -i '\\|" + body + "|d' " + path
 }
 
 // sudoUser is who ran sudo, or root.
@@ -239,19 +182,4 @@ func lastKeyOf(fsys fs.FS, plan []keys.Removal, me string) (string, bool) {
 		}
 	}
 	return me, losing > 0 && have <= losing
-}
-
-func accountsOf(plan []keys.Removal) string {
-	var names []string
-	for _, r := range plan {
-		names = append(names, r.Account.Name)
-	}
-	return strings.Join(names, ", ")
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
 }

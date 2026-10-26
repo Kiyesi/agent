@@ -326,3 +326,16 @@ func TestARedirectToPlainHTTPIsRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Each system's download keeps its name; Windows' ends in .exe.
+func TestAssetNames(t *testing.T) {
+	for goos, want := range map[string]string{
+		"linux":   "kiyesi-linux-amd64",
+		"darwin":  "kiyesi-darwin-amd64",
+		"windows": "kiyesi-windows-amd64.exe",
+	} {
+		if got := AssetName(goos, "amd64"); got != want {
+			t.Errorf("%s: %s, want %s", goos, got, want)
+		}
+	}
+}

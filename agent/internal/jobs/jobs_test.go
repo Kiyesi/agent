@@ -1,72 +1,16 @@
 package jobs
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/user"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
 )
-
-func TestExecuteKeepsTheJobAsItIsAndRecordsTheRun(t *testing.T) {
-	spool := t.TempDir()
-	var out, errOut bytes.Buffer
-	n := 0
-	ids := func() string { n++; return "run-1" }
-	clock := []time.Time{time.Date(2026, 10, 11, 4, 0, 0, 0, time.UTC), time.Date(2026, 10, 11, 4, 3, 12, 0, time.UTC)}
-	now := func() time.Time { t := clock[0]; clock = clock[1:]; return t }
-	code := Execute(spool, "nightly-backup", []string{"sh", "-c", "echo dumped 3 GB; sleep 0.2; echo 'password=hunter2' >&2; exit 3"}, nil, &out, &errOut, ids, now)
-	if code != 3 {
-		t.Fatalf("exit code = %d, want the job's own 3", code)
-	}
-	if out.String() != "dumped 3 GB\n" || errOut.String() != "password=hunter2\n" {
-		t.Errorf("output changed: %q %q", out.String(), errOut.String())
-	}
-	runs := Take(spool)
-	if len(runs) != 2 {
-		t.Fatalf("records = %d", len(runs))
-	}
-	// The start is sent before the end.
-	if runs[0].EndedAt != "" || runs[1].EndedAt == "" {
-		t.Fatalf("order: %+v", runs)
-	}
-	end := runs[1]
-	if end.Name != "nightly-backup" || *end.ExitCode != 3 || *end.DurationMs != 192000 {
-		t.Errorf("end = %+v", end)
-	}
-	if strings.Join(end.LastLines, "|") != "dumped 3 GB|password=hunter2" {
-		t.Errorf("last lines = %q", end.LastLines)
-	}
-	if left, _ := os.ReadDir(spool); len(left) != 0 {
-		t.Errorf("the spool keeps %d files after sending", len(left))
-	}
-}
-
-func TestExecuteRunsTheJobEvenWithNowhereToRecord(t *testing.T) {
-	var out, errOut bytes.Buffer
-	code := Execute(filepath.Join(t.TempDir(), "missing"), "x", []string{"sh", "-c", "echo ok"}, nil, &out, &errOut, func() string { return "r" }, time.Now)
-	if code != 0 || out.String() != "ok\n" {
-		t.Errorf("code %d, output %q", code, out.String())
-	}
-	// One line says the run was not recorded, not one per record.
-	if strings.Count(errOut.String(), "\n") != 1 || !strings.HasPrefix(errOut.String(), "kiyesi run: this run is not recorded") {
-		t.Errorf("stderr = %q", errOut.String())
-	}
-	// No spool at all: the caller said why, so nothing more is said.
-	errOut.Reset()
-	if code := Execute("", "x", []string{"true"}, nil, &out, &errOut, func() string { return "r" }, time.Now); code != 0 || errOut.Len() != 0 {
-		t.Errorf("no spool: code %d, stderr %q", code, errOut.String())
-	}
-	if code := Execute(t.TempDir(), "x", []string{"/no/such/command"}, nil, &out, &out, func() string { return "r" }, time.Now); code != 127 {
-		t.Errorf("a missing command exits %d, want 127", code)
-	}
-}
 
 func TestTakeIgnoresLinksAndBadNames(t *testing.T) {
 	spool := t.TempDir()
@@ -173,10 +117,10 @@ func (fakeRunner) Run(_ context.Context, name string, args ...string) ([]byte, e
 func TestFindReadsCrontabsAndTimers(t *testing.T) {
 	at := time.Date(2026, 10, 11, 4, 10, 0, 0, time.UTC)
 	fsys := fstest.MapFS{
-		"etc/crontab":                              {Data: []byte("SHELL=/bin/sh\n# m h dom mon dow user command\n0 4 * * * root kiyesi run --name nightly-backup -- /opt/backup.sh\n17 * * * * root cd / && run-parts --report /etc/cron.hourly\n")},
-		"etc/cron.d/reports":                       {Data: []byte("0 7 * * 1 app /usr/local/bin/kiyesi run --name=weekly-sales-report -- node report.js\n")},
-		"var/spool/cron/crontabs/app":              {Data: []byte("*/5 * * * * kiyesi run --name send-order-emails -- node send.js\n")},
-		"etc/systemd/system/kiyesi-backup.service": {Data: []byte("[Service]\nExecStart=/usr/local/bin/kiyesi run --name kiyesi-backup -- /usr/local/sbin/kiyesi-backup\n")},
+		"etc/crontab":                              {Data: []byte("SHELL=/bin/sh\n# m h dom mon dow user command\n0 4 * * * root S=$(date +%s); /opt/backup.sh; kiyesi job done --name nightly-backup --exit $? --started $S\n17 * * * * root cd / && run-parts --report /etc/cron.hourly\n")},
+		"etc/cron.d/reports":                       {Data: []byte("0 7 * * 1 app node report.js; /usr/local/bin/kiyesi job done --name=weekly-sales-report --exit $?\n")},
+		"var/spool/cron/crontabs/app":              {Data: []byte("*/5 * * * * node send.js; kiyesi job done --name send-order-emails --exit $?\n")},
+		"etc/systemd/system/kiyesi-backup.service": {Data: []byte("[Service]\nExecStart=/usr/local/sbin/kiyesi-backup\nExecStopPost=/usr/local/bin/kiyesi job done --name kiyesi-backup --exit $EXIT_STATUS\n")},
 		"etc/systemd/system/kiyesi-backup.timer":   {Data: []byte("[Timer]\nOnCalendar=*-*-* 03:30:00 UTC\n")},
 	}
 	got := Find(context.Background(), fsys, fakeRunner{}, at)
@@ -208,5 +152,34 @@ func TestParseElapse(t *testing.T) {
 	}
 	if _, ok := parseElapse("n/a"); ok {
 		t.Error("n/a should not parse")
+	}
+}
+
+// Record notes a run the job made on its own: its name, exit code and, with
+// a start, its length. Kiyesi starts nothing.
+func TestRecordNotesARunWithoutStartingAnything(t *testing.T) {
+	spool := t.TempDir()
+	start := time.Date(2026, 10, 11, 4, 0, 0, 0, time.UTC)
+	end := start.Add(192 * time.Second)
+	if err := Record(spool, "nightly-backup", 3, start, end, func() string { return "run-1" }); err != nil {
+		t.Fatal(err)
+	}
+	runs := Take(spool)
+	if len(runs) != 1 {
+		t.Fatalf("records = %d", len(runs))
+	}
+	r := runs[0]
+	if r.Name != "nightly-backup" || *r.ExitCode != 3 || *r.DurationMs != 192000 || r.StartedAt != "2026-10-11T04:00:00Z" || r.EndedAt != "2026-10-11T04:03:12Z" {
+		t.Errorf("run = %+v", r)
+	}
+	// Without a start, or one after the end, the run is noted at its end.
+	if err := Record(spool, "x", 0, time.Time{}, end, func() string { return "run-2" }); err != nil {
+		t.Fatal(err)
+	}
+	if r := Take(spool)[0]; r.StartedAt != r.EndedAt || *r.DurationMs != 0 {
+		t.Errorf("no start: %+v", r)
+	}
+	if err := Record(filepath.Join(t.TempDir(), "missing"), "x", 0, start, end, func() string { return "r" }); err == nil {
+		t.Error("a spool that is not there should say so")
 	}
 }

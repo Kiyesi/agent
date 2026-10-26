@@ -1,9 +1,6 @@
 package fix
 
 import (
-	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,7 +12,8 @@ import (
 	"time"
 )
 
-// Record is one fix that ran: what it changed and how to put it back.
+// Record is one change kiyesi fix made before 0.40.0: what it changed, and
+// what undoes it.
 type Record struct {
 	ID   string    `json:"id"`
 	Fix  string    `json:"fix"`
@@ -26,10 +24,10 @@ type Record struct {
 	CanUndo bool `json:"can_undo"`
 	// Files are saved before they changed, in the order they changed.
 	Files []Saved `json:"files,omitempty"`
-	// Then are run after the files are back, in order, such as reloading SSH.
+	// Then are the steps after the files are back, in order, such as reloading SSH.
 	Then [][]string `json:"then,omitempty"`
-	// Keys are login keys taken out of users' authorized_keys, put back by
-	// undo with each user's own rights (kiyesi keys remove).
+	// Keys are login keys kiyesi keys remove took out of users'
+	// authorized_keys files.
 	Keys     []KeyLines `json:"keys,omitempty"`
 	UndoneAt *time.Time `json:"undone_at,omitempty"`
 }
@@ -44,13 +42,6 @@ type KeyLines struct {
 	Lines []string `json:"lines"`
 }
 
-// RestoreKeys puts key lines back into a user's file, as that user. The
-// command line sets it; a record with keys is not undone without it.
-var RestoreKeys func(ctx context.Context, k KeyLines) error
-
-// Save writes a record made outside Run, such as a key removal's.
-func (s *Store) Save(r *Record) error { return s.save(r) }
-
 // Saved is a file as it was before a fix touched it. Content is kept only
 // for settings files a fix rewrites, never for a file whose mode alone
 // changed, so a secret's value is never copied.
@@ -60,62 +51,27 @@ type Saved struct {
 	Mode     fs.FileMode `json:"mode"`
 	Content  []byte      `json:"content,omitempty"`
 	ModeOnly bool        `json:"mode_only,omitempty"`
-	// ID is the file a change of mode reached. Undo puts the mode back only
-	// on that same file. Records from before 0.38.0 have none.
+	// ID is the file a change of mode reached. Records from before 0.38.0
+	// have none.
 	ID *FileID `json:"id,omitempty"`
 }
 
-// Store keeps the records in one folder that only root can read.
-type Store struct {
-	Dir string
-	Now func() time.Time
+// FileID names one file on disk, as a record from 0.38.0 to 0.39.x noted
+// it: its device, its inode and its owner.
+type FileID struct {
+	Dev uint64 `json:"dev"`
+	Ino uint64 `json:"ino"`
+	UID uint32 `json:"uid"`
 }
+
+// Store reads the records kiyesi fix kept before 0.40.0, in one folder that
+// only root can read. Nothing writes to it any more.
+type Store struct{ Dir string }
 
 // DefaultDir is where the records live.
 const DefaultDir = "/var/lib/kiyesi/fixes"
 
-func (s *Store) now() time.Time {
-	if s.Now != nil {
-		return s.Now()
-	}
-	return time.Now()
-}
-
 func (s *Store) dirOf(id string) string { return filepath.Join(s.Dir, id) }
-
-// Begin starts a record with a new short id, such as 7f3a.
-func (s *Store) Begin(fix, done, user string, canUndo bool) (*Record, error) {
-	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
-		return nil, err
-	}
-	for range 20 {
-		b := make([]byte, 2)
-		if _, err := rand.Read(b); err != nil {
-			return nil, err
-		}
-		id := hex.EncodeToString(b)
-		if err := os.Mkdir(s.dirOf(id), 0o700); err == nil {
-			return &Record{ID: id, Fix: fix, Done: done, User: user, At: s.now().UTC(), CanUndo: canUndo}, nil
-		} else if !errors.Is(err, fs.ErrExist) {
-			return nil, err
-		}
-	}
-	return nil, errors.New("no free record id")
-}
-
-func (s *Store) save(r *Record) error {
-	data, err := json.MarshalIndent(r, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := filepath.Join(s.dirOf(r.ID), ".record.json")
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, filepath.Join(s.dirOf(r.ID), "record.json"))
-}
-
-func (s *Store) forget(id string) { _ = os.RemoveAll(s.dirOf(id)) }
 
 // Get reads one record.
 func (s *Store) Get(id string) (*Record, error) {
@@ -156,163 +112,4 @@ func (s *Store) List() ([]Record, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].At.After(out[j].At) })
 	return out, nil
-}
-
-// Undo puts back what a fix changed and marks it undone.
-func (s *Store) Undo(ctx context.Context, h Host, r *Record) error {
-	if r.UndoneAt != nil {
-		return fmt.Errorf("fix %s was undone already, on %s", r.ID, r.UndoneAt.Local().Format("2 Jan 15:04"))
-	}
-	if !r.CanUndo {
-		return fmt.Errorf("fix %s (%s) cannot be undone", r.ID, r.Done)
-	}
-	if err := undo(ctx, h, s, r); err != nil {
-		return err
-	}
-	at := s.now().UTC()
-	r.UndoneAt = &at
-	return s.save(r)
-}
-
-// undo restores the files, newest change first, then runs the record's
-// commands. It goes on after a failure, so as much as possible is back.
-func undo(ctx context.Context, h Host, _ *Store, r *Record) error {
-	var problems []string
-	for i := len(r.Files) - 1; i >= 0; i-- {
-		f := r.Files[i]
-		var err error
-		switch {
-		case f.ModeOnly:
-			err = restoreMode(h, r.ID, f)
-		case !f.Existed:
-			err = h.Remove(f.Path)
-		default:
-			err = h.WriteFile(f.Path, f.Content, f.Mode)
-		}
-		if err != nil {
-			problems = append(problems, fmt.Sprintf("%s: %v", f.Path, err))
-		}
-	}
-	for _, k := range r.Keys {
-		if RestoreKeys == nil {
-			problems = append(problems, k.Path+": login keys cannot be put back here")
-			continue
-		}
-		if err := RestoreKeys(ctx, k); err != nil {
-			problems = append(problems, err.Error())
-		}
-	}
-	for _, c := range r.Then {
-		if len(c) == 0 {
-			continue
-		}
-		if _, err := h.Run(ctx, c[0], c[1:]...); err != nil {
-			problems = append(problems, err.Error())
-		}
-	}
-	if len(problems) > 0 {
-		return errors.New(strings.Join(problems, "; "))
-	}
-	return nil
-}
-
-// restoreMode puts a file's mode back, only on the file the fix changed and
-// only where no other user could have put a different file in its place.
-func restoreMode(h Host, id string, f Saved) error {
-	byHand := fmt.Sprintf("check it is still the file you expect (ls -l %s), then put the mode back by hand: sudo chmod %04o %s", f.Path, f.Mode.Perm(), f.Path)
-	if f.ID == nil {
-		return fmt.Errorf("fix %s was made by a Kiyesi older than 0.38.0, which did not note which file it changed, so its mode is not put back by itself. To do it yourself, %s", id, byHand)
-	}
-	dir, err := h.Lstat(filepath.Dir(f.Path))
-	if err != nil {
-		return err
-	}
-	if why := othersCanWrite(dir, f.ID.UID); why != "" {
-		return fmt.Errorf("its mode is not put back by Kiyesi, as %s. To do it yourself, %s", why, byHand)
-	}
-	return h.ChmodFile(f.Path, *f.ID, f.Mode.Perm())
-}
-
-// Changes is how a fix changes the server: each change is saved in the
-// record first.
-type Changes struct {
-	h   Host
-	s   *Store
-	rec *Record
-}
-
-func (c *Changes) seen(path string) bool {
-	for _, f := range c.rec.Files {
-		if f.Path == path {
-			return true
-		}
-	}
-	return false
-}
-
-// keep saves a settings file as it is now, or that it was not there.
-func (c *Changes) keep(path string) error {
-	if c.seen(path) {
-		return nil
-	}
-	info, err := c.h.Lstat(path)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		c.rec.Files = append(c.rec.Files, Saved{Path: path})
-	case err != nil:
-		return err
-	case !info.Mode().IsRegular():
-		return fmt.Errorf("%s is not a plain file, so it is left alone", path)
-	default:
-		data, err := c.h.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		c.rec.Files = append(c.rec.Files, Saved{Path: path, Existed: true, Mode: info.Mode().Perm(), Content: data})
-	}
-	// Saved at once, so even a crash leaves what undo needs.
-	return c.s.save(c.rec)
-}
-
-// Keep saves a file a program is about to change, such as ufw's rules.
-func (c *Changes) Keep(path string) error { return c.keep(path) }
-
-// Write saves the file as it is, then writes the new one.
-func (c *Changes) Write(path string, data []byte, perm fs.FileMode) error {
-	if err := c.keep(path); err != nil {
-		return err
-	}
-	return c.h.WriteFile(path, data, perm)
-}
-
-// Chmod saves the file's mode, never its content, then changes the mode.
-// seen is the file as the fix looked at it, from Lstat: the change reaches
-// only that same file, so one swapped in since, such as a link, is left
-// alone.
-func (c *Changes) Chmod(path string, seen fs.FileInfo, perm fs.FileMode) error {
-	if !seen.Mode().IsRegular() {
-		return fmt.Errorf("%s is not a plain file, so it is left alone", path)
-	}
-	id, ok := IDOf(seen)
-	if !ok {
-		return fmt.Errorf("%s cannot be told apart from another file on this system, so it is left alone", path)
-	}
-	if !c.seen(path) {
-		c.rec.Files = append(c.rec.Files, Saved{Path: path, Existed: true, Mode: seen.Mode().Perm(), ModeOnly: true, ID: &id})
-		if err := c.s.save(c.rec); err != nil {
-			return err
-		}
-	}
-	return c.h.ChmodFile(path, id, perm)
-}
-
-// Then adds a command undo runs after the files are back.
-func (c *Changes) Then(name string, args ...string) error {
-	c.rec.Then = append(c.rec.Then, append([]string{name}, args...))
-	return c.s.save(c.rec)
-}
-
-// Run runs a program as part of the fix.
-func (c *Changes) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return c.h.Run(ctx, name, args...)
 }

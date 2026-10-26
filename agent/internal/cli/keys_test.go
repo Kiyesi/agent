@@ -1,35 +1,15 @@
 package cli
 
 import (
-	"context"
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/kiyesi/kiyesi/agent/internal/fix"
-	"github.com/kiyesi/kiyesi/agent/internal/keys"
 	"github.com/kiyesi/kiyesi/agent/internal/system"
 )
-
-type edit struct {
-	user, path  string
-	remove, add []string
-}
-
-// fakeWriter records each change and makes it in the test's folder.
-type fakeWriter struct {
-	root  string
-	edits []edit
-}
-
-func (f *fakeWriter) Edit(_ context.Context, a keys.Account, path string, remove, add []string) error {
-	f.edits = append(f.edits, edit{a.Name, path, remove, add})
-	p := filepath.Join(f.root, path)
-	data, _ := os.ReadFile(p)
-	return os.WriteFile(p, keys.Edit(data, remove, add), 0o600)
-}
 
 func keyLine(t *testing.T, name string) (string, string) {
 	t.Helper()
@@ -40,7 +20,7 @@ func keyLine(t *testing.T, name string) (string, string) {
 
 // keysServer is a server with root and ada, root holding both test keys
 // and ada the RSA one.
-func keysServer(t *testing.T) (*fakeWriter, string) {
+func keysServer(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	ed, _ := keyLine(t, "ed25519")
@@ -57,17 +37,13 @@ func keysServer(t *testing.T) (*fakeWriter, string) {
 	write("etc/passwd", "root:x:0:0:root:/root:/bin/bash\nada:x:1000:1000::/home/ada:/bin/bash\n")
 	write("root/.ssh/authorized_keys", ed+"\n"+rsa+"\n")
 	write("home/ada/.ssh/authorized_keys", rsa+"\n")
-	w := &fakeWriter{root: root}
-	oldFS, oldW, oldRoot, oldStore := keysFS, keysWriter, keysAsRoot, keysStore
-	t.Cleanup(func() { keysFS, keysWriter, keysAsRoot, keysStore = oldFS, oldW, oldRoot, oldStore })
+	oldFS, oldRoot := keysFS, keysAsRoot
+	t.Cleanup(func() { keysFS, keysAsRoot = oldFS, oldRoot })
 	keysFS = func() system.RootFS { return system.NewRootFS(root) }
-	keysWriter = w
 	keysAsRoot = func() bool { return true }
-	store := filepath.Join(t.TempDir(), "fixes")
-	keysStore = func() *fix.Store { return &fix.Store{Dir: store} }
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("KIYESI_ETC", t.TempDir())
-	return w, root
+	return root
 }
 
 func TestKeysLists(t *testing.T) {
@@ -90,76 +66,57 @@ func TestKeysLists(t *testing.T) {
 	}
 }
 
-func TestKeysRemoveEverywhereAndUndo(t *testing.T) {
-	w, root := keysServer(t)
-	_, rsaFP := keyLine(t, "rsa")
-	code, out, errOut := runCLI(t, "keys", "remove", rsaFP, "--yes")
-	if code != ExitOK || !strings.Contains(out, "from root, ada") || !strings.Contains(out, "undo: sudo kiyesi fix undo") {
-		t.Fatalf("code %d, out %q, err %q", code, out, errOut)
+// kiyesi keys remove changes nothing: it says where the key is and gives
+// the command for each file, matched by the key itself, for a person to
+// review and run; --yes changes nothing either.
+func TestKeysRemoveShowsTheCommandsAndChangesNothing(t *testing.T) {
+	root := keysServer(t)
+	rsa, fp := keyLine(t, "rsa")
+	before, _ := os.ReadFile(filepath.Join(root, "root/.ssh/authorized_keys"))
+	code, out, errOut := runCLI(t, "keys", "remove", fp, "--yes")
+	if code != ExitOK {
+		t.Fatalf("%d %q %q", code, out, errOut)
 	}
-	if len(w.edits) != 2 || w.edits[0].user != "root" || w.edits[1].user != "ada" || len(w.edits[1].remove) != 1 {
-		t.Fatalf("edits = %+v", w.edits)
+	body := strings.Fields(rsa)[1]
+	for _, want := range []string{
+		"Kiyesi changes nothing on this server. It only suggests: you review each command and run it yourself.",
+		"root (/root/.ssh/authorized_keys)",
+		"ada (/home/ada/.ssh/authorized_keys)",
+		"sudo sed -i '\\|" + body + "|d' /root/.ssh/authorized_keys",
+		"sudo sed -i '\\|" + body + "|d' /home/ada/.ssh/authorized_keys",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
 	}
-	if data, _ := os.ReadFile(filepath.Join(root, "home/ada/.ssh/authorized_keys")); len(strings.TrimSpace(string(data))) != 0 {
-		t.Fatalf("ada's file = %q", data)
+	after, _ := os.ReadFile(filepath.Join(root, "root/.ssh/authorized_keys"))
+	if string(after) != string(before) {
+		t.Error("a file changed")
 	}
-	recs, _ := keysStore().List()
-	if len(recs) != 1 || recs[0].Fix != "keys" || len(recs[0].Keys) != 2 || !recs[0].CanUndo {
-		t.Fatalf("records = %+v", recs)
+	var got struct {
+		Changed bool `json:"changed"`
+		Steps   []struct{ Account, File, Command string }
 	}
-	// Undo puts each line back with that account's own rights.
-	if err := keysStore().Undo(context.Background(), fix.RealHost{}, &recs[0]); err != nil {
-		t.Fatal(err)
-	}
-	if got := w.edits[len(w.edits)-1]; got.user != "ada" || len(got.add) != 1 {
-		t.Fatalf("undo edit = %+v", got)
-	}
-	if data, _ := os.ReadFile(filepath.Join(root, "home/ada/.ssh/authorized_keys")); !strings.Contains(string(data), "ssh-rsa") {
-		t.Fatalf("ada's key not back: %q", data)
-	}
-}
-
-func TestKeysRemoveNeverLocksYouOut(t *testing.T) {
-	w, _ := keysServer(t)
-	_, rsaFP := keyLine(t, "rsa")
-	t.Setenv("SUDO_USER", "ada")
-	code, _, errOut := runCLIEnv(t, []string{"SUDO_USER=ada"}, "keys", "remove", rsaFP, "--yes")
-	if code != ExitUsage || !strings.Contains(errOut, "only key ada signs in with") || len(w.edits) != 0 {
-		t.Fatalf("code %d, err %q, edits %+v", code, errOut, w.edits)
+	code, out, _ = runCLI(t, "keys", "remove", fp, "--json")
+	if err := json.Unmarshal([]byte(out), &got); err != nil || code != ExitOK || got.Changed || len(got.Steps) != 2 {
+		t.Errorf("json: %d %v %+v", code, err, got)
 	}
 }
 
-func TestKeysRemoveAsksAndChecks(t *testing.T) {
-	w, _ := keysServer(t)
-	_, edFP := keyLine(t, "ed25519")
-	if code, _, errOut := runCLI(t, "keys", "remove", "not-a-key"); code != ExitUsage || !strings.Contains(errOut, "SHA256:") {
-		t.Fatalf("code %d, %q", code, errOut)
+// It warns, before the commands, when the key is the last one the person
+// signs in with; a fingerprint that is not one, or not found, says so.
+func TestKeysRemoveWarnsAboutYourLastKey(t *testing.T) {
+	keysServer(t)
+	_, fp := keyLine(t, "rsa")
+	var out bytes.Buffer
+	code := Execute([]string{"keys", "remove", fp}, IO{Out: &out, Err: &out, Environ: []string{"NO_COLOR=1", "SUDO_USER=ada"}})
+	if code != ExitOK || !strings.Contains(out.String(), "It is the only key ada signs in with here") {
+		t.Errorf("%d\n%s", code, out.String())
 	}
-	if code, _, _ := runCLI(t, "keys", "remove", "SHA256:"+strings.Repeat("A", 43)); code != ExitUsage {
-		t.Fatalf("an unknown key: code %d", code)
+	if code, _, errOut := runCLI(t, "keys", "remove", "nope"); code != ExitUsage || !strings.Contains(errOut, "is not a key's fingerprint") {
+		t.Errorf("bad fingerprint: %d %q", code, errOut)
 	}
-	if code, _, _ := runCLI(t, "keys", "remove", edFP, "--json"); code != ExitUsage {
-		t.Fatalf("--json without --yes: code %d", code)
-	}
-	// Without --yes and no answer, nothing changes.
-	if code, out, _ := runCLI(t, "keys", "remove", edFP); code != ExitOK || !strings.Contains(out, "Nothing changed") || len(w.edits) != 0 {
-		t.Fatalf("code %d, out %q, edits %+v", code, out, w.edits)
-	}
-	keysAsRoot = func() bool { return false }
-	if code, _, errOut := runCLI(t, "keys"); code != ExitNoAccess || !strings.Contains(errOut, "sudo kiyesi keys") {
-		t.Fatalf("code %d, %q", code, errOut)
-	}
-}
-
-func TestKeysRemoveKeepsToFixOff(t *testing.T) {
-	w, _ := keysServer(t)
-	_, edFP := keyLine(t, "ed25519")
-	cfg := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(cfg, []byte("fix: off\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	code, _, errOut := runCLI(t, "keys", "remove", edFP, "--yes", "--config", cfg)
-	if code != ExitNoAccess || !strings.Contains(errOut, "fix: off") || len(w.edits) != 0 {
-		t.Fatalf("code %d %q, edits %+v", code, errOut, w.edits)
+	if code, _, errOut := runCLI(t, "keys", "remove", "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"); code != ExitUsage || !strings.Contains(errOut, "No account on this server has the key") {
+		t.Errorf("unknown key: %d %q", code, errOut)
 	}
 }

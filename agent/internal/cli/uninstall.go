@@ -37,9 +37,9 @@ func newUninstall(io IO) *cobra.Command {
 			"/etc/kiyesi, the results waiting in /var/lib/kiyesi, and the kiyesi program.\n" +
 			"What the server already sent stays in the dashboard: there, disconnect the\n" +
 			"server to keep it until it expires, or delete it to erase it.\n\n" +
-			"Changes made by kiyesi fix stay on the server, but their undo records go\n" +
-			"with /var/lib/kiyesi, so kiyesi can no longer put them back. To put one back\n" +
-			"first: sudo kiyesi fix undo",
+			"Changes kiyesi fix made before 0.40.0 stay on the server, but their undo\n" +
+			"records go with /var/lib/kiyesi, so kiyesi can no longer put them back. To\n" +
+			"put one back first: sudo kiyesi fix undo",
 		Example: "  sudo kiyesi uninstall",
 		Args:    cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -52,7 +52,7 @@ func newUninstall(io IO) *cobra.Command {
 			}
 			if !yes {
 				fmt.Fprintln(io.Err, "This removes the kiyesi service, its token and settings, its waiting results and the program from this server.")
-				fmt.Fprintln(io.Err, "Changes made by kiyesi fix stay, and can no longer be undone with kiyesi. To put one back first: sudo kiyesi fix undo")
+				fmt.Fprintln(io.Err, "Changes kiyesi fix made before 0.40.0 stay, and can no longer be undone with kiyesi. To put one back first: sudo kiyesi fix undo")
 				if a := ask(io, "Type yes to go on: "); !strings.EqualFold(a, "yes") {
 					return usageErr("Nothing was removed.")
 				}

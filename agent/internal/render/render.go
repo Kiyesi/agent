@@ -52,11 +52,6 @@ func Terminal(w io.Writer, r scan.Report, saveErr error, viaSudo bool) error {
 	line("")
 	line(grey.Render(fmt.Sprintf("Kiyesi %s · read-only scan · nothing leaves this server", version.Version)))
 	body(&b, r)
-	if n := fixable(r); n > 0 {
-		line(bold.Render("Kiyesi can fix "+plural(n, "thing", "things")+" for you:") + " sudo kiyesi fix")
-		line(grey.Render("It says what it will change, and asks first."))
-		line("")
-	}
 	if saveErr != nil {
 		line(grey.Render("The full report could not be saved: " + saveErr.Error() + ". Run sudo kiyesi scan, or kiyesi scan --json."))
 	} else if r.ReportFile != "" {
@@ -91,26 +86,9 @@ func Stored(w io.Writer, r scan.Report, name string) error {
 	}
 	b.WriteString("\n" + grey.Render(head) + "\n")
 	body(&b, r)
-	// Root login is fixed only by someone signed in as their own user, as
-	// kiyesi fix says to anyone signed in as root, so it is offered apart.
-	n, root := fixable(r), offers(r, "ssh-root")
-	if root {
-		n--
-	}
-	switch {
-	case !r.StartedAt.IsZero() && age > 24*time.Hour:
+	if !r.StartedAt.IsZero() && age > 24*time.Hour {
 		b.WriteString(amber.Render("This scan is "+howLong(age)+" old, so it may no longer be true.") +
 			" Is the agent running? sudo systemctl status kiyesi\n\n")
-	default:
-		if n > 0 {
-			b.WriteString(bold.Render("Kiyesi can fix "+plural(n, "thing", "things")+" on the server:") + " sudo kiyesi fix\n")
-		}
-		if root {
-			b.WriteString(bold.Render("Root login:") + " sudo kiyesi fix ssh-root, signed in as your own user with sudo, not as root\n")
-		}
-		if n > 0 || root {
-			b.WriteString("\n")
-		}
 	}
 	b.WriteString(grey.Render("Every fix command: kiyesi server "+name+" --json, or the dashboard.") + "\n\n")
 	_, err := io.WriteString(w, b.String())
@@ -175,52 +153,11 @@ func howLong(d time.Duration) string {
 	}
 }
 
-// FixLines is how a fix is said everywhere: Kiyesi's own command first
-// when it has one, then the change by hand. fix is the pack's fix, auto the
-// kiyesi fix that makes it, or "".
-func FixLines(fix, auto string) (first, byHand string) {
-	if auto == "" {
-		return fix, ""
-	}
-	return "sudo kiyesi fix " + auto, fix
-}
-
-// fixLines wraps a fix for the terminal, indented under its finding.
+// fixLines wraps a fix for the terminal, indented under its finding: only
+// the commands a person reviews and runs, never kiyesi fix, even in a
+// report an agent before 0.40.0 sent.
 func fixLines(f scan.Finding, width int) []string {
-	first, byHand := FixLines(f.Fix, f.AutoFix)
-	out := wrap("Fix: "+first, width, 5)
-	if byHand != "" {
-		out = append(out, wrap("By hand: "+byHand, width, 9)...)
-	}
-	return out
-}
-
-// fixable counts the fixes kiyesi fix would offer for the findings that
-// count against the grade: one fix for three secret files is one. Optional
-// clean-ups (info) are not offered here: at A 100 the report says nothing
-// about fixing, so nobody is left wondering what is wrong.
-// offers says whether the report offers the named kiyesi fix.
-func offers(r scan.Report, name string) bool {
-	for _, c := range r.Checks {
-		for _, f := range c.Findings {
-			if f.AutoFix == name && f.Severity != "info" {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func fixable(r scan.Report) int {
-	names := map[string]bool{}
-	for _, c := range r.Checks {
-		for _, f := range c.Findings {
-			if f.AutoFix != "" && f.Severity != "info" {
-				names[f.AutoFix] = true
-			}
-		}
-	}
-	return len(names)
+	return wrap("Fix: "+f.Fix, width, 5)
 }
 
 func hostLine(r scan.Report) string {

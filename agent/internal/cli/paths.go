@@ -22,7 +22,7 @@ func stateDir() string {
 	}
 	// Beside a managed service (container mode), the token is in the
 	// environment and /var/lib is often not writable: use the temp folder,
-	// the same for kiyesi agent and kiyesi run in that container.
+	// the same for kiyesi agent and kiyesi job done in that container.
 	if os.Getenv("KIYESI_TOKEN") != "" {
 		return filepath.Join(os.TempDir(), "kiyesi")
 	}
