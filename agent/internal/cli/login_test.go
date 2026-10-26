@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/kiyesi/kiyesi/agent/internal/api"
 )
 
 // What the fake API last got for /v1/logs, how many Follow asks it
@@ -623,5 +626,47 @@ func TestLoginAgainKeepsTheTeamAndEndsTheOldSession(t *testing.T) {
 	}
 	if l, _ := loadLogin(); l.Team != "" {
 		t.Errorf("team = %q, want none", l.Team)
+	}
+}
+
+// A connection dropped on the way, a service restarting or "too many
+// requests" is asked again: one such ask used to end the sign-in. Asks that
+// keep failing stop after about two minutes, with the reason.
+func TestLoginWaitsThroughAFailedAsk(t *testing.T) {
+	sleep = func(context.Context, time.Duration) error { return nil }
+	asks := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asks++
+		switch asks {
+		case 1: // the connection dropped, as on the owner's Windows laptop
+			conn, _, _ := w.(http.Hijacker).Hijack()
+			conn.Close()
+		case 2:
+			w.WriteHeader(http.StatusBadGateway)
+		case 3:
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"statusCode":429,"error":"too_many_requests","message":"Too many requests."}`))
+		case 4:
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"authorization_pending"}`))
+		default:
+			_, _ = w.Write([]byte(`{"access_token":"tok"}`))
+		}
+	}))
+	defer srv.Close()
+	token, err := poll(context.Background(), api.New(srv.URL, ""), api.DeviceCode{DeviceCode: "d", Interval: 5, ExpiresIn: 600})
+	if err != nil || token != "tok" || asks != 5 {
+		t.Fatalf("token %q, err %v, after %d asks", token, err, asks)
+	}
+
+	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, _, _ := w.(http.Hijacker).Hijack()
+		conn.Close()
+	}))
+	defer down.Close()
+	_, err = poll(context.Background(), api.New(down.URL, ""), api.DeviceCode{DeviceCode: "d", Interval: 5, ExpiresIn: 600})
+	var e *exitError
+	if !errors.As(err, &e) || !strings.Contains(e.msg, "Check your connection") {
+		t.Errorf("unreachable: %v", err)
 	}
 }

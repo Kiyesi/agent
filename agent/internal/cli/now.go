@@ -61,7 +61,12 @@ func runNow(io IO, asJSON bool, ctx context.Context) error {
 			return err
 		}
 		fmt.Fprintln(io.Out, "You are not signed in here.")
-		fmt.Fprintln(io.Out, "On a server:  sudo kiyesi scan   prints its report; nothing leaves the server.")
+		// Windows has no server to scan: the scan runs on the Linux server.
+		if hostOS == "windows" {
+			fmt.Fprintln(io.Out, "On a Linux server, over SSH:  sudo kiyesi scan   prints its report; nothing leaves the server.")
+		} else {
+			fmt.Fprintln(io.Out, "On a server:  sudo kiyesi scan   prints its report; nothing leaves the server.")
+		}
 		fmt.Fprintln(io.Out, "To see your team's servers and incidents:  kiyesi login")
 		return nil
 	}

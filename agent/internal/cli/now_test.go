@@ -43,6 +43,19 @@ func TestKiyesiAloneWhenNotSignedInPointsToScanAndLogin(t *testing.T) {
 	}
 }
 
+// On Windows there is no server to scan: the scan is on the Linux server.
+func TestKiyesiAloneOnWindowsPointsToTheLinuxServer(t *testing.T) {
+	t.Setenv("KIYESI_CONFIG", t.TempDir())
+	keychain = noKeychain{}
+	old := hostOS
+	t.Cleanup(func() { hostOS = old })
+	hostOS = "windows"
+	code, out, _ := runCLI(t)
+	if code != ExitOK || !strings.Contains(out, "On a Linux server, over SSH:  sudo kiyesi scan") || !strings.Contains(out, "kiyesi login") {
+		t.Errorf("%d %s", code, out)
+	}
+}
+
 func TestFindingsListsEachProblemWithItsFix(t *testing.T) {
 	signInForTest(t)
 	code, out, errOut := runCLI(t, "findings", "--severity", "critical")

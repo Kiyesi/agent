@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
 	"os/exec"
 	"runtime"
 	"time"
@@ -63,11 +65,11 @@ func newLogin(io IO) *cobra.Command {
 			if err != nil {
 				return &exitError{code: ExitNoAccess, msg: fmt.Sprintf("%v\nCheck the address and your connection, then try again.", err)}
 			}
-			fmt.Fprintf(io.Out, "Open %s and check this code: %s\n", d.VerificationURI, d.UserCode)
+			fmt.Fprintf(io.Out, "Open %s, sign in if it asks, and approve this code: %s\n", d.VerificationURI, d.UserCode)
 			if !noBrowser && d.VerificationURIComplete != "" {
 				openBrowser(d.VerificationURIComplete)
 			}
-			fmt.Fprintln(io.Out, "Waiting for you to approve it in the browser...")
+			fmt.Fprintln(io.Out, "Waiting for you to approve it in the browser (up to 10 minutes)...")
 			token, err := poll(ctx, c, d)
 			if err != nil {
 				return err
@@ -116,16 +118,32 @@ func newLogin(io IO) *cobra.Command {
 	return cmd
 }
 
+// maxFailedAsks is how many asks in a row may fail on the way (about two
+// minutes at the usual pace) before the sign-in gives up.
+const maxFailedAsks = 24
+
 // poll asks every few seconds whether the sign-in was approved, until the
-// code runs out.
+// code runs out. A dropped connection, a service restarting or a "too many
+// requests" on the way is asked again: one such ask once ended the sign-in.
 func poll(ctx context.Context, c *api.Client, d api.DeviceCode) (string, error) {
 	interval := time.Duration(max(d.Interval, 5)) * time.Second
 	deadline := time.Now().Add(time.Duration(max(d.ExpiresIn, 60)) * time.Second)
+	failed := 0
 	for time.Now().Before(deadline) {
 		if err := sleep(ctx, interval); err != nil {
 			return "", err
 		}
 		token, err := c.PollLogin(ctx, d.DeviceCode)
+		if again, slower := askAgain(err); again {
+			if failed++; failed >= maxFailedAsks {
+				return "", &exitError{code: ExitNoAccess, msg: err.Error() + "\nCheck your connection, then run kiyesi login again."}
+			}
+			if slower {
+				interval += 5 * time.Second
+			}
+			continue
+		}
+		failed = 0
 		switch {
 		case err == nil:
 			return token, nil
@@ -139,6 +157,20 @@ func poll(ctx context.Context, c *api.Client, d api.DeviceCode) (string, error) 
 		}
 	}
 	return "", &exitError{code: ExitNoAccess, msg: "The code expired before it was approved. Run kiyesi login again."}
+}
+
+// askAgain says whether a failed ask is worth asking again (the connection
+// or the service failing on the way), and whether to ask less often.
+func askAgain(err error) (again, slower bool) {
+	if err == nil {
+		return false, false
+	}
+	var p *api.Problem
+	if errors.As(err, &p) {
+		return p.Status == http.StatusTooManyRequests || p.Status >= 500, p.Status == http.StatusTooManyRequests
+	}
+	var u *url.Error
+	return errors.As(err, &u), false
 }
 
 func newLogout(io IO) *cobra.Command {
