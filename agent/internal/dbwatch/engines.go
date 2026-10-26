@@ -219,7 +219,12 @@ func readRedis(ctx context.Context, u *url.URL, f *Figures, now time.Time) error
 	if v, ok := field("connected_clients"); ok {
 		f.Connections = i64(v)
 	}
-	if cfg, err := command(conn, rd, "CONFIG", "GET", "maxclients"); err == nil {
+	// INFO says maxclients from Redis 7 and in Valkey; before, only CONFIG
+	// GET does, which the read-only user is not given (it shows every
+	// setting, the main password among them).
+	if v, ok := field("maxclients"); ok {
+		f.MaxConnections = i64(v)
+	} else if cfg, err := command(conn, rd, "CONFIG", "GET", "maxclients"); err == nil {
 		if arr, ok := cfg.([]any); ok && len(arr) == 2 {
 			if s, ok := arr[1].(string); ok {
 				if n, err := strconv.ParseInt(s, 10, 64); err == nil {

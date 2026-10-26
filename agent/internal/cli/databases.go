@@ -185,6 +185,20 @@ func newDatabasesCheck(io IO) *cobra.Command {
 					fmt.Fprintf(io.Out, ", newest backup %s", f.NewestBackupAt)
 				}
 				fmt.Fprintln(io.Out, ".")
+				for _, x := range dbwatch.TooMuch(cmd.Context(), dbwatch.Config{Name: d.Name, URL: d.URL}) {
+					fmt.Fprintf(io.Out, "  Its user may do more than Kiyesi needs. %s\n", x.What)
+					for _, why := range x.Details {
+						fmt.Fprintf(io.Out, "    - %s\n", why)
+					}
+					lead := "To take that away, review and run"
+					if x.NewUser {
+						lead = "Review and run"
+					}
+					fmt.Fprintf(io.Out, "  %s %s:\n", lead, x.Where)
+					for _, c := range x.Commands {
+						fmt.Fprintf(io.Out, "    %s\n", c)
+					}
+				}
 			}
 			if failed > 0 {
 				return &exitError{code: ExitFindings}

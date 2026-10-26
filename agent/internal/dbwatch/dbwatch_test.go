@@ -48,6 +48,11 @@ func TestLocalOrHosted(t *testing.T) {
 
 // A fake Redis that answers the few commands the reader sends.
 func fakeRedis(t *testing.T) string {
+	return fakeRedisWith(t, "# Server\r\nredis_version:7.0.15\r\n# Memory\r\nused_memory:50331648\r\nmaxmemory:268435456\r\n# Clients\r\nconnected_clients:12\r\n")
+}
+
+// fakeRedisWith answers INFO with info, and CONFIG GET maxclients with 10000.
+func fakeRedisWith(t *testing.T, info string) string {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +76,6 @@ func fakeRedis(t *testing.T) string {
 			case "AUTH":
 				c.Write([]byte("+OK\r\n"))
 			case "INFO":
-				info := "# Server\r\nredis_version:7.0.15\r\n# Memory\r\nused_memory:50331648\r\nmaxmemory:268435456\r\n# Clients\r\nconnected_clients:12\r\n"
 				c.Write([]byte("$" + itoa(len(info)) + "\r\n" + info + "\r\n"))
 			case "CONFIG":
 				c.Write([]byte("*2\r\n$10\r\nmaxclients\r\n$5\r\n10000\r\n"))
@@ -123,6 +127,7 @@ func TestRealDatabases(t *testing.T) {
 	urls := map[string]string{
 		"postgresql": os.Getenv("KIYESI_DB_POSTGRES"),
 		"mysql":      os.Getenv("KIYESI_DB_MYSQL"),
+		"mariadb":    os.Getenv("KIYESI_DB_MARIADB"),
 		"mongodb":    os.Getenv("KIYESI_DB_MONGO"),
 		"redis":      os.Getenv("KIYESI_DB_REDIS"),
 	}
@@ -136,7 +141,11 @@ func TestRealDatabases(t *testing.T) {
 			t.Errorf("%s: %s", engine, f.Error)
 			continue
 		}
-		if f.Engine != engine || f.Version == "" || f.SizeBytes == nil || *f.SizeBytes <= 0 {
+		want := engine
+		if engine == "mariadb" {
+			want = "mysql"
+		}
+		if f.Engine != want || f.Version == "" || f.SizeBytes == nil || *f.SizeBytes <= 0 {
 			t.Errorf("%s: %+v", engine, f)
 		}
 		if f.Connections == nil || f.MaxConnections == nil || *f.MaxConnections <= 0 {

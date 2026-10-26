@@ -160,6 +160,9 @@ func plainError(err error) string {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded) || strings.Contains(msg, "timeout"):
 		return "It did not answer within 20 seconds."
+	// MySQL's "Access denied … to database": the user may sign in, not open it.
+	case strings.Contains(msg, "Error 1044"):
+		return "The read-only user may not open this database: give it SHOW VIEW on it."
 	// A wrong password first: drivers also mention other addresses they tried.
 	case strings.Contains(strings.ToLower(msg), "auth") || strings.Contains(msg, "password") || strings.Contains(msg, "Access denied"):
 		return "It refused the read-only user's name or password."
