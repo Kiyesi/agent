@@ -226,3 +226,34 @@ func ownTestStore(t *testing.T) {
 	CredstoreDir = filepath.Join(t.TempDir(), "none")
 	t.Setenv("CREDENTIALS_DIRECTORY", "")
 }
+
+// Run by scripts/db-watch-test.sh: databases whose certificates a private
+// authority signs, as AWS RDS, Supabase and DigitalOcean do. Named in the
+// address, the authority checks the certificate and the database is read;
+// left out, the connection is refused, so the certificate is really checked.
+func TestRealPrivateAuthority(t *testing.T) {
+	if os.Getenv("KIYESI_TLS_PG") == "" {
+		t.Skip("run scripts/db-watch-test.sh")
+	}
+	ca := os.Getenv("KIYESI_TLS_CA")
+	r := &Reader{}
+	for _, env := range []string{"KIYESI_TLS_PG", "KIYESI_TLS_MY", "KIYESI_TLS_MO", "KIYESI_TLS_RD"} {
+		raw := os.Getenv(env)
+		f := r.Read(context.Background(), viaCredential(t, "tls", raw), time.Now())
+		if f.Error != "" || f.SizeBytes == nil {
+			t.Errorf("%s with its authority: %+v", env, f)
+			continue
+		}
+		without := raw
+		for _, p := range []string{"&sslrootcert=" + ca, "&ca=" + ca, "?ca=" + ca, "&tlsCAFile=" + ca} {
+			without = strings.Replace(without, p, "", 1)
+		}
+		if without == raw {
+			t.Fatalf("%s: no authority to leave out", env)
+		}
+		if g := r.Read(context.Background(), viaCredential(t, "tls", without), time.Now()); g.Error == "" {
+			t.Errorf("%s was read without its authority: the certificate was not checked", env)
+		}
+		t.Logf("%s: read with its authority (%s %s), refused without it", env, f.Engine, f.Version)
+	}
+}

@@ -368,7 +368,11 @@ func redisExcess(ctx context.Context, u *url.URL, password string) []Excess {
 	var conn net.Conn
 	var err error
 	if u.Scheme == "rediss" {
-		conn, err = tls.DialWithDialer(&d, "tcp", addr, &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12})
+		var t *tls.Config
+		if t, err = tlsFor(u); err != nil {
+			return nil
+		}
+		conn, err = tls.DialWithDialer(&d, "tcp", addr, t)
 	} else {
 		conn, err = d.DialContext(ctx, "tcp", addr)
 	}

@@ -253,3 +253,18 @@ func TestSecretFileBehindAClosedFolderIsANote(t *testing.T) {
 		t.Errorf("closed finding = %v", v)
 	}
 }
+
+// The provider's firewall (DigitalOcean's Cloud Firewall, an AWS security
+// group) cannot be seen from inside. Said in the settings, it is the
+// firewall, and ports on public addresses are behind it, not open.
+func TestProviderFirewallInTheSettings(t *testing.T) {
+	e := newTestEnv().file("proc/net/tcp", procTCP(22, 80, 443, 5432, 8080))
+	e.cfg.Ports.ProviderFirewall = true
+	r := run(t, firewallCheck{}, e)
+	wantStatus(t, r, StatusPass)
+	if !strings.Contains(r.Vars["firewall"], "your provider's") {
+		t.Errorf("firewall: %+v", r)
+	}
+	wantStatus(t, run(t, openPortsCheck{}, e), StatusFail, "provider")
+	wantStatus(t, run(t, exposedDatabasesCheck{}, e), StatusFail, "provider")
+}

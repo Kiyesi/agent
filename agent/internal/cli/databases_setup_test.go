@@ -28,11 +28,12 @@ func TestSetupSQLPassesThroughTheShell(t *testing.T) {
 func fakeServer(t *testing.T, containers [][2]string, env map[string][]string, envFiles map[string]string, published map[string]string) {
 	t.Helper()
 	oldC, oldE, oldF, oldP, oldG, oldT, oldS := dockerContainers, dockerEnv, appEnvFiles, dockerPublished, dockerGateway, fileThere, systemdVersion
-	oldSettings, oldIP := setupSettingsPath, publicIPv4
+	oldSettings, oldIP, oldV6 := setupSettingsPath, publicIPv4, hasIPv6
 	t.Cleanup(func() {
 		dockerContainers, dockerEnv, appEnvFiles, dockerPublished, dockerGateway, fileThere, systemdVersion = oldC, oldE, oldF, oldP, oldG, oldT, oldS
-		setupSettingsPath, publicIPv4 = oldSettings, oldIP
+		setupSettingsPath, publicIPv4, hasIPv6 = oldSettings, oldIP, oldV6
 	})
+	hasIPv6 = func() bool { return false }
 	setupSettingsPath = t.TempDir() + "/config.yaml"
 	publicIPv4 = func() string { return "203.0.113.24" }
 	dockerContainers = func() ([][2]string, error) { return containers, nil }
@@ -106,9 +107,7 @@ func TestSetupAtlas(t *testing.T) {
 		"with only cluster0",
 		"IP Access List tab, this server's public address, 203.0.113.24,",
 		`sudo sh -c 'systemd-ask-password "Password for kiyesi_ro (not shown):" | systemd-creds encrypt - /etc/credstore.encrypted/kiyesi.db.shop'`,
-		"sudo tee -a " + setupSettingsPath + " >/dev/null <<'YAML'",
-		"databases:",
-		"url: mongodb+srv://kiyesi_ro@cluster0.abcde.mongodb.net/shop",
+		"printf '%s\\n' 'databases:' '  - name: shop' '    url: mongodb+srv://kiyesi_ro@cluster0.abcde.mongodb.net/shop' '    password: credential' | sudo tee -a " + setupSettingsPath + " >/dev/null",
 		"password: credential",
 	} {
 		if !strings.Contains(out, want) {
@@ -178,11 +177,11 @@ func TestSetupPrintsTheOnlyDatabaseStraightAway(t *testing.T) {
 // The settings step is one command that is right for the file as it is.
 func TestSetupAddsToTheSettingsAsTheyAre(t *testing.T) {
 	for name, c := range map[string]struct{ settings, want, not string }{
-		"no file":        {"", "databases:\n       - name: test", ""},
-		"no databases":   {"token: x\n", "databases:\n       - name: test", ""},
-		"databases last": {"token: x\ndatabases:\n  - name: orders\n    url: postgres://kiyesi_ro@/orders?host=/run/postgresql\n", "<<'YAML'\n       - name: test", "databases:\n       - name: test"},
-		"listed":         {"databases:\n  - name: test\n    url: x\n", "It is already in", "<<'YAML'"},
-		"inside":         {"databases:\n  - name: orders\n    url: x\nlogs:\n  level: info\n", "Add it under databases:", "<<'YAML'"},
+		"no file":        {"", "'databases:' '  - name: test'", ""},
+		"no databases":   {"token: x\n", "'databases:' '  - name: test'", ""},
+		"databases last": {"token: x\ndatabases:\n  - name: orders\n    url: postgres://kiyesi_ro@/orders?host=/run/postgresql\n", "printf '%s\\n' '  - name: test'", "'databases:'"},
+		"listed":         {"databases:\n  - name: test\n    url: x\n", "It is already in", "sudo tee"},
+		"inside":         {"databases:\n  - name: orders\n    url: x\nlogs:\n  level: info\n", "Add it under databases:", "sudo tee"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			fakeServer(t, nil, nil, nil, nil)
@@ -196,5 +195,74 @@ func TestSetupAddsToTheSettingsAsTheyAre(t *testing.T) {
 				t.Errorf("want %q, not %q, in:\n%s", c.want, c.not, out)
 			}
 		})
+	}
+}
+
+// Every command setup prints is one line, safe to copy with its indentation:
+// a <<'END' block hangs when its closing line is copied indented, as a
+// person's first try at the settings step did.
+func TestSetupCommandsAreSafeToCopy(t *testing.T) {
+	fakeServer(t, nil, nil, nil, map[string]string{"db-1": "127.0.0.1:5432"})
+	fileThere = func(p string) bool {
+		return p == "/var/run/postgresql/.s.PGSQL.5432" || p == "/var/run/mysqld/mysqld.sock"
+	}
+	for _, args := range [][]string{
+		{"postgres", "orders"}, {"mysql", "shop"}, {"mariadb", "shop"}, {"mongodb", "catalogue"}, {"redis", "cache"},
+		{"postgres", "orders", "--host", "db.example.com"}, {"mysql", "shop", "--host", "db.example.com"},
+		{"mongodb", "catalogue", "--host", "db.example.com"}, {"redis", "cache", "--host", "db.example.com"},
+		{"mongodb", "shop", "--host", "c.abcde.mongodb.net"},
+		{"postgres", "orders", "--container", "db-1"}, {"mongodb", "catalogue", "--container", "db-1"},
+	} {
+		_, out, _ := runCLI(t, append([]string{"databases", "setup"}, args...)...)
+		if strings.Contains(out, "<<") {
+			t.Errorf("%v prints a << block:\n%s", args, out)
+		}
+	}
+}
+
+// Providers that sign their databases' certificates themselves: the steps
+// keep their authority, and the address checks the certificate against it.
+func TestSetupHostedWithTheirOwnCertificateAuthority(t *testing.T) {
+	fakeServer(t, nil, nil, nil, nil)
+	for _, c := range []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"postgres", "orders", "--host", "orders.c9x.eu-west-1.rds.amazonaws.com"}, []string{
+			"sudo curl -fsSL -o /etc/kiyesi/ca/aws-rds.pem https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem",
+			"sslmode=verify-full sslrootcert=/etc/kiyesi/ca/aws-rds.pem",
+			"url: postgres://kiyesi_ro@orders.c9x.eu-west-1.rds.amazonaws.com:5432/orders?sslmode=verify-full&sslrootcert=/etc/kiyesi/ca/aws-rds.pem",
+			"The admin is the database's master user.",
+		}},
+		{[]string{"mysql", "shop", "--host", "shop.c9x.eu-west-1.rds.amazonaws.com"}, []string{
+			"--ssl-mode=VERIFY_IDENTITY --ssl-ca=/etc/kiyesi/ca/aws-rds.pem",
+			"url: mysql://kiyesi_ro@shop.c9x.eu-west-1.rds.amazonaws.com:3306/shop?tls=true&ca=/etc/kiyesi/ca/aws-rds.pem",
+		}},
+		{[]string{"postgres", "app", "--host", "db-postgresql-lon1-1.b.db.ondigitalocean.com", "--port", "25060"}, []string{
+			"Download CA certificate",
+			"sudo tee /etc/kiyesi/ca/digitalocean.pem >/dev/null",
+			":25060/app?sslmode=verify-full&sslrootcert=/etc/kiyesi/ca/digitalocean.pem",
+		}},
+		// No IPv6 on the server: Supabase's Session pooler, with its users.
+		{[]string{"postgres", "postgres", "--host", "db.abcdefgh.supabase.co"}, []string{
+			"Download certificate",
+			"Session pooler",
+			"user=postgres.abcdefgh sslmode=verify-full sslrootcert=/etc/kiyesi/ca/supabase.pem",
+			"url: postgres://kiyesi_ro.abcdefgh@<the Session pooler host, from Supabase: Connect>:5432/postgres?sslmode=verify-full&sslrootcert=/etc/kiyesi/ca/supabase.pem",
+		}},
+		// Neon's certificates are signed by an authority every system trusts.
+		{[]string{"postgres", "neondb", "--host", "ep-cool-1.eu-central-1.aws.neon.tech"}, []string{
+			"url: postgres://kiyesi_ro@ep-cool-1.eu-central-1.aws.neon.tech:5432/neondb?sslmode=verify-full",
+		}},
+	} {
+		_, out, _ := runCLI(t, append([]string{"databases", "setup"}, c.args...)...)
+		for _, w := range c.want {
+			if !strings.Contains(out, w) {
+				t.Errorf("%v: missing %q in:\n%s", c.args, w, out)
+			}
+		}
+		if c.args[3] == "ep-cool-1.eu-central-1.aws.neon.tech" && strings.Contains(out, "/etc/kiyesi/ca/") {
+			t.Errorf("Neon needs no certificate authority of its own:\n%s", out)
+		}
 	}
 }

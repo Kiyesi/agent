@@ -204,6 +204,8 @@ func TestBreakInPreloadAndQuietLogs(t *testing.T) {
 	e.file("etc/ld.so.preload", "# nothing\n/usr/local/lib/libprocesshider.so\n")
 	e.fs["root/.bash_history"] = &fstest.MapFile{Data: []byte("/dev/null"), Mode: fs.ModeSymlink}
 	e.fs["var/log/auth.log"] = &fstest.MapFile{ModTime: now.Add(-3 * 24 * time.Hour)}
+	// People signed in since, yet the sign-in log stayed empty.
+	e.fs["var/log/wtmp"] = &fstest.MapFile{Data: []byte("x"), ModTime: now.Add(-2 * time.Hour)}
 	r := run(t, breachCheck{}, e)
 	wantStatus(t, r, StatusFail, "preload", "history-off", "auth-log-empty")
 	if r.Findings[0].Vars["path"] != "/usr/local/lib/libprocesshider.so" || r.Findings[1].Vars["user"] != "root" {
@@ -219,6 +221,11 @@ func TestBreakInEmptySignInLogAfterRotationIsNotASign(t *testing.T) {
 	// Empty for days, but so is the system log: logging is off, not wiped.
 	e.fs["var/log/auth.log"] = &fstest.MapFile{ModTime: now.Add(-3 * 24 * time.Hour)}
 	e.fs["var/log/syslog"] = &fstest.MapFile{ModTime: now.Add(-3 * 24 * time.Hour)}
+	wantStatus(t, run(t, breachCheck{}, e), StatusPass)
+	// A quiet server nobody signed in to since the weekly rotation: the
+	// system log goes on, the sign-in log is empty, and nobody signed in.
+	e.fs["var/log/syslog"] = &fstest.MapFile{ModTime: now.Add(-10 * time.Minute)}
+	e.fs["var/log/wtmp"] = &fstest.MapFile{Data: []byte("x"), ModTime: now.Add(-5 * 24 * time.Hour)}
 	wantStatus(t, run(t, breachCheck{}, e), StatusPass)
 }
 

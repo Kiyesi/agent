@@ -94,6 +94,11 @@ type Logs struct {
 // Ports lists the ports that may be open on a public address.
 type Ports struct {
 	Allowed []int `yaml:"allowed"`
+	// ProviderFirewall is the person's word that the provider's own
+	// firewall (such as DigitalOcean's Cloud Firewall or an AWS security
+	// group) protects this server. Kiyesi cannot see it from inside, so
+	// "no firewall" and "open on a public address" would be wrong.
+	ProviderFirewall bool `yaml:"provider_firewall"`
 }
 
 // Backups names the folders backups are written to.

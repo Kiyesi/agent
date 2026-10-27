@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kiyesi/kiyesi/agent/internal/packs"
 )
 
 type backupsCheck struct{}
@@ -17,10 +20,10 @@ func (backupsCheck) ID() string { return "backups" }
 // walkLimit stops a walk of a very large folder from slowing the scan.
 const walkLimit = 20000
 
-func (backupsCheck) Run(_ context.Context, env *Env) Result {
+func (backupsCheck) Run(ctx context.Context, env *Env) Result {
 	cfg := env.Cfg.Backups
 	if len(cfg.Paths) == 0 {
-		return Fail(Found("not-set", nil))
+		return noBackupsNamed(ctx, env)
 	}
 	now := env.Sys.Now()
 	maxAge := time.Duration(cfg.MaxAgeHours) * time.Hour
@@ -74,6 +77,83 @@ func (backupsCheck) Run(_ context.Context, env *Env) Result {
 		opens = ", and it opens"
 	}
 	return Pass(map[string]string{"age": ageText(now.Sub(newestAll)), "opens": opens})
+}
+
+// dataDirs are where databases installed on a server keep their data.
+var dataDirs = map[string]string{
+	"var/lib/postgresql": "PostgreSQL", "var/lib/mysql": "MySQL", "var/lib/mongodb": "MongoDB",
+	"var/lib/redis": "Redis", "var/lib/valkey": "Valkey", "var/lib/elasticsearch": "Elasticsearch",
+	"var/lib/clickhouse": "ClickHouse",
+}
+
+// databaseImages are the words in a container image that runs a database.
+var databaseImages = []string{"postgres", "postgis", "timescale", "mysql", "mariadb", "percona", "mongo",
+	"redis", "valkey", "keydb", "elasticsearch", "opensearch", "clickhouse", "cassandra", "couchdb", "influxdb", "neo4j"}
+
+// noBackupsNamed decides what no backup folder means, from where this
+// server's data lives. Data on this server with no backup named is a
+// warning. Data only in hosted databases is backed up there, by its
+// provider's plan, which Kiyesi cannot see from here; and a server whose
+// apps name no database at all has nothing for this check to look at.
+// Neither of those costs points: a warning there was wrong for a server
+// whose only database is MongoDB Atlas.
+func noBackupsNamed(ctx context.Context, env *Env) Result {
+	here := map[string]bool{}
+	for dir, name := range dataDirs {
+		if fi, err := fs.Stat(env.Sys.FS, dir); err == nil && fi.IsDir() {
+			here[name] = true
+		}
+	}
+	if cs, err := env.Containers(ctx); err == nil {
+		for _, c := range cs {
+			if c.Status != "running" {
+				continue
+			}
+			img := strings.ToLower(c.Image)
+			for _, w := range databaseImages {
+				if strings.Contains(img, w) {
+					here["a "+w+" container ("+c.Name+")"] = true
+					break
+				}
+			}
+		}
+	}
+	var elsewhere []string
+	seen := map[string]bool{}
+	for _, d := range env.Databases(ctx) {
+		if d.local {
+			here[d.kind] = true
+			continue
+		}
+		name := d.host
+		if d.provider != "" {
+			name = d.provider + " (" + d.host + ")"
+		}
+		if !seen[name] {
+			seen[name] = true
+			elsewhere = append(elsewhere, name)
+		}
+	}
+	if len(here) > 0 {
+		// Backups sent elsewhere (restic, rclone, aws s3 in a timed job)
+		// are a backup: Kiyesi only cannot open them from here.
+		if places, err := packs.LoadPlaces(); err == nil {
+			var to []string
+			for _, b := range backups(env, places) {
+				to = append(to, b.target)
+			}
+			if len(to) > 0 {
+				sort.Strings(to)
+				return Skip("offsite", map[string]string{"to": strings.Join(to, ", ")})
+			}
+		}
+		return Fail(Found("not-set", nil))
+	}
+	if len(elsewhere) > 0 {
+		sort.Strings(elsewhere)
+		return Skip("elsewhere", map[string]string{"where": strings.Join(elsewhere, ", ")})
+	}
+	return Skip("no-data", nil)
 }
 
 // shrinkFloor keeps tiny backups, such as a settings export, from being

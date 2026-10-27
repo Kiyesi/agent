@@ -45,6 +45,21 @@ var (
 var (
 	// setupSettingsPath is Kiyesi's settings file, to add the database to.
 	setupSettingsPath = "/etc/kiyesi/config.yaml"
+	// hasIPv6 says whether this server has a public IPv6 address, which
+	// Supabase's direct connections need.
+	hasIPv6 = func() bool {
+		addrs, err := net.InterfaceAddrs()
+		if err != nil {
+			return false
+		}
+		for _, a := range addrs {
+			ip, _, err := net.ParseCIDR(a.String())
+			if err == nil && ip.To4() == nil && ip.IsGlobalUnicast() && !ip.IsPrivate() {
+				return true
+			}
+		}
+		return false
+	}
 	// publicIPv4 is this server's public address, when it is on one of
 	// its network cards (as on DigitalOcean); empty behind a NAT.
 	publicIPv4 = func() string {
@@ -294,15 +309,15 @@ func provider(host string) (name, note string) {
 	case strings.HasSuffix(h, ".mongodb.net"):
 		return "MongoDB Atlas", ""
 	case strings.HasSuffix(h, ".rds.amazonaws.com"):
-		return "AWS RDS", "Run the SQL as the database's master user, from a server that can reach it."
+		return "AWS RDS", "The admin is the database's master user."
 	case strings.HasSuffix(h, ".supabase.co") || strings.HasSuffix(h, ".supabase.com"):
-		return "Supabase", "Run the SQL in Supabase's SQL Editor (it signs in as postgres)."
+		return "Supabase", "The admin is postgres, with the database password from Supabase: Project Settings, Database."
 	case strings.HasSuffix(h, ".neon.tech"):
-		return "Neon", "Run the SQL in Neon's SQL Editor, on the database's branch."
+		return "Neon", "The admin is the role in Neon's connection string (Neon: Connect)."
 	case strings.HasSuffix(h, ".ondigitalocean.com"):
-		return "DigitalOcean", "Run the SQL as doadmin, from a server in the database's trusted sources."
+		return "DigitalOcean", "The admin is doadmin; this server must be in the database's trusted sources."
 	case strings.HasSuffix(h, ".database.azure.com"):
-		return "Azure Database", "Run the SQL as the server's admin user."
+		return "Azure Database", "The admin is the server's admin user."
 	case strings.HasSuffix(h, ".psdb.cloud"):
 		return "PlanetScale", "PlanetScale makes passwords in its dashboard, and its smallest role, Reader, can read rows: Kiyesi reads only sizes, but that password could read data."
 	case strings.HasSuffix(h, ".upstash.io"):
@@ -495,18 +510,61 @@ func (s *setupFor) config(url string, encrypted bool) {
 	case "listed":
 		s.say("It is already in " + setupSettingsPath + " as " + s.db + ": check its url says " + url + ".")
 	case "last", "none":
-		block := entry
+		lines := strings.Split(entry, "\n")
 		if where == "none" {
-			block = "databases:\n" + entry
+			lines = append([]string{"databases:"}, lines...)
 		}
 		s.say("Add it to Kiyesi's settings, "+setupSettingsPath+" (the address holds no password):",
-			"sudo tee -a "+setupSettingsPath+" >/dev/null <<'YAML'\n"+block+"\nYAML")
+			printfLines(lines...)+" | sudo tee -a "+setupSettingsPath+" >/dev/null")
 	default:
 		s.say("Add it under databases: in "+setupSettingsPath+" (the address holds no password):", entry)
 	}
 	s.say("Check it: Kiyesi signs in the way the agent will, and says how, and any right its user should not have.",
 		"sudo kiyesi databases check")
 	fmt.Fprintln(s.out, "\nThe agent reads it again within 5 minutes. Guide: https://docs.kiyesi.dev/guides/databases/")
+}
+
+// caDir keeps the certificate authorities of providers that sign their
+// databases' certificates themselves.
+const caDir = "/etc/kiyesi/ca"
+
+// caStep adds the step that keeps the provider's own certificate authority
+// here, for a provider whose certificates no system trusts by itself, and
+// gives its file; "" when the system's authorities check the certificate.
+func (s *setupFor) caStep() string {
+	name, _ := provider(s.host)
+	paste := func(path string) []string {
+		return []string{"sudo install -d -m 755 " + caDir, "sudo tee " + path + " >/dev/null"}
+	}
+	switch name {
+	case "AWS RDS":
+		path := caDir + "/aws-rds.pem"
+		s.say("Fetch AWS's certificate authority for RDS, so the database's certificate is checked against it:",
+			"sudo install -d -m 755 "+caDir,
+			"sudo curl -fsSL -o "+path+" https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem")
+		return path
+	case "Supabase":
+		path := caDir + "/supabase.pem"
+		s.say("Supabase signs its databases' certificates itself. In Supabase: Project Settings, Database, SSL Configuration, Download certificate. Open the file, copy all of it, run this, paste it, then press Ctrl-D:", paste(path)...)
+		return path
+	case "DigitalOcean":
+		path := caDir + "/digitalocean.pem"
+		s.say("DigitalOcean signs its databases' certificates itself. On the database's Overview page, Connection Details, Download CA certificate (or: doctl databases get-ca <cluster> --format Certificate --no-header). Copy all of it, run this, paste it, then press Ctrl-D:", paste(path)...)
+		return path
+	}
+	return ""
+}
+
+// supabasePooler is the host and users to reach a Supabase database through
+// its session pooler, on a server with no IPv6: the direct connection is
+// IPv6 only. The pooler's host is in Supabase's Connect panel.
+func supabasePooler(host string) (pooler, ref string, ok bool) {
+	h := strings.ToLower(host)
+	if !strings.HasPrefix(h, "db.") || !strings.HasSuffix(h, ".supabase.co") || hasIPv6() {
+		return "", "", false
+	}
+	ref = strings.TrimSuffix(strings.TrimPrefix(h, "db."), ".supabase.co")
+	return "<the Session pooler host, from Supabase: Connect>", ref, true
 }
 
 // databasesSection says where a new database goes in the settings: "none"
@@ -535,6 +593,23 @@ func databasesSection(settings, name string) string {
 		}
 	}
 	return "last"
+}
+
+// printfLines is one shell command that prints these lines, each in single
+// quotes: safe to copy with any indentation, unlike a <<'END' block, whose
+// closing line must start the line. The lines hold no single quote.
+// shellDQ escapes text for inside double quotes in the shell: what the
+// shell would read there (\\, ", backquotes, $) is passed as written.
+func shellDQ(text string) string {
+	return strings.NewReplacer(`\`, `\\`, `"`, `\"`, "`", "\\`", `$`, `\$`).Replace(text)
+}
+
+func printfLines(lines ...string) string {
+	q := make([]string, len(lines))
+	for i, l := range lines {
+		q[i] = "'" + l + "'"
+	}
+	return `printf '%s\n' ` + strings.Join(q, " ")
 }
 
 // sqlLines writes SQL lines for a printf format inside double quotes: each
@@ -609,7 +684,7 @@ func (s *setupFor) postgres() {
 	if s.host == "" && socket != "" {
 		s.intro("the PostgreSQL database " + s.db + " on this server, read-only, through its socket with no password")
 		s.say("Make Kiyesi's user. It may connect and read sizes and counts, never a row, and every session it opens is read-only:",
-			"sudo -u postgres psql -v ON_ERROR_STOP=1 <<'SQL'\nCREATE ROLE "+pgRole+";\n"+readOnly+"\nSQL")
+			"sudo -u postgres psql -v ON_ERROR_STOP=1 -c 'CREATE ROLE "+pgRole+"' -c '"+strings.Join(strings.Split(readOnly, "\n"), "' -c '")+"'")
 		s.say("Let this server's root user, which runs the agent, sign in as kiyesi_ro through the socket only (peer). The line goes first in pg_hba.conf, which is read top to bottom:",
 			`hba="$(sudo -u postgres psql -tAc 'SHOW hba_file')"; ident="$(sudo -u postgres psql -tAc 'SHOW ident_file')"`,
 			`echo 'kiyesi  root  kiyesi_ro' | sudo tee -a "$ident" >/dev/null`,
@@ -630,8 +705,19 @@ func (s *setupFor) postgres() {
 	if s.container != "" {
 		admin = `sudo docker exec -i ` + s.container + ` sh -c 'exec psql -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}"'`
 	}
+	pgHost, pgAdmin, pgUser := s.host, "<admin>", "kiyesi_ro"
+	if pooler, ref, ok := supabasePooler(s.host); ok {
+		fmt.Fprintln(s.out, "Supabase's direct connection is IPv6 only, and this server has no IPv6 address: both steps go through Supabase's Session pooler, port 5432. Put its host, from Supabase: Connect, Session pooler, in place of "+pooler+".")
+		pgHost, pgAdmin, pgUser = pooler, "postgres."+ref, "kiyesi_ro."+ref
+	}
+	var ca string
 	if s.host != "" {
-		admin = `psql -v ON_ERROR_STOP=1 "host=` + s.host + ` port=` + strings.Split(s.hostPort(5432), ":")[1] + ` dbname=` + s.db + ` user=<admin> sslmode=verify-full"`
+		ca = s.caStep()
+		root := ""
+		if ca != "" {
+			root = " sslrootcert=" + ca
+		}
+		admin = `psql -v ON_ERROR_STOP=1 "host=` + pgHost + ` port=` + strings.Split(s.hostPort(5432), ":")[1] + ` dbname=` + s.db + ` user=` + pgAdmin + ` sslmode=verify-full` + root + `"`
 	}
 	s.say("Make Kiyesi's user with a random password nobody sees. It may connect and read sizes and counts, never a row, and every session is read-only. Run it as the database's admin:",
 		randomPassword,
@@ -644,9 +730,15 @@ func (s *setupFor) postgres() {
 	if s.addr != "" {
 		addr = s.addr
 	}
-	url := "postgres://kiyesi_ro@" + addr + "/" + s.db
+	if s.host != "" && pgHost != s.host {
+		addr = pgHost + ":5432"
+	}
+	url := "postgres://" + pgUser + "@" + addr + "/" + s.db
 	if s.host != "" {
 		url += "?sslmode=verify-full"
+		if ca != "" {
+			url += "&sslrootcert=" + ca
+		}
 	}
 	s.config(url, true)
 }
@@ -670,7 +762,7 @@ func (s *setupFor) mysql(maria bool) {
 	if !maria && s.host == "" && s.container == "" && socket != "" {
 		s.intro("the MySQL database " + s.db + " on this server, read-only, through its socket with no password")
 		s.say("Make Kiyesi's user. Only this server's root user, which runs the agent, may sign in as it, and only through the socket (auth_socket). SHOW VIEW on the one database lets it see its tables' sizes, never their rows:",
-			"sudo mysql <<'SQL'\nCREATE USER 'kiyesi_ro'@'localhost' IDENTIFIED WITH auth_socket AS 'root' WITH MAX_USER_CONNECTIONS 3;\n"+fmt.Sprintf(grant, "localhost")+"\nSQL")
+			"sudo mysql -e \""+shellDQ("CREATE USER 'kiyesi_ro'@'localhost' IDENTIFIED WITH auth_socket AS 'root' WITH MAX_USER_CONNECTIONS 3; "+fmt.Sprintf(grant, "localhost"))+"\"")
 		fmt.Fprintln(s.out, "   If it says the auth_socket plugin is not loaded: sudo mysql -e \"INSTALL PLUGIN auth_socket SONAME 'auth_socket.so'\"")
 		s.config("mysql://kiyesi_ro@localhost/"+s.db+"?socket="+socket, false)
 		return
@@ -698,8 +790,17 @@ func (s *setupFor) mysql(maria bool) {
 		}
 		admin = `sudo docker exec -i ` + s.container + ` sh -c 'exec ` + cli + ` -uroot -p` + root + `'`
 	}
+	var ca string
 	if s.host != "" {
-		admin = cli + " -h " + s.host + " -P " + strings.Split(s.hostPort(3306), ":")[1] + " -u <admin> -p --ssl"
+		ca = s.caStep()
+		tlsOpt := " --ssl-mode=VERIFY_IDENTITY"
+		if maria {
+			tlsOpt = " --ssl --ssl-verify-server-cert"
+		}
+		if ca != "" {
+			tlsOpt += " --ssl-ca=" + ca
+		}
+		admin = cli + " -h " + s.host + " -P " + strings.Split(s.hostPort(3306), ":")[1] + " -u <admin> -p" + tlsOpt
 	}
 	s.say("Make Kiyesi's user with a random password nobody sees, allowed only from "+from+". SHOW VIEW on the one database lets it see its tables' sizes, never their rows. Run it as the database's admin:",
 		randomPassword,
@@ -715,6 +816,9 @@ func (s *setupFor) mysql(maria bool) {
 	url := "mysql://kiyesi_ro@" + addr + "/" + s.db
 	if s.host != "" {
 		url += "?tls=true"
+		if ca != "" {
+			url += "&ca=" + ca
+		}
 	}
 	s.config(url, true)
 }
@@ -727,6 +831,17 @@ func (s *setupFor) mongoUserJS() string {
   { resource: { db: "` + s.db + `", collection: "" }, actions: ["dbStats"] },
   { resource: { cluster: true }, actions: ["serverStatus"] } ], roles: [] });
 db.getSiblingDB("admin").createUser({ user: "kiyesi_ro", pwd: process.env.KIYESI_PW, roles: [{ role: "kiyesiStats", db: "admin" }] });`
+}
+
+// mongoRun runs the script as the admin. In a container the admin's
+// password comes from the container's settings, so the script can come in
+// on standard input; elsewhere mongosh asks for the password there, so the
+// script goes in --eval, as one line.
+func mongoRun(admin, js string, piped bool) string {
+	if piped {
+		return printfLines(strings.Split(js, "\n")...) + " | " + admin
+	}
+	return admin + " --eval '" + strings.Join(strings.Fields(js), " ") + "'"
 }
 
 func (s *setupFor) mongodb() {
@@ -743,15 +858,21 @@ func (s *setupFor) mongodb() {
 	}
 	s.intro(where + ", read-only, with a random password kept encrypted")
 	admin := `KIYESI_PW="$pw" mongosh --quiet admin -u <admin>`
+	var ca string
 	if s.host != "" {
-		admin = `KIYESI_PW="$pw" mongosh --quiet "mongodb://` + s.hostPort(27017) + `/admin?tls=true" -u <admin>`
+		ca = s.caStep()
+		caOpt := ""
+		if ca != "" {
+			caOpt = "&tlsCAFile=" + ca
+		}
+		admin = `KIYESI_PW="$pw" mongosh --quiet "mongodb://` + s.hostPort(27017) + `/admin?tls=true` + caOpt + `" -u <admin>`
 	}
 	if s.container != "" {
 		admin = `sudo docker exec -i -e KIYESI_PW="$pw" ` + s.container + ` sh -c 'exec mongosh --quiet admin -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD"'`
 	}
 	s.say("Make a role that may only read the database's size and the server's status, and Kiyesi's user with it and a random password nobody sees. Run it as the database's admin:",
 		randomPassword,
-		admin+" <<'JS'\n"+s.mongoUserJS()+"\nJS")
+		mongoRun(admin, s.mongoUserJS(), s.container != ""))
 	s.say(s.storeWords(), s.store())
 	addr := "127.0.0.1:27017"
 	if s.host != "" {
@@ -763,6 +884,9 @@ func (s *setupFor) mongodb() {
 	url := "mongodb://kiyesi_ro@" + addr + "/" + s.db + "?authSource=admin"
 	if s.host != "" {
 		url += "&tls=true"
+		if ca != "" {
+			url += "&tlsCAFile=" + ca
+		}
 	}
 	s.config(url, true)
 }
@@ -807,8 +931,14 @@ func (s *setupFor) redis() {
 	}
 	s.intro(where + ", read-only, with a random password kept encrypted")
 	admin := "redis-cli -a <the admin password> --no-auth-warning"
+	var ca string
 	if s.host != "" {
-		admin = "redis-cli --tls -h " + s.host + " -p " + strings.Split(s.hostPort(6379), ":")[1] + " -a <the admin password> --no-auth-warning"
+		ca = s.caStep()
+		caOpt := ""
+		if ca != "" {
+			caOpt = " --cacert " + ca
+		}
+		admin = "redis-cli --tls" + caOpt + " -h " + s.host + " -p " + strings.Split(s.hostPort(6379), ":")[1] + " -a <the admin password> --no-auth-warning"
 	}
 	if s.container != "" {
 		admin = `sudo docker exec -i ` + s.container + ` sh -c 'exec "$(command -v redis-cli || command -v valkey-cli)" ${REDIS_PASSWORD:+-a "$REDIS_PASSWORD" --no-auth-warning}'`
@@ -824,11 +954,14 @@ func (s *setupFor) redis() {
 	if s.addr != "" {
 		addr = s.addr
 	}
-	scheme := "redis"
+	scheme, query := "redis", ""
 	if s.host != "" {
 		scheme = "rediss"
+		if ca != "" {
+			query = "?ca=" + ca
+		}
 	}
-	s.config(scheme+"://kiyesi_ro@"+addr, true)
+	s.config(scheme+"://kiyesi_ro@"+addr+query, true)
 }
 
 func newDatabasesEncrypt(io IO) *cobra.Command {

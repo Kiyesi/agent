@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"database/sql"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -58,6 +60,25 @@ func connectPostgres(ctx context.Context, dsn, password string) (*pgx.Conn, erro
 	return pgx.ConnectConfig(ctx, cfg)
 }
 
+// tlsFor is the TLS settings for a database's host: its certificate checked
+// against the system's authorities, or against the provider's own in the
+// ?ca= file (AWS RDS, Supabase, DigitalOcean have their own).
+func tlsFor(u *url.URL) (*tls.Config, error) {
+	cfg := &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12}
+	if ca := u.Query().Get("ca"); ca != "" {
+		pem, err := os.ReadFile(ca) // #nosec G304 -- a path from root's own settings file
+		if err != nil {
+			return nil, fmt.Errorf("its certificate authority %s could not be read", ca)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("its certificate authority %s holds no certificate", ca)
+		}
+		cfg.RootCAs = pool
+	}
+	return cfg, nil
+}
+
 // mysqlConfig is the driver's settings for an address: over its socket
 // file (?socket=/path) for auth_socket, else over TCP.
 func mysqlConfig(u *url.URL, password string) *mysql.Config {
@@ -76,6 +97,9 @@ func mysqlConfig(u *url.URL, password string) *mysql.Config {
 	cfg.Timeout = 10 * time.Second
 	if u.Query().Get("tls") == "true" {
 		cfg.TLSConfig = "true"
+		if t, err := tlsFor(u); err == nil {
+			cfg.TLS = t
+		}
 	}
 	return cfg
 }
@@ -211,7 +235,11 @@ func readRedis(ctx context.Context, u *url.URL, password string, f *Figures, now
 	var conn net.Conn
 	var err error
 	if u.Scheme == "rediss" {
-		conn, err = tls.DialWithDialer(&d, "tcp", addr, &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12})
+		var t *tls.Config
+		if t, err = tlsFor(u); err != nil {
+			return err
+		}
+		conn, err = tls.DialWithDialer(&d, "tcp", addr, t)
 	} else {
 		conn, err = d.DialContext(ctx, "tcp", addr)
 	}

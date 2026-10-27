@@ -133,8 +133,36 @@ func mustRead(tb testing.TB, name string) string {
 	return string(e.fs["x"].Data)
 }
 
+// No backup folder named means different things by where the data lives.
+func TestBackupsNotNamed(t *testing.T) {
+	// A server with no database anywhere: nothing for this check to look at.
+	r := run(t, backupsCheck{}, newTestEnv())
+	if r.Status != StatusSkip || r.SkipKey != "no-data" {
+		t.Errorf("no data: %+v", r)
+	}
+	// A database installed here, with no backup anywhere: the warning.
+	e := newTestEnv()
+	e.fs["var/lib/postgresql/16/main/PG_VERSION"] = &fstest.MapFile{Data: []byte("16\n")}
+	wantStatus(t, run(t, backupsCheck{}, e), StatusFail, "not-set")
+	// The owner's server: its only database is MongoDB Atlas, from the
+	// app's settings. Backups are Atlas's, by its plan: no warning.
+	e = newTestEnv()
+	e.fs["opt/appstack/.env"] = &fstest.MapFile{Data: []byte("MONGODB_URI=mongodb+srv://app:" + "s3cret@cluster0.ab1cd.mongodb.net/test\n"), Mode: 0o600}
+	e.cfg.Secrets.Paths = []string{"/opt"}
+	r = run(t, backupsCheck{}, e)
+	if r.Status != StatusSkip || r.SkipKey != "elsewhere" || !strings.Contains(r.SkipVars["where"], "cluster0.ab1cd.mongodb.net") || strings.Contains(r.SkipVars["where"], "s3cret") {
+		t.Errorf("hosted only: %+v", r)
+	}
+	// A database here, backed up off the server by restic: named, not "none".
+	e = appEnv(t)
+	e.fs["var/lib/mysql/ibdata1"] = &fstest.MapFile{Data: []byte("x")}
+	r = run(t, backupsCheck{}, e)
+	if r.Status != StatusSkip || r.SkipKey != "offsite" || !strings.Contains(r.SkipVars["to"], "restic") {
+		t.Errorf("offsite: %+v", r)
+	}
+}
+
 func TestBackups(t *testing.T) {
-	wantStatus(t, run(t, backupsCheck{}, newTestEnv()), StatusFail, "not-set")
 
 	e := newTestEnv()
 	e.cfg.Backups.Paths = []string{"/var/backups/db"}

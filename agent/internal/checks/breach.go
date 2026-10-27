@@ -564,6 +564,13 @@ func quietLogs(env *Env) []Finding {
 		if err != nil || now.Sub(rest.ModTime()) > time.Hour {
 			continue
 		}
+		// A quiet server nobody signs in to keeps an empty auth log after
+		// its weekly rotation: only sign-ins recorded since (wtmp) while the
+		// auth log stayed empty say it was wiped or stopped.
+		wtmp, err := fs.Stat(fsys, "var/log/wtmp")
+		if err != nil || !wtmp.ModTime().After(auth.ModTime().Add(time.Hour)) {
+			continue
+		}
 		found = append(found, Found("auth-log-empty", map[string]string{
 			"path": "/" + pair[0], "date": auth.ModTime().UTC().Format("2 Jan 2006"),
 		}))

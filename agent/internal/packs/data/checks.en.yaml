@@ -192,13 +192,27 @@ checks:
       needed: sometimes
       why: Backup folders are often readable only by root.
     passed: "Newest backup is {age} old{opens}"
+    skips:
+      elsewhere: >-
+        this server keeps no database of its own: its data is in {where}, backed up there by its
+        provider's plan, which Kiyesi cannot see from here. Check backups are on in its settings:
+        some free plans keep none
+      offsite: >-
+        backups go to {to}, which Kiyesi cannot open from here to check their age. To have it
+        check them, name a folder on this server they are also written to under backups.paths in
+        /etc/kiyesi/config.yaml
+      no-data: >-
+        found no database on this server, in its containers or in its apps' settings. If it keeps
+        files that matter, add the folder their backups are written to under backups.paths in
+        /etc/kiyesi/config.yaml
     findings:
       not-set:
         severity: warning
         sentence: No backup is set up for Kiyesi to check
         why: >-
-          Without a backup, a failed disk or one wrong command loses the data for good. If you
-          do have backups, tell Kiyesi where they are written.
+          This server keeps a database of its own. Without a backup, a failed disk or one wrong
+          command loses its data for good. If you do have backups, tell Kiyesi where they are
+          written.
         fix: "Add the backup folder under backups.paths in /etc/kiyesi/config.yaml"
       empty:
         severity: warning
@@ -305,6 +319,13 @@ checks:
       needed: never
     passed: "Only allowed ports are open ({ports})"
     findings:
+      provider:
+        severity: info
+        sentence: "Port {port} listens on a public address, behind your provider's firewall"
+        why: >-
+          The settings say your provider's firewall protects this server, which Kiyesi cannot see
+          from inside: that firewall decides who reaches port {port}.
+        fix: "Check your provider's firewall allows {port} only from where it should be reached"
       open:
         severity: warning
         sentence: "Port {port} is open on a public address"
@@ -324,6 +345,13 @@ checks:
       why: Reading the firewall rules needs root.
     passed: "No database is open to the internet"
     findings:
+      provider:
+        severity: warning
+        sentence: "{database} listens on a public address on port {port}, behind your provider's firewall"
+        why: >-
+          Only your provider's firewall, which Kiyesi cannot see from inside, keeps {database} from
+          the internet. One wrong rule there opens it to everyone.
+        fix: "Bind {database} to 127.0.0.1 or a private address if only this server or your private network needs it, and check your provider's firewall does not allow {port} from the internet"
       open:
         severity: critical
         confidence: likely
@@ -405,7 +433,11 @@ checks:
         severity: warning
         auto: firewall
         sentence: No firewall is on
-        why: Without a firewall, every port a program opens can be reached from the internet.
+        why: >-
+          Without a firewall, every port a program opens can be reached from the internet. If
+          your provider's firewall protects this server (such as DigitalOcean's Cloud Firewall or
+          an AWS security group), Kiyesi cannot see it from inside: say so with
+          provider_firewall: true under ports in /etc/kiyesi/config.yaml.
         fix: "sudo ufw allow {ssh_port}/tcp && sudo ufw enable"
 
   - id: login-protection

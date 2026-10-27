@@ -37,6 +37,8 @@ func (firewallCheck) Run(ctx context.Context, env *Env) Result {
 	switch {
 	case fw.Name != "":
 		return Pass(map[string]string{"firewall": fw.Name})
+	case env.Cfg.Ports.ProviderFirewall:
+		return Pass(map[string]string{"firewall": "your provider's, as the settings say: Kiyesi sees only this server's own"})
 	case !fw.Known:
 		return NeedsRoot()
 	default:

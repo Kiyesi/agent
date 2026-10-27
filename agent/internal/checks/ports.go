@@ -54,7 +54,11 @@ func (openPortsCheck) Run(ctx context.Context, env *Env) Result {
 		if allowed[p] || databases[p] != "" {
 			continue
 		}
-		found = append(found, Found("open", map[string]string{"port": strconv.Itoa(p)}))
+		key := "open"
+		if env.Cfg.Ports.ProviderFirewall {
+			key = "provider"
+		}
+		found = append(found, Found(key, map[string]string{"port": strconv.Itoa(p)}))
 	}
 	if len(found) > 0 {
 		return Fail(found...)
@@ -116,6 +120,13 @@ func (exposedDatabasesCheck) Run(ctx context.Context, env *Env) Result {
 		}
 		vars := map[string]string{"database": name, "port": strconv.Itoa(l.Port)}
 		found = append(found, Finding{Key: "open", Variant: databaseVariant[l.Port], Vars: vars})
+	}
+	// The provider's firewall, by the person's word, stands between these
+	// and the internet: listening on a public address, not open to it.
+	if env.Cfg.Ports.ProviderFirewall {
+		for i := range found {
+			found[i].Key, found[i].Variant = "provider", ""
+		}
 	}
 	if len(found) > 0 {
 		return Fail(found...)
