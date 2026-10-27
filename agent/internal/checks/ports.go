@@ -58,7 +58,7 @@ func (openPortsCheck) Run(ctx context.Context, env *Env) Result {
 		if env.Cfg.Ports.ProviderFirewall {
 			key = "provider"
 		}
-		found = append(found, Found(key, map[string]string{"port": strconv.Itoa(p)}))
+		found = append(found, Found(key, map[string]string{"port": strconv.Itoa(p), "provider_firewall": providerFirewall(ctx, env)}))
 	}
 	if len(found) > 0 {
 		return Fail(found...)
@@ -93,7 +93,7 @@ func (exposedDatabasesCheck) Run(ctx context.Context, env *Env) Result {
 			continue
 		}
 		byDocker[p.Port] = true
-		vars := map[string]string{"database": name, "port": strconv.Itoa(p.Port), "service": p.Container.ComposeService}
+		vars := map[string]string{"database": name, "port": strconv.Itoa(p.Port), "service": p.Container.ComposeService, "provider_firewall": providerFirewall(ctx, env)}
 		variant := ""
 		if p.Container.ComposeService == "" {
 			variant = "docker-run"
@@ -118,7 +118,7 @@ func (exposedDatabasesCheck) Run(ctx context.Context, env *Env) Result {
 			unknown = true
 			continue
 		}
-		vars := map[string]string{"database": name, "port": strconv.Itoa(l.Port)}
+		vars := map[string]string{"database": name, "port": strconv.Itoa(l.Port), "provider_firewall": providerFirewall(ctx, env)}
 		found = append(found, Finding{Key: "open", Variant: databaseVariant[l.Port], Vars: vars})
 	}
 	// The provider's firewall, by the person's word, stands between these

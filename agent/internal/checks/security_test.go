@@ -268,3 +268,18 @@ func TestProviderFirewallInTheSettings(t *testing.T) {
 	wantStatus(t, run(t, openPortsCheck{}, e), StatusFail, "provider")
 	wantStatus(t, run(t, exposedDatabasesCheck{}, e), StatusFail, "provider")
 }
+
+// "No firewall" names the firewall this server's provider offers, which
+// Kiyesi cannot see from inside.
+func TestNoFirewallNamesTheProvidersOwn(t *testing.T) {
+	do := newTestEnv().saved(t, "run/cloud-init/instance-data.json", "instance-data-do-lon1.json").
+		file("etc/ufw/ufw.conf", "ENABLED=no\n").command("iptables -S INPUT", "-P INPUT ACCEPT\n")
+	r := run(t, firewallCheck{}, do)
+	if r.Status != StatusFail || r.Findings[0].Vars["provider_firewall"] != "a DigitalOcean Cloud Firewall" {
+		t.Errorf("DigitalOcean: %+v", r)
+	}
+	unknown := newTestEnv().file("etc/ufw/ufw.conf", "ENABLED=no\n").command("iptables -S INPUT", "-P INPUT ACCEPT\n")
+	if r := run(t, firewallCheck{}, unknown); r.Findings[0].Vars["provider_firewall"] != "your provider's firewall" {
+		t.Errorf("unknown provider: %+v", r)
+	}
+}

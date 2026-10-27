@@ -331,7 +331,9 @@ checks:
         sentence: "Port {port} is open on a public address"
         why: >-
           Every open port is a way in. Only ports you mean to serve should be open. If this one
-          should be open, add it to ports.allowed in /etc/kiyesi/config.yaml.
+          should be open, add it to ports.allowed in /etc/kiyesi/config.yaml. If {provider_firewall}
+          protects this server, which Kiyesi cannot see from inside, say so with
+          provider_firewall: true under ports there.
         fix: "Bind the program to 127.0.0.1 if only this server needs it. Or keep it behind the firewall: with none on, allow SSH first (sudo ufw allow 22/tcp, or the port you sign in on), then sudo ufw enable; with ufw on, sudo ufw status numbered shows the rule that allows {port}, and sudo ufw delete <number> removes it"
 
   - id: exposed-databases
@@ -357,8 +359,9 @@ checks:
         confidence: likely
         sentence: "{database} is open to the internet on port {port}"
         why: >-
-          Anyone can connect and read or wipe the data. A cloud firewall outside the server
-          cannot be seen from here, so this is likely, not confirmed.
+          Anyone can connect and read or wipe the data. Kiyesi cannot see {provider_firewall} from
+          inside the server, so this is likely, not confirmed. If one protects it, say so with
+          provider_firewall: true under ports in /etc/kiyesi/config.yaml.
         fix: "bind the port to 127.0.0.1 in docker-compose.yml, then\ndocker compose up -d {service}"
         fix-variants:
           docker-run: "recreate the container with -p 127.0.0.1:{port}:{port} in place of -p {port}:{port}"
@@ -435,8 +438,7 @@ checks:
         sentence: No firewall is on
         why: >-
           Without a firewall, every port a program opens can be reached from the internet. If
-          your provider's firewall protects this server (such as DigitalOcean's Cloud Firewall or
-          an AWS security group), Kiyesi cannot see it from inside: say so with
+          {provider_firewall} protects this server, Kiyesi cannot see it from inside: say so with
           provider_firewall: true under ports in /etc/kiyesi/config.yaml.
         fix: "sudo ufw allow {ssh_port}/tcp && sudo ufw enable"
 

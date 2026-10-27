@@ -51,8 +51,28 @@ func (firewallCheck) Run(ctx context.Context, env *Env) Result {
 		if len(ports) == 0 {
 			ports = []string{"22"}
 		}
-		return Fail(Found("off", map[string]string{"ssh_port": strings.Join(ports, ",")}))
+		return Fail(Found("off", map[string]string{"ssh_port": strings.Join(ports, ","), "provider_firewall": providerFirewall(ctx, env)}))
 	}
+}
+
+// providerFirewalls name each provider's own firewall, which protects a
+// server from outside it, where the agent cannot see it.
+var providerFirewalls = map[string]string{
+	"DigitalOcean": "a DigitalOcean Cloud Firewall",
+	"AWS":          "an AWS security group",
+	"Google":       "a Google Cloud VPC firewall rule",
+	"Azure":        "an Azure network security group",
+	"Hetzner":      "a Hetzner Cloud Firewall",
+	"Vultr":        "a Vultr Firewall",
+}
+
+// providerFirewall names the firewall this server's provider offers, or
+// says "your provider's firewall" when the provider is not known.
+func providerFirewall(ctx context.Context, env *Env) string {
+	if name, ok := providerFirewalls[env.Server(ctx).provider]; ok {
+		return name
+	}
+	return "your provider's firewall"
 }
 
 type loginProtectionCheck struct{}

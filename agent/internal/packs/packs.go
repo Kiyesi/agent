@@ -131,10 +131,17 @@ var placeholder = regexp.MustCompile(`\{([a-z_]+)((?:\|[^{}|]*)*)\}`)
 //	{count|no containers|container|containers} no containers, 1 container, 2 containers
 //	{days|in}                                  today, tomorrow, in 9 days
 //	{days|ago}                                 today, yesterday, 3 days ago
+// fillDefaults are the words for a value a finding may not carry, such as
+// one saved by an agent from before the value existed.
+var fillDefaults = map[string]string{"provider_firewall": "your provider's firewall"}
+
 func Fill(s string, vars map[string]string) string {
 	return placeholder.ReplaceAllStringFunc(s, func(m string) string {
 		parts := placeholder.FindStringSubmatch(m)
 		v, ok := vars[parts[1]]
+		if !ok {
+			v, ok = fillDefaults[parts[1]]
+		}
 		if !ok {
 			return m
 		}
