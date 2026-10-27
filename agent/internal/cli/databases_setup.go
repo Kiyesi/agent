@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -37,6 +38,31 @@ var (
 	fileThere = func(path string) bool {
 		_, err := os.Stat(path)
 		return err == nil
+	}
+)
+
+// What setup reads about this server besides its databases. Tests replace them.
+var (
+	// setupSettingsPath is Kiyesi's settings file, to add the database to.
+	setupSettingsPath = "/etc/kiyesi/config.yaml"
+	// publicIPv4 is this server's public address, when it is on one of
+	// its network cards (as on DigitalOcean); empty behind a NAT.
+	publicIPv4 = func() string {
+		addrs, err := net.InterfaceAddrs()
+		if err != nil {
+			return ""
+		}
+		for _, a := range addrs {
+			ip, _, err := net.ParseCIDR(a.String())
+			if err != nil || ip.To4() == nil || !ip.IsGlobalUnicast() || ip.IsPrivate() {
+				continue
+			}
+			if _, cgnat, _ := net.ParseCIDR("100.64.0.0/10"); cgnat.Contains(ip) {
+				continue
+			}
+			return ip.String()
+		}
+		return ""
 	}
 )
 
@@ -128,14 +154,27 @@ func newDatabasesSetup(io IO) *cobra.Command {
 			"  sudo kiyesi databases setup mysql shop --host db.internal",
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			var engine, db string
 			if len(args) == 0 {
-				listDatabases(io.Out)
-				return nil
-			}
-			engine := strings.ToLower(args[0])
-			db := "app"
-			if len(args) == 2 {
-				db = args[1]
+				found := findDatabases()
+				one := found.only()
+				if one == nil {
+					listDatabases(io.Out, found)
+					return nil
+				}
+				// One database, and all its steps need: print them now.
+				label, _ := provider(one.host)
+				if label == "" {
+					label = one.engine
+				}
+				fmt.Fprintf(io.Out, "Found one database, which the apps on this server use: %s %s, database %s.\n(If that is not the database to watch: sudo kiyesi databases setup <engine> <database> --host <host>)\n\n", label, one.host, one.db)
+				engine, db, host = one.engine, one.db, one.host
+			} else {
+				engine = strings.ToLower(args[0])
+				db = "app"
+				if len(args) == 2 {
+					db = args[1]
+				}
 			}
 			if !dbNamePattern.MatchString(db) {
 				return usageErr("%q is not a database name Kiyesi can put in a command: letters, digits, _, $ and -", db)
@@ -272,93 +311,113 @@ func provider(host string) (name, note string) {
 	return "", ""
 }
 
-// listDatabases names every database it can find for this server: on it,
-// in its containers, and those its apps use elsewhere; and how to set up
-// one it cannot find.
-func listDatabases(out io.Writer) {
-	found := 0
-	fmt.Fprintln(out, "On this server:")
-	local := 0
-	say := func(name, cmd string) {
-		local++
-		fmt.Fprintf(out, "  %-12s sudo kiyesi databases setup %s <database>\n", name, cmd)
-	}
+// foundDatabases is every database setup finds for this server.
+type foundDatabases struct {
+	// local are the engines installed on this server, as setup's names.
+	local [][2]string // label, engine
+	// containers are the database containers: name and engine.
+	containers [][2]string
+	// used are the hosted databases the apps' settings name.
+	used      []usedDatabase
+	dockerErr error
+}
+
+func findDatabases() foundDatabases {
+	var f foundDatabases
 	for _, d := range postgresSockets {
 		if fileThere(d + "/.s.PGSQL.5432") {
-			say("PostgreSQL", "postgres")
+			f.local = append(f.local, [2]string{"PostgreSQL", "postgres"})
 			break
 		}
 	}
 	for _, sock := range mysqlSockets {
 		if fileThere(sock) {
 			if fileThere("/usr/sbin/mariadbd") {
-				say("MariaDB", "mariadb")
+				f.local = append(f.local, [2]string{"MariaDB", "mariadb"})
 			} else {
-				say("MySQL", "mysql")
+				f.local = append(f.local, [2]string{"MySQL", "mysql"})
 			}
 			break
 		}
 	}
 	if fileThere("/usr/bin/mongod") || fileThere("/var/run/mongodb") {
-		say("MongoDB", "mongodb")
+		f.local = append(f.local, [2]string{"MongoDB", "mongodb"})
 	}
 	if fileThere("/usr/bin/redis-server") || fileThere("/usr/bin/valkey-server") {
-		say("Redis", "redis")
+		f.local = append(f.local, [2]string{"Redis", "redis"})
 	}
-	if local == 0 {
-		fmt.Fprintln(out, "  none installed here")
-	}
-	found += local
-
-	containers, dockerErr := dockerContainers()
-	if dockerErr != nil {
-		fmt.Fprintf(out, "\nDocker is installed here, but asking it for its containers failed: %v\nRun this as root, and check the Docker service is running (systemctl status docker).\n", dockerErr)
-	}
-	inContainers := 0
+	containers, err := dockerContainers()
+	f.dockerErr = err
 	var used []usedDatabase
 	for _, c := range containers {
 		if !containerNamePattern.MatchString(c[0]) {
 			continue
 		}
 		if e := imageEngine(c[1]); e != "" {
-			if inContainers == 0 {
-				fmt.Fprintln(out, "\nIn Docker containers on this server:")
-			}
-			inContainers++
-			fmt.Fprintf(out, "  %-24s sudo kiyesi databases setup %s <database> --container %s\n", c[0], e, c[0])
+			f.containers = append(f.containers, [2]string{c[0], e})
 			continue
 		}
 		used = append(used, databasesIn(dockerEnv(c[0]))...)
 	}
-	found += inContainers
-	for _, f := range appEnvFiles() {
-		b, err := os.ReadFile(f) // #nosec G304 -- an app's settings file under /opt, /srv or /var/www, read for host names only
+	for _, file := range appEnvFiles() {
+		b, err := os.ReadFile(file) // #nosec G304 -- an app's settings file under /opt, /srv or /var/www, read for host names only
 		if err == nil {
 			used = append(used, databasesIn(strings.Split(string(b), "\n"))...)
 		}
 	}
 	seen := map[string]bool{}
-	shown := 0
 	for _, u := range used {
 		key := u.engine + " " + u.host + " " + u.db
-		if seen[key] {
-			continue
+		if !seen[key] {
+			seen[key] = true
+			f.used = append(f.used, u)
 		}
-		seen[key] = true
-		if shown == 0 {
-			fmt.Fprintln(out, "\nUsed by the apps on this server (from their settings: host only, never a password):")
-		}
-		shown++
-		label, _ := provider(u.host)
-		if label == "" {
-			label = u.host
-		} else {
-			label += " " + u.host
-		}
-		fmt.Fprintf(out, "  %s\n    sudo kiyesi databases setup %s %s --host %s\n", label, u.engine, u.db, u.host)
 	}
-	found += shown
-	if found == 0 {
+	return f
+}
+
+// only is the one database found, when there is exactly one and setup knows
+// all it needs to print its steps: a hosted one an app names, with its
+// database.
+func (f foundDatabases) only() *usedDatabase {
+	if len(f.local) == 0 && len(f.containers) == 0 && len(f.used) == 1 && f.used[0].db != "<database>" {
+		return &f.used[0]
+	}
+	return nil
+}
+
+// listDatabases names every database found for this server, and how to set
+// up one it cannot find.
+func listDatabases(out io.Writer, f foundDatabases) {
+	fmt.Fprintln(out, "On this server:")
+	for _, l := range f.local {
+		fmt.Fprintf(out, "  %-12s sudo kiyesi databases setup %s <database>\n", l[0], l[1])
+	}
+	if len(f.local) == 0 {
+		fmt.Fprintln(out, "  none installed here")
+	}
+	if f.dockerErr != nil {
+		fmt.Fprintf(out, "\nDocker is installed here, but asking it for its containers failed: %v\nRun this as root, and check the Docker service is running (systemctl status docker).\n", f.dockerErr)
+	}
+	if len(f.containers) > 0 {
+		fmt.Fprintln(out, "\nIn Docker containers on this server:")
+		for _, c := range f.containers {
+			fmt.Fprintf(out, "  %-24s sudo kiyesi databases setup %s <database> --container %s\n", c[0], c[1], c[0])
+		}
+	}
+	if len(f.used) > 0 {
+		fmt.Fprintln(out, "\nUsed by the apps on this server (from their settings: host only, never a password):")
+		for _, u := range f.used {
+			label, _ := provider(u.host)
+			if label == "" {
+				label = u.host
+			} else {
+				label += " " + u.host
+			}
+			fmt.Fprintf(out, "  %s\n    sudo kiyesi databases setup %s %s --host %s\n", label, u.engine, u.db, u.host)
+		}
+	}
+	if len(f.local)+len(f.containers)+len(f.used) == 0 {
 		fmt.Fprintln(out, "\nNo database was found on this server, in its containers, or in its apps' settings.")
 	}
 	fmt.Fprintln(out, "\nFor any other database:")
@@ -427,14 +486,55 @@ func (s *setupFor) say(what string, commands ...string) {
 }
 
 func (s *setupFor) config(url string, encrypted bool) {
-	lines := "databases:\n  - name: " + s.db + "\n    url: " + url
+	entry := "  - name: " + s.db + "\n    url: " + url
 	if encrypted {
-		lines += "\n    password: credential"
+		entry += "\n    password: credential"
 	}
-	s.say("Add it to /etc/kiyesi/config.yaml (the address holds no password):", lines)
+	settings, _ := os.ReadFile(setupSettingsPath) // #nosec G304 -- Kiyesi's own settings file
+	switch where := databasesSection(string(settings), s.db); where {
+	case "listed":
+		s.say("It is already in " + setupSettingsPath + " as " + s.db + ": check its url says " + url + ".")
+	case "last", "none":
+		block := entry
+		if where == "none" {
+			block = "databases:\n" + entry
+		}
+		s.say("Add it to Kiyesi's settings, "+setupSettingsPath+" (the address holds no password):",
+			"sudo tee -a "+setupSettingsPath+" >/dev/null <<'YAML'\n"+block+"\nYAML")
+	default:
+		s.say("Add it under databases: in "+setupSettingsPath+" (the address holds no password):", entry)
+	}
 	s.say("Check it: Kiyesi signs in the way the agent will, and says how, and any right its user should not have.",
 		"sudo kiyesi databases check")
 	fmt.Fprintln(s.out, "\nThe agent reads it again within 5 minutes. Guide: https://docs.kiyesi.dev/guides/databases/")
+}
+
+// databasesSection says where a new database goes in the settings: "none"
+// when there is no databases: list, "last" when the list ends the file (so
+// an entry can be added at its end), "listed" when this name is there
+// already, and "inside" when other settings follow the list.
+func databasesSection(settings, name string) string {
+	lines := strings.Split(settings, "\n")
+	start := -1
+	for i, l := range lines {
+		if strings.TrimRight(l, " \t\r") == "databases:" {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return "none"
+	}
+	for _, l := range lines[start+1:] {
+		t := strings.TrimSpace(l)
+		if t == "- name: "+name {
+			return "listed"
+		}
+		if l != "" && l[0] != ' ' && l[0] != '\t' && l[0] != '#' && l[0] != '-' {
+			return "inside"
+		}
+	}
+	return "last"
 }
 
 // sqlLines writes SQL lines for a printf format inside double quotes: each
@@ -667,17 +767,32 @@ func (s *setupFor) mongodb() {
 	s.config(url, true)
 }
 
-// atlas is MongoDB Atlas: its roles and users are made in Atlas itself,
-// which undoes one made in mongosh. Every plan allows a custom role.
+// atlas is MongoDB Atlas: its roles and users are made in Atlas's website,
+// which undoes one made any other way. Every plan allows a custom role.
 func (s *setupFor) atlas() {
+	cluster := strings.Split(strings.ToLower(s.host), ".")[0]
 	s.intro("the MongoDB Atlas database " + s.db + " on " + s.host + ", read-only, with a password kept encrypted")
-	s.say("In Atlas, make a custom role that may only read the database's size and the server's status. With the Atlas CLI:",
-		"atlas customDbRoles create kiyesiStats --privilege DB_STATS@"+s.db+",SERVER_STATUS")
-	fmt.Fprintln(s.out, "   Or in Atlas: Database Access, Custom Roles, Add New Custom Role, named kiyesiStats: dbStats on the database "+s.db+", and serverStatus under Global Actions and Roles.")
-	s.say("In Atlas, make Kiyesi's user: Database Access, Database Users, Add New Database User. Choose Password, name it kiyesi_ro, choose Autogenerate Secure Password and copy it. Under Database User Privileges, give it only the custom role kiyesiStats, and restrict its access to this cluster.")
-	s.say("In Atlas, let only this server reach the cluster: Network Access, Add IP Address, with this server's public address and nothing broader. This shows it:",
-		"curl -4s https://checkip.amazonaws.com")
-	s.say(strings.Replace(s.storeWords(), ":", ". Paste the password when asked; it is not shown or kept in your history:", 1), s.storeTyped())
+	fmt.Fprintln(s.out, "Steps 1 and 2 are in Atlas's website: Atlas undoes a user made any other way. The rest are on this server.")
+	s.say("At cloud.mongodb.com, open this cluster's project, then in the sidebar Security, Database & Network Access, and the Custom Roles tab. Add New Custom Role:",
+		"Name:     kiyesiStats",
+		"Actions:  dbStats, on the database "+s.db,
+		"          serverStatus, a global action (for the whole cluster)",
+		"Save it. Nothing else: it cannot read a document.")
+	fmt.Fprintln(s.out, "   With the Atlas CLI instead: atlas customDbRoles create kiyesiStats --privilege DB_STATS@"+s.db+",SERVER_STATUS")
+	s.say("On the Database Users tab, Add New Database User:",
+		"Authentication Method:  Password",
+		"Username:               kiyesi_ro",
+		"Password:               Autogenerate Secure Password, then Copy",
+		"Privileges:             under Custom Roles, only kiyesiStats",
+		"Restrict Access to Specific Clusters: on, with only "+cluster,
+		"Then Add User. Keep the password on your clipboard for the next step.")
+	s.say(strings.Replace(s.storeWords(), ":", ". Run this here and paste the password when asked; it is not shown or kept in your history:", 1), s.storeTyped())
+	ip := publicIPv4()
+	where := "this server's public address (curl -4s https://checkip.amazonaws.com shows it)"
+	if ip != "" {
+		where = "this server's public address, " + ip + ","
+	}
+	s.say("In Atlas, on the IP Access List tab, " + where + " must be listed; if it is not, Add IP Address with it alone, then Confirm. When an app on this server already uses this cluster, it is there already.")
 	s.config("mongodb+srv://kiyesi_ro@"+s.host+"/"+s.db, true)
 	fmt.Fprintln(s.out, "A later release signs in to Atlas with the cloud's own identity, with no password kept at all.")
 }

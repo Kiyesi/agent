@@ -28,9 +28,13 @@ func TestSetupSQLPassesThroughTheShell(t *testing.T) {
 func fakeServer(t *testing.T, containers [][2]string, env map[string][]string, envFiles map[string]string, published map[string]string) {
 	t.Helper()
 	oldC, oldE, oldF, oldP, oldG, oldT, oldS := dockerContainers, dockerEnv, appEnvFiles, dockerPublished, dockerGateway, fileThere, systemdVersion
+	oldSettings, oldIP := setupSettingsPath, publicIPv4
 	t.Cleanup(func() {
 		dockerContainers, dockerEnv, appEnvFiles, dockerPublished, dockerGateway, fileThere, systemdVersion = oldC, oldE, oldF, oldP, oldG, oldT, oldS
+		setupSettingsPath, publicIPv4 = oldSettings, oldIP
 	})
+	setupSettingsPath = t.TempDir() + "/config.yaml"
+	publicIPv4 = func() string { return "203.0.113.24" }
 	dockerContainers = func() ([][2]string, error) { return containers, nil }
 	dockerEnv = func(name string) []string { return env[name] }
 	dir := t.TempDir()
@@ -93,11 +97,17 @@ func TestSetupAtlas(t *testing.T) {
 	fakeServer(t, nil, nil, nil, nil)
 	_, out, _ := runCLI(t, "databases", "setup", "mongodb", "shop", "--host", "cluster0.abcde.mongodb.net")
 	for _, want := range []string{
+		"Steps 1 and 2 are in Atlas's website",
+		"Security, Database & Network Access, and the Custom Roles tab",
+		"dbStats, on the database shop",
 		"atlas customDbRoles create kiyesiStats --privilege DB_STATS@shop,SERVER_STATUS",
-		"Autogenerate Secure Password",
-		"only the custom role kiyesiStats",
-		"Network Access",
+		"Autogenerate Secure Password, then Copy",
+		"under Custom Roles, only kiyesiStats",
+		"with only cluster0",
+		"IP Access List tab, this server's public address, 203.0.113.24,",
 		`sudo sh -c 'systemd-ask-password "Password for kiyesi_ro (not shown):" | systemd-creds encrypt - /etc/credstore.encrypted/kiyesi.db.shop'`,
+		"sudo tee -a " + setupSettingsPath + " >/dev/null <<'YAML'",
+		"databases:",
 		"url: mongodb+srv://kiyesi_ro@cluster0.abcde.mongodb.net/shop",
 		"password: credential",
 	} {
@@ -139,5 +149,52 @@ func TestSetupSaysWhenDockerCannotBeAsked(t *testing.T) {
 	_, out, _ := runCLI(t, "databases", "setup")
 	if !strings.Contains(out, "Docker is installed here, but asking it for its containers failed: Cannot connect to the Docker daemon") {
 		t.Errorf("%s", out)
+	}
+}
+
+// The owner's server: no database of its own, one app using Atlas. setup
+// alone prints that database's steps, with no second command to copy.
+func TestSetupPrintsTheOnlyDatabaseStraightAway(t *testing.T) {
+	fakeServer(t,
+		[][2]string{{"appstack-api-1", "shop/app-api:latest"}, {"appstack-caddy-1", "caddy:2"}},
+		map[string][]string{"appstack-api-1": {"MONGODB_URI=mongodb+srv://app:" + "s3cret@cluster0.ab1cd.mongodb.net/test?retryWrites=true"}},
+		nil, nil)
+	_, out, _ := runCLI(t, "databases", "setup")
+	for _, want := range []string{
+		"Found one database, which the apps on this server use: MongoDB Atlas cluster0.ab1cd.mongodb.net, database test.",
+		"Steps to watch the MongoDB Atlas database test on cluster0.ab1cd.mongodb.net",
+		"with only cluster0",
+		"kiyesi.db.test",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "s3cret") || strings.Contains(out, "app:") {
+		t.Errorf("printed the app's password:\n%s", out)
+	}
+}
+
+// The settings step is one command that is right for the file as it is.
+func TestSetupAddsToTheSettingsAsTheyAre(t *testing.T) {
+	for name, c := range map[string]struct{ settings, want, not string }{
+		"no file":        {"", "databases:\n       - name: test", ""},
+		"no databases":   {"token: x\n", "databases:\n       - name: test", ""},
+		"databases last": {"token: x\ndatabases:\n  - name: orders\n    url: postgres://kiyesi_ro@/orders?host=/run/postgresql\n", "<<'YAML'\n       - name: test", "databases:\n       - name: test"},
+		"listed":         {"databases:\n  - name: test\n    url: x\n", "It is already in", "<<'YAML'"},
+		"inside":         {"databases:\n  - name: orders\n    url: x\nlogs:\n  level: info\n", "Add it under databases:", "<<'YAML'"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fakeServer(t, nil, nil, nil, nil)
+			if c.settings != "" {
+				if err := os.WriteFile(setupSettingsPath, []byte(c.settings), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, out, _ := runCLI(t, "databases", "setup", "mongodb", "test", "--host", "c.abcde.mongodb.net")
+			if !strings.Contains(out, c.want) || (c.not != "" && strings.Contains(out, c.not)) {
+				t.Errorf("want %q, not %q, in:\n%s", c.want, c.not, out)
+			}
+		})
 	}
 }
