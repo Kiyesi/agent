@@ -6,7 +6,7 @@ package version
 import "strings"
 
 // Version is the full version, such as 0.19.0.
-var Version = "0.42.0"
+var Version = "0.42.1"
 
 // Commit is the git commit the binary was built from, when the build says.
 var Commit = ""

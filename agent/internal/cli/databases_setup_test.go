@@ -185,7 +185,7 @@ func TestSetupAddsToTheSettingsAsTheyAre(t *testing.T) {
 		"no file":        {"", "'databases:' '  - name: test'", ""},
 		"no databases":   {"token: x\n", "'databases:' '  - name: test'", ""},
 		"databases last": {"token: x\ndatabases:\n  - name: orders\n    url: postgres://kiyesi_ro@/orders?host=/run/postgresql\n", "printf '%s\\n' '  - name: test'", "'databases:'"},
-		"listed":         {"databases:\n  - name: test\n    url: x\n", "It is already in", "sudo tee -a"},
+		"listed":         {"databases:\n  - name: test\n    url: x\n", "as test, set another way", "sudo tee -a"},
 		"inside":         {"databases:\n  - name: orders\n    url: x\nlogs:\n  level: info\n", "Add it under databases:", "sudo tee -a"},
 	} {
 		t.Run(name, func(t *testing.T) {

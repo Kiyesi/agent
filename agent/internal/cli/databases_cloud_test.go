@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -171,5 +172,36 @@ func TestSetupVault(t *testing.T) {
 		if code, _, _ := runCLI(t, append([]string{"databases", "setup"}, args...)...); code == 0 {
 			t.Errorf("%v: no error", args)
 		}
+	}
+}
+
+// Moving a database set up with a password to its certificate: the steps
+// say what its entry must become, keep the role made before, and remove
+// the old password once the new way works.
+func TestSetupSwitchesFromAPassword(t *testing.T) {
+	fakeServer(t, nil, nil, nil, nil)
+	old := "databases:\n  - name: test\n    url: mongodb+srv://kiyesi_ro@cluster0.ab1cd.mongodb.net/test\n    password: credential\n    limit: 512MB\n"
+	if err := os.WriteFile(setupSettingsPath, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, out, _ := runCLI(t, "databases", "setup", "mongodb", "test", "--host", "cluster0.ab1cd.mongodb.net")
+	wantAll(t, out,
+		"If kiyesiStats is there already, from an earlier setup, keep it and go to the next step.",
+		"set another way. Open the file (sudo nano "+setupSettingsPath+") and make its entry read exactly as below",
+		"url: mongodb+srv://cluster0.ab1cd.mongodb.net/test?authSource=%24external&authMechanism=MONGODB-X509&tlsCertificateKeyFile=/etc/kiyesi/credentials/test.pem",
+		"delete the kiyesi_ro user whose method is Password",
+		"sudo rm -f /etc/credstore.encrypted/kiyesi.db.test /etc/kiyesi/credentials/test.enc")
+	if strings.Contains(out, "check its url says") {
+		t.Errorf("asks to check instead of saying what to change:\n%s", out)
+	}
+	// Set up this way already: nothing to change, nothing to remove.
+	now := "databases:\n  - name: test\n    url: mongodb+srv://cluster0.ab1cd.mongodb.net/test?authSource=%24external&authMechanism=MONGODB-X509&tlsCertificateKeyFile=/etc/kiyesi/credentials/test.pem\n"
+	if err := os.WriteFile(setupSettingsPath, []byte(now), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, out, _ = runCLI(t, "databases", "setup", "mongodb", "test", "--host", "cluster0.ab1cd.mongodb.net")
+	wantAll(t, out, "It is already in "+setupSettingsPath+" as test, set this way.")
+	if strings.Contains(out, "sudo rm -f") {
+		t.Errorf("removes a password that is not there:\n%s", out)
 	}
 }

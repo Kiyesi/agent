@@ -258,6 +258,7 @@ func (s *setupFor) atlasRole() {
 		"          serverStatus, a global action (for the whole cluster)",
 		"Save it. Nothing else: it cannot read a document.")
 	fmt.Fprintln(s.out, "   With the Atlas CLI instead: atlas customDbRoles create kiyesiStats --privilege DB_STATS@"+s.db+",SERVER_STATUS")
+	fmt.Fprintln(s.out, "   If kiyesiStats is there already, from an earlier setup, keep it and go to the next step.")
 }
 
 // atlasAccess is the step that lists this server's address in Atlas.

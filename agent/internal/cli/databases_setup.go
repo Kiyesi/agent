@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
+	"github.com/kiyesi/kiyesi/agent/internal/config"
 	"github.com/kiyesi/kiyesi/agent/internal/dbwatch"
 )
 
@@ -538,9 +539,21 @@ func (s *setupFor) config(url, password string) {
 		entry += "\n    password: " + password
 	}
 	settings, _ := os.ReadFile(setupSettingsPath) // #nosec G304 -- Kiyesi's own settings file
+	var was *config.Database
+	if c, err := config.Load(setupSettingsPath); err == nil {
+		for i := range c.Databases {
+			if c.Databases[i].Name == s.db {
+				was = &c.Databases[i]
+			}
+		}
+	}
 	switch where := databasesSection(string(settings), s.db); where {
 	case "listed":
-		s.say("It is already in " + setupSettingsPath + " as " + s.db + ": check its url says " + url + ".")
+		if was != nil && was.URL == url && was.Password == password {
+			s.say("It is already in " + setupSettingsPath + " as " + s.db + ", set this way.")
+			break
+		}
+		s.say("It is in "+setupSettingsPath+" as "+s.db+", set another way. Open the file (sudo nano "+setupSettingsPath+") and make its entry read exactly as below, its other lines (limit, backups) kept; the address holds no password:", entry)
 	case "last", "none":
 		lines := strings.Split(entry, "\n")
 		if where == "none" {
@@ -556,6 +569,15 @@ func (s *setupFor) config(url, password string) {
 	}
 	s.say("Check it: Kiyesi signs in the way the agent will, and says how, and any right its user should not have.",
 		"sudo kiyesi databases check")
+	// Moving away from a password kept here: once the check shows the new
+	// way, the old password goes, so nothing is left to steal.
+	if was != nil && was.Password == "credential" && password != "credential" {
+		what := "When the check says it signs in the new way, remove the old password from this server:"
+		if strings.HasSuffix(strings.ToLower(s.host), ".mongodb.net") {
+			what = "When the check says it signs in the new way, in Atlas's Database Users tab delete the kiyesi_ro user whose method is Password (keep the Certificate or AWS IAM one), and remove its password from this server:"
+		}
+		s.say(what, "sudo rm -f "+dbwatch.CredstoreDir+"/"+dbwatch.CredentialPrefix+s.db+" "+dbwatch.OwnCredentialsDir+"/"+s.db+".enc")
+	}
 	fmt.Fprintln(s.out, "\nThe agent reads it again within 5 minutes. Guide: https://docs.kiyesi.dev/guides/databases/")
 }
 
@@ -932,12 +954,7 @@ func (s *setupFor) atlas() {
 	cluster := strings.Split(strings.ToLower(s.host), ".")[0]
 	s.intro("the MongoDB Atlas database " + s.db + " on " + s.host + ", read-only, with a password kept encrypted")
 	fmt.Fprintln(s.out, "Steps 1 and 2 are in Atlas's website: Atlas undoes a user made any other way. The rest are on this server.")
-	s.say("At cloud.mongodb.com, open this cluster's project, then in the sidebar Security, Database & Network Access, and the Custom Roles tab. Add New Custom Role:",
-		"Name:     kiyesiStats",
-		"Actions:  dbStats, on the database "+s.db,
-		"          serverStatus, a global action (for the whole cluster)",
-		"Save it. Nothing else: it cannot read a document.")
-	fmt.Fprintln(s.out, "   With the Atlas CLI instead: atlas customDbRoles create kiyesiStats --privilege DB_STATS@"+s.db+",SERVER_STATUS")
+	s.atlasRole()
 	s.say("On the Database Users tab, Add New Database User:",
 		"Authentication Method:  Password",
 		"Username:               kiyesi_ro",
