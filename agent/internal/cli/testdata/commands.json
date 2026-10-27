@@ -245,9 +245,13 @@
     "path": "kiyesi databases setup",
     "use": "kiyesi databases setup [postgres|mysql|mariadb|mongodb|redis] [database] [flags]",
     "short": "Print the steps to watch a database, read-only and with no password in a file",
-    "long": "Prints numbered steps for this server, for you to review and run: a user for Kiyesi\nthat may only read sizes and counts, never a row, and cannot write; how it signs\nin (through the socket with no password, or with a random password nobody sees,\nkept encrypted); and the lines for /etc/kiyesi/config.yaml. Kiyesi changes nothing.\nWith no engine, it lists the databases it finds on this server.",
-    "example": "  sudo kiyesi databases setup\n  sudo kiyesi databases setup postgres orders\n  sudo kiyesi databases setup mysql shop --host db.internal",
+    "long": "Prints numbered steps for this server, for you to review and run: a user for Kiyesi\nthat may only read sizes and counts, never a row, and cannot write; how it signs\nin (through the socket with no password, or with a random password nobody sees,\nkept encrypted); and the lines for /etc/kiyesi/config.yaml. Kiyesi changes nothing.\nWith no engine, it lists the databases it finds: on this server, in its Docker\ncontainers, and the hosted ones its apps use (host and engine only, never a password).",
+    "example": "  sudo kiyesi databases setup\n  sudo kiyesi databases setup postgres orders\n  sudo kiyesi databases setup postgres orders --container app-db-1\n  sudo kiyesi databases setup mongodb shop --host cluster0.abcde.mongodb.net\n  sudo kiyesi databases setup mysql shop --host db.internal",
     "flags": [
+      {
+        "name": "container",
+        "usage": "the Docker container the database runs in, on this server"
+      },
       {
         "name": "host",
         "usage": "the database's host, when it is not on this server"
