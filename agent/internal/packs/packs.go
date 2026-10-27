@@ -122,8 +122,13 @@ func (p *Pack) Check(id string) *Check { return p.byID[id] }
 
 var placeholder = regexp.MustCompile(`\{([a-z_]+)((?:\|[^{}|]*)*)\}`)
 
-// Fill replaces each {name} in s with vars[name]. A placeholder with no
-// value is left as it is, so a missing value is visible rather than blank.
+// fillDefaults are the words for a value a finding may not carry, such as
+// one saved by an agent from before the value existed.
+var fillDefaults = map[string]string{"provider_firewall": "your provider's firewall"}
+
+// Fill replaces each {name} in s with vars[name], or its word in
+// fillDefaults. A placeholder with neither is left as it is, so a missing
+// value is visible rather than blank.
 //
 // A count can carry its words, so they agree with it:
 //
@@ -131,9 +136,6 @@ var placeholder = regexp.MustCompile(`\{([a-z_]+)((?:\|[^{}|]*)*)\}`)
 //	{count|no containers|container|containers} no containers, 1 container, 2 containers
 //	{days|in}                                  today, tomorrow, in 9 days
 //	{days|ago}                                 today, yesterday, 3 days ago
-// fillDefaults are the words for a value a finding may not carry, such as
-// one saved by an agent from before the value existed.
-var fillDefaults = map[string]string{"provider_firewall": "your provider's firewall"}
 
 func Fill(s string, vars map[string]string) string {
 	return placeholder.ReplaceAllStringFunc(s, func(m string) string {

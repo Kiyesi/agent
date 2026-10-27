@@ -38,6 +38,9 @@ type Figures struct {
 	// Login is how the agent signs in: socket, encrypted or none. Never
 	// the password, nor where it is kept.
 	Login string `json:"login,omitempty"`
+	// Provider names the service a hosted database is on, such as MongoDB
+	// Atlas, from its host name. Never the host itself.
+	Provider string `json:"provider,omitempty"`
 	// Error says why the database could not be read, in one sentence.
 	Error string `json:"error,omitempty"`
 }
@@ -89,6 +92,35 @@ func engineOf(u *url.URL) string {
 	return ""
 }
 
+// providers name hosted database services by the end of their host names.
+var providers = []struct{ suffix, name string }{
+	{".mongodb.net", "MongoDB Atlas"},
+	{".rds.amazonaws.com", "AWS RDS"},
+	{".supabase.co", "Supabase"},
+	{".supabase.com", "Supabase"},
+	{".neon.tech", "Neon"},
+	{".ondigitalocean.com", "DigitalOcean"},
+	{".database.azure.com", "Azure Database"},
+	{".psdb.cloud", "PlanetScale"},
+	{".upstash.io", "Upstash"},
+	{".aivencloud.com", "Aiven"},
+	{".redis-cloud.com", "Redis Cloud"},
+	{".redislabs.com", "Redis Cloud"},
+	{".cache.amazonaws.com", "AWS ElastiCache"},
+}
+
+// ProviderOf names the service a hosted database's host belongs to, or ""
+// when it is not one Kiyesi knows.
+func ProviderOf(host string) string {
+	h := strings.ToLower(host)
+	for _, p := range providers {
+		if strings.HasSuffix(h, p.suffix) {
+			return p.name
+		}
+	}
+	return ""
+}
+
 // local says whether a host is this server: the database's disk is then
 // this server's disk.
 func local(host string) bool {
@@ -124,6 +156,9 @@ func (r *Reader) Read(ctx context.Context, c Config, now time.Time) Figures {
 	}
 	f.Engine = engineOf(u)
 	f.Hosted = u.Scheme == "mongodb+srv" || !local(u.Hostname())
+	if f.Hosted {
+		f.Provider = ProviderOf(u.Hostname())
+	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	secret, err := LoginFor(ctx, c, u)
