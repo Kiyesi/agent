@@ -25,8 +25,8 @@ import (
 )
 
 // PostgreSQL: the database's size, and connections against max_connections.
-func readPostgres(ctx context.Context, dsn, password string, f *Figures) error {
-	conn, err := connectPostgres(ctx, dsn, password)
+func readPostgres(ctx context.Context, dsn string, s Secret, f *Figures) error {
+	conn, err := connectPostgres(ctx, dsn, s)
 	if err != nil {
 		return err
 	}
@@ -47,13 +47,16 @@ func readPostgres(ctx context.Context, dsn, password string, f *Figures) error {
 
 // connectPostgres opens a read-only session: on top of a user that may only
 // read sizes and counts, nothing sent on it can write.
-func connectPostgres(ctx context.Context, dsn, password string) (*pgx.Conn, error) {
+func connectPostgres(ctx context.Context, dsn string, s Secret) (*pgx.Conn, error) {
 	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
 		return nil, err
 	}
-	if password != "" {
-		cfg.Password = password
+	if s.Password != "" {
+		cfg.Password = s.Password
+	}
+	if s.User != "" {
+		cfg.User = s.User
 	}
 	cfg.RuntimeParams["default_transaction_read_only"] = "on"
 	cfg.RuntimeParams["application_name"] = "kiyesi-agent"
@@ -81,7 +84,7 @@ func tlsFor(u *url.URL) (*tls.Config, error) {
 
 // mysqlConfig is the driver's settings for an address: over its socket
 // file (?socket=/path) for auth_socket, else over TCP.
-func mysqlConfig(u *url.URL, password string) *mysql.Config {
+func mysqlConfig(u *url.URL, s Secret) *mysql.Config {
 	cfg := mysql.NewConfig()
 	if s := u.Query().Get("socket"); strings.HasPrefix(s, "/") {
 		cfg.Net, cfg.Addr = "unix", s
@@ -92,7 +95,10 @@ func mysqlConfig(u *url.URL, password string) *mysql.Config {
 		}
 	}
 	cfg.User = u.User.Username()
-	cfg.Passwd = password
+	if s.User != "" {
+		cfg.User = s.User
+	}
+	cfg.Passwd = s.Password
 	cfg.DBName = strings.TrimPrefix(u.Path, "/")
 	cfg.Timeout = 10 * time.Second
 	if u.Query().Get("tls") == "true" {
@@ -100,14 +106,17 @@ func mysqlConfig(u *url.URL, password string) *mysql.Config {
 		if t, err := tlsFor(u); err == nil {
 			cfg.TLS = t
 		}
+		// A cloud token is sent as it is (mysql_clear_password), which
+		// RDS, Azure and Cloud SQL require: only ever inside TLS.
+		cfg.AllowCleartextPasswords = s.Kind == LoginIAM
 	}
 	return cfg
 }
 
 // MySQL and MariaDB: the schema's size, connections, and the server's own
 // slow-query counter, turned into a count for the last hour.
-func (r *Reader) readMySQL(ctx context.Context, name string, u *url.URL, password string, f *Figures, now time.Time) error {
-	connector, err := mysql.NewConnector(mysqlConfig(u, password))
+func (r *Reader) readMySQL(ctx context.Context, name string, u *url.URL, s Secret, f *Figures, now time.Time) error {
+	connector, err := mysql.NewConnector(mysqlConfig(u, s))
 	if err != nil {
 		return err
 	}
@@ -159,8 +168,8 @@ func (r *Reader) readMySQL(ctx context.Context, name string, u *url.URL, passwor
 
 // MongoDB: the database's storage (dbStats), and connections where the
 // plan allows serverStatus.
-func readMongo(ctx context.Context, uri, password string, f *Figures) error {
-	client, err := mongo.Connect(mongoOptions(uri, password).SetServerSelectionTimeout(15 * time.Second).SetAppName("kiyesi-agent"))
+func readMongo(ctx context.Context, uri string, s Secret, f *Figures) error {
+	client, err := mongo.Connect(mongoOptions(uri, s).SetServerSelectionTimeout(15 * time.Second).SetAppName("kiyesi-agent"))
 	if err != nil {
 		return err
 	}
@@ -218,15 +227,18 @@ func connstringDB(uri string) (string, error) {
 // entries in the last hour. A few commands over the wire: no driver needed.
 // mongoOptions are the driver's settings for an address, with the password
 // from where it is kept, never from the address.
-func mongoOptions(uri, password string) *options.ClientOptions {
+func mongoOptions(uri string, s Secret) *options.ClientOptions {
 	o := options.Client().ApplyURI(uri)
-	if password != "" && o.Auth != nil {
-		o.Auth.Password, o.Auth.PasswordSet = password, true
+	if s.Password != "" && o.Auth != nil {
+		o.Auth.Password, o.Auth.PasswordSet = s.Password, true
+		if s.User != "" {
+			o.Auth.Username = s.User
+		}
 	}
 	return o
 }
 
-func readRedis(ctx context.Context, u *url.URL, password string, f *Figures, now time.Time) error {
+func readRedis(ctx context.Context, u *url.URL, s Secret, f *Figures, now time.Time) error {
 	addr := u.Host
 	if u.Port() == "" {
 		addr = net.JoinHostPort(u.Hostname(), "6379")
@@ -251,10 +263,14 @@ func readRedis(ctx context.Context, u *url.URL, password string, f *Figures, now
 		_ = conn.SetDeadline(deadline)
 	}
 	rd := bufio.NewReader(conn)
-	if password != "" {
-		args := []string{"AUTH", password}
-		if user := u.User.Username(); user != "" && user != "default" {
-			args = []string{"AUTH", user, password}
+	if s.Password != "" {
+		user := u.User.Username()
+		if s.User != "" {
+			user = s.User
+		}
+		args := []string{"AUTH", s.Password}
+		if user != "" && user != "default" {
+			args = []string{"AUTH", user, s.Password}
 		}
 		if _, err := command(conn, rd, args...); err != nil {
 			return err

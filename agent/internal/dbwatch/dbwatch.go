@@ -17,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/kiyesi/kiyesi/agent/internal/cloudlogin"
 )
 
 // Figures are what one database looks like now.
@@ -48,9 +50,12 @@ type Figures struct {
 // Config is one database from the settings file.
 type Config struct {
 	Name, URL, Limit, Backups string
-	// Password names where its password is kept ("credential"), never
-	// the password itself.
+	// Password names where its password is kept ("credential", "aws-iam",
+	// "vault:…"), never the password itself.
 	Password string
+	// Vault is the company's Vault, when one is set, shared by every
+	// database so it signs in once.
+	Vault *cloudlogin.Vault
 }
 
 // NamePattern is what a database's name may be.
@@ -138,6 +143,20 @@ type Reader struct {
 	// server, from the agent's own measurements.
 	DiskBytes func(path string) (int64, bool)
 	slow      map[string]counter
+	vault     *cloudlogin.Vault
+}
+
+// VaultFor is the Vault these settings name, the same one from reading to
+// reading while they do not change, so its sign-in and leases are kept.
+// The AppRole's secret ID is the one encrypted on this server as "vault".
+func (r *Reader) VaultFor(s cloudlogin.VaultSettings) *cloudlogin.Vault {
+	if s.Address == "" {
+		return nil
+	}
+	if r.vault == nil || r.vault.S != s {
+		r.vault = &cloudlogin.Vault{S: s, SecretID: func(ctx context.Context) (string, error) { return credential(ctx, "vault") }}
+	}
+	return r.vault
 }
 
 type counter struct {
@@ -169,13 +188,13 @@ func (r *Reader) Read(ctx context.Context, c Config, now time.Time) Figures {
 	f.Login = secret.Kind
 	switch f.Engine {
 	case "postgresql":
-		err = readPostgres(ctx, c.URL, secret.Password, &f)
+		err = readPostgres(ctx, c.URL, secret, &f)
 	case "mysql":
-		err = r.readMySQL(ctx, c.Name, u, secret.Password, &f, now)
+		err = r.readMySQL(ctx, c.Name, u, secret, &f, now)
 	case "mongodb":
-		err = readMongo(ctx, c.URL, secret.Password, &f)
+		err = readMongo(ctx, c.URL, secret, &f)
 	case "redis":
-		err = readRedis(ctx, u, secret.Password, &f, now)
+		err = readRedis(ctx, u, secret, &f, now)
 	}
 	if err != nil {
 		f.Error = plainError(err)

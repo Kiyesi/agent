@@ -139,9 +139,13 @@ func unreachable(d api.Database) bool {
 
 // loginWords say how the agent signs in to a database, never with what.
 var loginWords = map[string]string{
-	dbwatch.LoginSocket:    "through its socket, with no password",
-	dbwatch.LoginEncrypted: "with its password encrypted on this server",
-	dbwatch.LoginNone:      "with no password: the database asks for none",
+	dbwatch.LoginSocket:      "through its socket, with no password",
+	dbwatch.LoginEncrypted:   "with its password encrypted on this server",
+	dbwatch.LoginNone:        "with no password: the database asks for none",
+	dbwatch.LoginIAM:         "with a short-lived token from this server's cloud identity, no password",
+	dbwatch.LoginCertificate: "with its certificate on this server, no password",
+	dbwatch.LoginVault:       "with a login from your vault, held only in memory",
+	dbwatch.LoginAWSSecret:   "with its password from AWS Secrets Manager, held only in memory",
 }
 
 func newDatabasesCheck(io IO) *cobra.Command {
@@ -174,7 +178,7 @@ func newDatabasesCheck(io IO) *cobra.Command {
 					failed++
 					continue
 				}
-				f := r.Read(cmd.Context(), dbwatch.Config{Name: d.Name, URL: d.URL, Limit: d.Limit, Backups: d.Backups, Password: d.Password}, time.Now())
+				f := r.Read(cmd.Context(), dbwatch.Config{Name: d.Name, URL: d.URL, Limit: d.Limit, Backups: d.Backups, Password: d.Password, Vault: r.VaultFor(c.Vault)}, time.Now())
 				if f.Error != "" {
 					fmt.Fprintf(io.Out, "%s: %s\n", d.Name, f.Error)
 					failed++
@@ -195,7 +199,7 @@ func newDatabasesCheck(io IO) *cobra.Command {
 					fmt.Fprintf(io.Out, ". Signs in %s, read-only", l)
 				}
 				fmt.Fprintln(io.Out, ".")
-				for _, x := range dbwatch.TooMuch(cmd.Context(), dbwatch.Config{Name: d.Name, URL: d.URL, Password: d.Password}) {
+				for _, x := range dbwatch.TooMuch(cmd.Context(), dbwatch.Config{Name: d.Name, URL: d.URL, Password: d.Password, Vault: r.VaultFor(c.Vault)}) {
 					fmt.Fprintf(io.Out, "  Its user may do more than Kiyesi needs. %s\n", x.What)
 					for _, why := range x.Details {
 						fmt.Fprintf(io.Out, "    - %s\n", why)

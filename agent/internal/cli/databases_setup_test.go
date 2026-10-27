@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"github.com/kiyesi/kiyesi/agent/internal/cloudlogin"
 )
 
 // The SQL in the printed steps reaches the database as written: the shell
@@ -28,11 +30,13 @@ func TestSetupSQLPassesThroughTheShell(t *testing.T) {
 func fakeServer(t *testing.T, containers [][2]string, env map[string][]string, envFiles map[string]string, published map[string]string) {
 	t.Helper()
 	oldC, oldE, oldF, oldP, oldG, oldT, oldS := dockerContainers, dockerEnv, appEnvFiles, dockerPublished, dockerGateway, fileThere, systemdVersion
-	oldSettings, oldIP, oldV6 := setupSettingsPath, publicIPv4, hasIPv6
+	oldSettings, oldIP, oldV6, oldAWS := setupSettingsPath, publicIPv4, hasIPv6, thisAWS
 	t.Cleanup(func() {
 		dockerContainers, dockerEnv, appEnvFiles, dockerPublished, dockerGateway, fileThere, systemdVersion = oldC, oldE, oldF, oldP, oldG, oldT, oldS
-		setupSettingsPath, publicIPv4, hasIPv6 = oldSettings, oldIP, oldV6
+		setupSettingsPath, publicIPv4, hasIPv6, thisAWS = oldSettings, oldIP, oldV6, oldAWS
 	})
+	// Off AWS, unless a test says otherwise.
+	thisAWS = func() cloudlogin.AWSInstance { return cloudlogin.AWSInstance{} }
 	hasIPv6 = func() bool { return false }
 	setupSettingsPath = t.TempDir() + "/config.yaml"
 	publicIPv4 = func() string { return "203.0.113.24" }
@@ -94,9 +98,10 @@ func TestSetupNothingFoundStillSaysEveryWay(t *testing.T) {
 	}
 }
 
+// Atlas with a password, when asked for: --login password.
 func TestSetupAtlas(t *testing.T) {
 	fakeServer(t, nil, nil, nil, nil)
-	_, out, _ := runCLI(t, "databases", "setup", "mongodb", "shop", "--host", "cluster0.abcde.mongodb.net")
+	_, out, _ := runCLI(t, "databases", "setup", "mongodb", "shop", "--host", "cluster0.abcde.mongodb.net", "--login", "password")
 	for _, want := range []string{
 		"Steps 1 and 2 are in Atlas's website",
 		"Security, Database & Network Access, and the Custom Roles tab",
@@ -163,7 +168,7 @@ func TestSetupPrintsTheOnlyDatabaseStraightAway(t *testing.T) {
 		"Found one database, which the apps on this server use: MongoDB Atlas cluster0.ab1cd.mongodb.net, database test.",
 		"Steps to watch the MongoDB Atlas database test on cluster0.ab1cd.mongodb.net",
 		"with only cluster0",
-		"kiyesi.db.test",
+		"sudo install -m 600 /dev/null /etc/kiyesi/credentials/test.pem",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -180,8 +185,8 @@ func TestSetupAddsToTheSettingsAsTheyAre(t *testing.T) {
 		"no file":        {"", "'databases:' '  - name: test'", ""},
 		"no databases":   {"token: x\n", "'databases:' '  - name: test'", ""},
 		"databases last": {"token: x\ndatabases:\n  - name: orders\n    url: postgres://kiyesi_ro@/orders?host=/run/postgresql\n", "printf '%s\\n' '  - name: test'", "'databases:'"},
-		"listed":         {"databases:\n  - name: test\n    url: x\n", "It is already in", "sudo tee"},
-		"inside":         {"databases:\n  - name: orders\n    url: x\nlogs:\n  level: info\n", "Add it under databases:", "sudo tee"},
+		"listed":         {"databases:\n  - name: test\n    url: x\n", "It is already in", "sudo tee -a"},
+		"inside":         {"databases:\n  - name: orders\n    url: x\nlogs:\n  level: info\n", "Add it under databases:", "sudo tee -a"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			fakeServer(t, nil, nil, nil, nil)

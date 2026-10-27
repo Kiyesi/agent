@@ -151,22 +151,26 @@ var (
 )
 
 func newDatabasesSetup(io IO) *cobra.Command {
-	var host, container string
+	var host, container, login, vaultAddr, vaultAuth string
 	var port int
 	cmd := &cobra.Command{
 		Use:   "setup [postgres|mysql|mariadb|mongodb|redis] [database]",
 		Short: "Print the steps to watch a database, read-only and with no password in a file",
 		Long: "Prints numbered steps for this server, for you to review and run: a user for Kiyesi\n" +
 			"that may only read sizes and counts, never a row, and cannot write; how it signs\n" +
-			"in (through the socket with no password, or with a random password nobody sees,\n" +
-			"kept encrypted); and the lines for /etc/kiyesi/config.yaml. Kiyesi changes nothing.\n" +
+			"in, the safest way where the database is (through the socket; with a short-lived\n" +
+			"token from the server's cloud identity on AWS RDS, Azure and Google Cloud SQL; with\n" +
+			"a certificate on MongoDB Atlas; from your vault; or with a random password nobody\n" +
+			"sees, kept encrypted); and the lines for /etc/kiyesi/config.yaml. Kiyesi changes nothing.\n" +
 			"With no engine, it lists the databases it finds: on this server, in its Docker\n" +
 			"containers, and the hosted ones its apps use (host and engine only, never a password).",
 		Example: "  sudo kiyesi databases setup\n" +
 			"  sudo kiyesi databases setup postgres orders\n" +
 			"  sudo kiyesi databases setup postgres orders --container app-db-1\n" +
 			"  sudo kiyesi databases setup mongodb shop --host cluster0.abcde.mongodb.net\n" +
-			"  sudo kiyesi databases setup mysql shop --host db.internal",
+			"  sudo kiyesi databases setup postgres orders --host orders.c9x.eu-west-1.rds.amazonaws.com\n" +
+			"  sudo kiyesi databases setup postgres orders --host 10.20.0.3 --login gcp-iam\n" +
+			"  sudo kiyesi databases setup mysql shop --host db.internal --login vault --vault https://vault.example.com:8200",
 		Args: cobra.MaximumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var engine, db string
@@ -203,9 +207,27 @@ func newDatabasesSetup(io IO) *cobra.Command {
 			if container != "" && host != "" {
 				return usageErr("give --container or --host, not both")
 			}
-			s := setupFor{out: io.Out, db: db, host: host, port: port, container: container, systemd: systemdVersion()}
+			login = strings.ToLower(login)
+			if !validLogin(login) {
+				return usageErr("%q is not a way Kiyesi signs in: password, aws-iam, gcp-iam, azure-identity, certificate, aws-secret or vault", login)
+			}
+			if vaultAuth != "" && vaultAuth != "aws" && vaultAuth != "gcp" && vaultAuth != "azure" && vaultAuth != "approle" {
+				return usageErr("--vault-auth is aws, gcp, azure or approle")
+			}
+			if vaultAddr != "" && !strings.HasPrefix(vaultAddr, "https://") {
+				return usageErr("--vault is Vault's https:// address")
+			}
+			s := setupFor{out: io.Out, db: db, host: host, port: port, container: container, systemd: systemdVersion(),
+				vaultAddr: vaultAddr, vaultAuth: vaultAuth}
 			if container != "" && !s.reachContainer(engineDefaultPort(engine)) {
 				return nil
+			}
+			if login == "" {
+				login = s.bestLogin(engine)
+			}
+			s.login = login
+			if done, err := s.cloud(engine); done || err != nil {
+				return err
 			}
 			switch engine {
 			case "postgres", "postgresql":
@@ -227,6 +249,9 @@ func newDatabasesSetup(io IO) *cobra.Command {
 	cmd.Flags().StringVar(&host, "host", "", "the database's host, when it is not on this server")
 	cmd.Flags().IntVar(&port, "port", 0, "the database's port, when it is not the usual one")
 	cmd.Flags().StringVar(&container, "container", "", "the Docker container the database runs in, on this server")
+	cmd.Flags().StringVar(&login, "login", "", "how Kiyesi signs in: password, aws-iam, gcp-iam, azure-identity, certificate, aws-secret or vault (the safest one for the host when not given)")
+	cmd.Flags().StringVar(&vaultAddr, "vault", "", "with --login vault: your Vault's https:// address")
+	cmd.Flags().StringVar(&vaultAuth, "vault-auth", "", "with --login vault: how this server signs in to Vault: aws, gcp, azure or approle")
 	return cmd
 }
 
@@ -455,6 +480,11 @@ type setupFor struct {
 	openToAll bool
 	systemd   int
 	step      int
+	// login is how Kiyesi will sign in (password, aws-iam, …), and the
+	// Vault's address and sign-in when it is vault.
+	login     string
+	vaultAddr string
+	vaultAuth string
 }
 
 func (s *setupFor) intro(what string) {
@@ -500,10 +530,12 @@ func (s *setupFor) say(what string, commands ...string) {
 	}
 }
 
-func (s *setupFor) config(url string, encrypted bool) {
+// config adds the database to Kiyesi's settings, with the password
+// setting that names where its password is kept ("" for none).
+func (s *setupFor) config(url, password string) {
 	entry := "  - name: " + s.db + "\n    url: " + url
-	if encrypted {
-		entry += "\n    password: credential"
+	if password != "" {
+		entry += "\n    password: " + password
 	}
 	settings, _ := os.ReadFile(setupSettingsPath) // #nosec G304 -- Kiyesi's own settings file
 	switch where := databasesSection(string(settings), s.db); where {
@@ -516,6 +548,9 @@ func (s *setupFor) config(url string, encrypted bool) {
 		}
 		s.say("Add it to Kiyesi's settings, "+setupSettingsPath+" (the address holds no password):",
 			printfLines(lines...)+" | sudo tee -a "+setupSettingsPath+" >/dev/null")
+		if strings.Contains(entry, "<") {
+			fmt.Fprintln(s.out, "   Put the value each <…> names in its place before running it.")
+		}
 	default:
 		s.say("Add it under databases: in "+setupSettingsPath+" (the address holds no password):", entry)
 	}
@@ -690,7 +725,7 @@ func (s *setupFor) postgres() {
 			`echo 'kiyesi  root  kiyesi_ro' | sudo tee -a "$ident" >/dev/null`,
 			`sudo sed -i '1i local  `+s.db+`  kiyesi_ro  peer map=kiyesi' "$hba"`,
 			`sudo -u postgres psql -c 'SELECT pg_reload_conf()'`)
-		s.config("postgres://kiyesi_ro@/"+s.db+"?host="+socket, false)
+		s.config("postgres://kiyesi_ro@/"+s.db+"?host="+socket, "")
 		return
 	}
 	where := "the PostgreSQL database " + s.db
@@ -722,7 +757,7 @@ func (s *setupFor) postgres() {
 	s.say("Make Kiyesi's user with a random password nobody sees. It may connect and read sizes and counts, never a row, and every session is read-only. Run it as the database's admin:",
 		randomPassword,
 		`printf "CREATE ROLE `+pgRole+` PASSWORD '%s';\n`+sqlLines(readOnly)+`" "$pw" | `+admin)
-	s.say(s.storeWords(), s.store())
+	s.keep()
 	addr := "127.0.0.1:5432"
 	if s.host != "" {
 		addr = s.hostPort(5432)
@@ -740,7 +775,7 @@ func (s *setupFor) postgres() {
 			url += "&sslrootcert=" + ca
 		}
 	}
-	s.config(url, true)
+	s.config(url, s.passwordSetting())
 }
 
 func (s *setupFor) mysql(maria bool) {
@@ -764,7 +799,7 @@ func (s *setupFor) mysql(maria bool) {
 		s.say("Make Kiyesi's user. Only this server's root user, which runs the agent, may sign in as it, and only through the socket (auth_socket). SHOW VIEW on the one database lets it see its tables' sizes, never their rows:",
 			"sudo mysql -e \""+shellDQ("CREATE USER 'kiyesi_ro'@'localhost' IDENTIFIED WITH auth_socket AS 'root' WITH MAX_USER_CONNECTIONS 3; "+fmt.Sprintf(grant, "localhost"))+"\"")
 		fmt.Fprintln(s.out, "   If it says the auth_socket plugin is not loaded: sudo mysql -e \"INSTALL PLUGIN auth_socket SONAME 'auth_socket.so'\"")
-		s.config("mysql://kiyesi_ro@localhost/"+s.db+"?socket="+socket, false)
+		s.config("mysql://kiyesi_ro@localhost/"+s.db+"?socket="+socket, "")
 		return
 	}
 	where := "the " + name + " database " + s.db
@@ -805,7 +840,7 @@ func (s *setupFor) mysql(maria bool) {
 	s.say("Make Kiyesi's user with a random password nobody sees, allowed only from "+from+". SHOW VIEW on the one database lets it see its tables' sizes, never their rows. Run it as the database's admin:",
 		randomPassword,
 		`printf "CREATE USER 'kiyesi_ro'@'`+from+`' IDENTIFIED BY '%s' WITH MAX_USER_CONNECTIONS 3;\n`+sqlLines(fmt.Sprintf(grant, from))+`" "$pw" | `+admin)
-	s.say(s.storeWords(), s.store())
+	s.keep()
 	addr := "127.0.0.1:3306"
 	if s.host != "" {
 		addr = s.hostPort(3306)
@@ -820,7 +855,7 @@ func (s *setupFor) mysql(maria bool) {
 			url += "&ca=" + ca
 		}
 	}
-	s.config(url, true)
+	s.config(url, s.passwordSetting())
 }
 
 // mongoUserJS makes the role that may only read the database's size and
@@ -873,7 +908,7 @@ func (s *setupFor) mongodb() {
 	s.say("Make a role that may only read the database's size and the server's status, and Kiyesi's user with it and a random password nobody sees. Run it as the database's admin:",
 		randomPassword,
 		mongoRun(admin, s.mongoUserJS(), s.container != ""))
-	s.say(s.storeWords(), s.store())
+	s.keep()
 	addr := "127.0.0.1:27017"
 	if s.host != "" {
 		addr = s.hostPort(27017)
@@ -888,7 +923,7 @@ func (s *setupFor) mongodb() {
 			url += "&tlsCAFile=" + ca
 		}
 	}
-	s.config(url, true)
+	s.config(url, s.passwordSetting())
 }
 
 // atlas is MongoDB Atlas: its roles and users are made in Atlas's website,
@@ -917,8 +952,7 @@ func (s *setupFor) atlas() {
 		where = "this server's public address, " + ip + ","
 	}
 	s.say("In Atlas, on the IP Access List tab, " + where + " must be listed; if it is not, Add IP Address with it alone, then Confirm. When an app on this server already uses this cluster, it is there already.")
-	s.config("mongodb+srv://kiyesi_ro@"+s.host+"/"+s.db, true)
-	fmt.Fprintln(s.out, "A later release signs in to Atlas with the cloud's own identity, with no password kept at all.")
+	s.config("mongodb+srv://kiyesi_ro@"+s.host+"/"+s.db, "credential")
 }
 
 func (s *setupFor) redis() {
@@ -946,7 +980,7 @@ func (s *setupFor) redis() {
 	s.say("Make Kiyesi's user with a random password nobody sees. It may run only INFO and PING: no key, no value, no setting:",
 		randomPassword,
 		`printf 'ACL SETUSER kiyesi_ro on >%s -@all +info +ping\n' "$pw" | `+admin)
-	s.say(s.storeWords(), s.store())
+	s.keep()
 	addr := "127.0.0.1:6379"
 	if s.host != "" {
 		addr = s.hostPort(6379)
@@ -961,7 +995,7 @@ func (s *setupFor) redis() {
 			query = "?ca=" + ca
 		}
 	}
-	s.config(scheme+"://kiyesi_ro@"+addr+query, true)
+	s.config(scheme+"://kiyesi_ro@"+addr+query, s.passwordSetting())
 }
 
 func newDatabasesEncrypt(io IO) *cobra.Command {

@@ -77,13 +77,13 @@ func TooMuch(ctx context.Context, c Config) []Excess {
 	}
 	switch engineOf(u) {
 	case "postgresql":
-		return postgresExcess(ctx, c.URL, secret.Password)
+		return postgresExcess(ctx, c.URL, secret)
 	case "mysql":
-		return mysqlExcess(ctx, u, secret.Password)
+		return mysqlExcess(ctx, u, secret)
 	case "mongodb":
-		return mongoExcess(ctx, c.URL, secret.Password, u)
+		return mongoExcess(ctx, c.URL, secret, u)
 	case "redis":
-		return redisExcess(ctx, u, secret.Password)
+		return redisExcess(ctx, u, secret)
 	}
 	return nil
 }
@@ -91,8 +91,8 @@ func TooMuch(ctx context.Context, c Config) []Excess {
 // PostgreSQL needs only to connect: the size, the connection count and the
 // settings are open to every user. pg_read_all_stats (part of pg_monitor)
 // shows every session's query text, and a SELECT on a table its rows.
-func postgresExcess(ctx context.Context, dsn, password string) []Excess {
-	conn, err := connectPostgres(ctx, dsn, password)
+func postgresExcess(ctx context.Context, dsn string, s Secret) []Excess {
+	conn, err := connectPostgres(ctx, dsn, s)
 	if err != nil {
 		return nil
 	}
@@ -190,8 +190,8 @@ func mysqlGrants(lines []string) (global, onDB map[string][]string) {
 	return global, onDB
 }
 
-func mysqlExcess(ctx context.Context, u *url.URL, password string) []Excess {
-	cfg := mysqlConfig(u, password)
+func mysqlExcess(ctx context.Context, u *url.URL, s Secret) []Excess {
+	cfg := mysqlConfig(u, s)
 	db, err := sql.Open("mysql", cfg.FormatDSN())
 	if err != nil {
 		return nil
@@ -265,8 +265,8 @@ func mysqlExcess(ctx context.Context, u *url.URL, password string) []Excess {
 // mongoNeeds is everything Kiyesi asks MongoDB for (buildInfo needs no right).
 var mongoNeeds = []string{"dbStats", "serverStatus"}
 
-func mongoExcess(ctx context.Context, uri, password string, u *url.URL) []Excess {
-	client, err := mongo.Connect(mongoOptions(uri, password).SetServerSelectionTimeout(10 * time.Second))
+func mongoExcess(ctx context.Context, uri string, s Secret, u *url.URL) []Excess {
+	client, err := mongo.Connect(mongoOptions(uri, s).SetServerSelectionTimeout(10 * time.Second))
 	if err != nil {
 		return nil
 	}
@@ -350,7 +350,8 @@ func dbOf(uri string) string {
 
 // Redis and Valkey need only INFO and PING. CONFIG GET shows every setting,
 // the main password among them, and a read command a key's value.
-func redisExcess(ctx context.Context, u *url.URL, password string) []Excess {
+func redisExcess(ctx context.Context, u *url.URL, s Secret) []Excess {
+	password := s.Password
 	user := u.User.Username()
 	if user == "" || user == "default" {
 		what := "With the main password, it can read and change everything."

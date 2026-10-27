@@ -440,7 +440,7 @@ func readDatabases(ctx context.Context, configPath string, r *dbwatch.Reader, no
 		if !dbwatch.NamePattern.MatchString(d.Name) {
 			continue
 		}
-		out = append(out, r.Read(ctx, dbwatch.Config{Name: d.Name, URL: d.URL, Limit: d.Limit, Backups: d.Backups, Password: d.Password}, now))
+		out = append(out, r.Read(ctx, dbwatch.Config{Name: d.Name, URL: d.URL, Limit: d.Limit, Backups: d.Backups, Password: d.Password, Vault: r.VaultFor(c.Vault)}, now))
 		if len(out) == 20 {
 			break
 		}

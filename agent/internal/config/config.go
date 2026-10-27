@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kiyesi/kiyesi/agent/internal/cloudlogin"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -40,6 +41,9 @@ type Config struct {
 	// Their addresses stay in this file and are never sent; a password is
 	// never kept here, only encrypted (see Database.Password).
 	Databases []Database `yaml:"databases"`
+	// Vault is the company's HashiCorp Vault, for databases whose password
+	// is vault:<path>. It names no secret.
+	Vault cloudlogin.VaultSettings `yaml:"vault"`
 }
 
 // Database is one database the agent reads: sizes, counts and the slow log,
@@ -56,8 +60,11 @@ type Database struct {
 	// Backups is the folder its backups are written to, for the newest one's age.
 	Backups string `yaml:"backups"`
 	// Password names where its password is kept, never the password:
-	// "credential" is one encrypted on this server (sudo kiyesi databases
-	// setup gives the steps). A password in the URL is refused.
+	// "credential" is one encrypted on this server; aws-iam, gcp-iam and
+	// azure-identity are tokens from the server's cloud identity;
+	// aws-secret:<ARN> and vault:<path> read it from AWS Secrets Manager or
+	// Vault (sudo kiyesi databases setup gives the steps). A password in the
+	// URL is refused.
 	Password string `yaml:"password"`
 }
 

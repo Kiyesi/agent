@@ -245,8 +245,8 @@
     "path": "kiyesi databases setup",
     "use": "kiyesi databases setup [postgres|mysql|mariadb|mongodb|redis] [database] [flags]",
     "short": "Print the steps to watch a database, read-only and with no password in a file",
-    "long": "Prints numbered steps for this server, for you to review and run: a user for Kiyesi\nthat may only read sizes and counts, never a row, and cannot write; how it signs\nin (through the socket with no password, or with a random password nobody sees,\nkept encrypted); and the lines for /etc/kiyesi/config.yaml. Kiyesi changes nothing.\nWith no engine, it lists the databases it finds: on this server, in its Docker\ncontainers, and the hosted ones its apps use (host and engine only, never a password).",
-    "example": "  sudo kiyesi databases setup\n  sudo kiyesi databases setup postgres orders\n  sudo kiyesi databases setup postgres orders --container app-db-1\n  sudo kiyesi databases setup mongodb shop --host cluster0.abcde.mongodb.net\n  sudo kiyesi databases setup mysql shop --host db.internal",
+    "long": "Prints numbered steps for this server, for you to review and run: a user for Kiyesi\nthat may only read sizes and counts, never a row, and cannot write; how it signs\nin, the safest way where the database is (through the socket; with a short-lived\ntoken from the server's cloud identity on AWS RDS, Azure and Google Cloud SQL; with\na certificate on MongoDB Atlas; from your vault; or with a random password nobody\nsees, kept encrypted); and the lines for /etc/kiyesi/config.yaml. Kiyesi changes nothing.\nWith no engine, it lists the databases it finds: on this server, in its Docker\ncontainers, and the hosted ones its apps use (host and engine only, never a password).",
+    "example": "  sudo kiyesi databases setup\n  sudo kiyesi databases setup postgres orders\n  sudo kiyesi databases setup postgres orders --container app-db-1\n  sudo kiyesi databases setup mongodb shop --host cluster0.abcde.mongodb.net\n  sudo kiyesi databases setup postgres orders --host orders.c9x.eu-west-1.rds.amazonaws.com\n  sudo kiyesi databases setup postgres orders --host 10.20.0.3 --login gcp-iam\n  sudo kiyesi databases setup mysql shop --host db.internal --login vault --vault https://vault.example.com:8200",
     "flags": [
       {
         "name": "container",
@@ -257,9 +257,21 @@
         "usage": "the database's host, when it is not on this server"
       },
       {
+        "name": "login",
+        "usage": "how Kiyesi signs in: password, aws-iam, gcp-iam, azure-identity, certificate, aws-secret or vault (the safest one for the host when not given)"
+      },
+      {
         "name": "port",
         "usage": "the database's port, when it is not the usual one",
         "default": "0"
+      },
+      {
+        "name": "vault",
+        "usage": "with --login vault: your Vault's https:// address"
+      },
+      {
+        "name": "vault-auth",
+        "usage": "with --login vault: how this server signs in to Vault: aws, gcp, azure or approle"
       }
     ]
   },

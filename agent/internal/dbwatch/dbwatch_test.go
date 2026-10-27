@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kiyesi/kiyesi/agent/internal/cloudlogin"
 )
 
 func TestParseLimit(t *testing.T) {
@@ -98,7 +100,7 @@ func TestReadRedisFromItsOwnFigures(t *testing.T) {
 	addr := fakeRedis(t)
 	u, _ := url.Parse("redis://:pw@" + addr)
 	var f Figures
-	if err := readRedis(context.Background(), u, "pw", &f, time.Now()); err != nil {
+	if err := readRedis(context.Background(), u, Secret{Password: "pw"}, &f, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if f.Version != "7.0.15" || *f.SizeBytes != 48<<20 || *f.LimitBytes != 256<<20 || f.LimitSource != "maxmemory" {
@@ -256,4 +258,61 @@ func TestRealPrivateAuthority(t *testing.T) {
 		}
 		t.Logf("%s: read with its authority (%s %s), refused without it", env, f.Engine, f.Version)
 	}
+}
+
+// A real Vault making short-lived read-only users on a real PostgreSQL:
+// the agent signs in with an AppRole, reads with Vault's user, renews its
+// lease, and takes a new user when the lease can be renewed no more.
+func TestRealVault(t *testing.T) {
+	addr := os.Getenv("KIYESI_VAULT_ADDR")
+	if addr == "" {
+		t.Skip("run scripts/db-watch-test.sh")
+	}
+	r := &Reader{}
+	v := r.VaultFor(cloudlogin.VaultSettings{Address: addr, Auth: "approle", Role: os.Getenv("KIYESI_VAULT_ROLE_ID")})
+	v.SecretID = func(context.Context) (string, error) { return os.Getenv("KIYESI_VAULT_SECRET_ID"), nil }
+	c := Config{Name: "orders", URL: os.Getenv("KIYESI_VAULT_PG"), Password: "vault:database/creds/kiyesi-ro", Vault: v}
+	user := func() string {
+		t.Helper()
+		f := r.Read(context.Background(), c, time.Now())
+		if f.Error != "" || f.SizeBytes == nil || f.Login != LoginVault {
+			t.Fatalf("read: %+v", f)
+		}
+		u, _ := url.Parse(c.URL)
+		s, err := LoginFor(context.Background(), c, u)
+		if err != nil || !strings.HasPrefix(s.User, "v-approle-kiyesi-r") {
+			t.Fatalf("its user: %+v %v", s, err)
+		}
+		return s.User
+	}
+	first := user()
+	// Vault's user has the smallest rights: nothing more than Kiyesi needs.
+	if x := TooMuch(context.Background(), c); len(x) > 0 {
+		t.Errorf("Vault's user may do more: %+v", x)
+	}
+	// The role gives 15 seconds, renewable up to 40: at 11 seconds the
+	// same user is renewed, after 40 a new one is made.
+	time.Sleep(11 * time.Second)
+	if again := user(); again != first {
+		t.Errorf("renewed: got %s, want the same %s", again, first)
+	}
+	time.Sleep(32 * time.Second)
+	if next := user(); next == first {
+		t.Errorf("after its longest time: still %s", first)
+	}
+	t.Logf("read as %s, renewed, then a new user", first)
+}
+
+// A real MongoDB with a certificate sign-in, as Atlas's X.509 users are:
+// no password anywhere, and a file readable by root only.
+func TestRealCertificate(t *testing.T) {
+	raw := os.Getenv("KIYESI_X509_MO")
+	if raw == "" {
+		t.Skip("run scripts/db-watch-test.sh")
+	}
+	f := (&Reader{}).Read(context.Background(), Config{Name: "catalogue", URL: raw}, time.Now())
+	if f.Error != "" || f.SizeBytes == nil || f.Login != LoginCertificate {
+		t.Fatalf("certificate: %+v", f)
+	}
+	t.Logf("read with a certificate (%s %s)", f.Engine, f.Version)
 }

@@ -51,7 +51,7 @@ func TestOnlyKiyesisOwnUserLosesRights(t *testing.T) {
 func TestRedisDefaultUser(t *testing.T) {
 	for raw, pw := range map[string]string{"redis://127.0.0.1:1": "main", "redis://127.0.0.1:2": "", "redis://default@127.0.0.1:1": "main"} {
 		u, _ := url.Parse(raw)
-		got := redisExcess(context.Background(), u, pw)
+		got := redisExcess(context.Background(), u, Secret{Password: pw})
 		if len(got) != 1 || !got[0].NewUser || got[0].Commands[0] != "ACL SETUSER kiyesi_ro on >CHOOSE-A-PASSWORD -@all +info +ping" {
 			t.Errorf("%s: %+v", raw, got)
 		}
@@ -64,7 +64,7 @@ func TestRedisLimitFromInfo(t *testing.T) {
 	addr := fakeRedisWith(t, "# Server\r\nredis_version:7.4.1\r\n# Clients\r\nconnected_clients:3\r\nmaxclients:500\r\n")
 	u, _ := url.Parse("redis://kiyesi_ro:pw@" + addr)
 	var f Figures
-	if err := readRedis(context.Background(), u, "pw", &f, time.Now()); err != nil {
+	if err := readRedis(context.Background(), u, Secret{Password: "pw"}, &f, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if f.MaxConnections == nil || *f.MaxConnections != 500 {

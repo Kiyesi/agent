@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/kiyesi/kiyesi/agent/internal/cloudlogin"
 )
 
 // How the agent signs in to a database. A password is never kept in plain
@@ -28,6 +30,17 @@ const (
 	// LoginNone: the database asks for no password at all (a Redis or
 	// MongoDB on this server without sign-in turned on).
 	LoginNone = "none"
+	// LoginIAM: a short-lived token from the server's own cloud identity
+	// (AWS IAM, Google Cloud, Azure managed identity), or MongoDB's AWS and
+	// workload identity sign-in. Nothing secret is stored.
+	LoginIAM = "iam"
+	// LoginCertificate: an X.509 certificate kept on the server, root only.
+	LoginCertificate = "certificate"
+	// LoginVault: a password, or a short-lived user, from HashiCorp Vault.
+	LoginVault = "vault"
+	// LoginAWSSecret: a password from AWS Secrets Manager, read with the
+	// server's AWS role.
+	LoginAWSSecret = "aws-secret"
 )
 
 // CredentialPrefix names a database's encrypted password for systemd:
@@ -57,34 +70,171 @@ var (
 var ErrPasswordInAddress = errors.New("a password is written in its address. Kiyesi never keeps a database password in plain text: remove it, and run sudo kiyesi databases setup for a safe way to sign in")
 
 // Secret is how the agent signs in to one database: the password, held
-// only in memory, and the kind of login. It never leaves this server.
+// only in memory, the user when it is not the address's own (a user Vault
+// made), and the kind of login. It never leaves this server.
 type Secret struct {
 	Password string
+	User     string
 	Kind     string
 }
 
 // LoginFor finds how to sign in to a database, from its settings. The
 // password setting names where the password is kept, never the password:
-// "credential" is the one encrypted for this database on this server.
+//
+//	credential             encrypted for this database on this server
+//	aws-iam                an RDS or Aurora IAM token from the server's AWS role
+//	gcp-iam                a Cloud SQL token from the VM's service account
+//	azure-identity[:id]    a token from the VM's managed identity
+//	aws-secret:<arn>       a password in AWS Secrets Manager
+//	vault:<path>[#field]   a password, or a short-lived user, from Vault
+//
+// MongoDB's own certificate, AWS and workload identity sign-ins are named
+// in its address (authMechanism=), with no password setting.
 func LoginFor(ctx context.Context, c Config, u *url.URL) (Secret, error) {
 	if _, ok := u.User.Password(); ok {
 		return Secret{}, ErrPasswordInAddress
 	}
-	switch c.Password {
+	kind, arg, _ := strings.Cut(c.Password, ":")
+	switch kind {
 	case "":
-		if socketAddress(u) {
-			return Secret{Kind: LoginSocket}, nil
-		}
-		return Secret{Kind: LoginNone}, nil
+		return addressLogin(u)
 	case "credential":
 		pw, err := credential(ctx, c.Name)
 		if err != nil {
 			return Secret{}, err
 		}
 		return Secret{Password: pw, Kind: LoginEncrypted}, nil
+	case "aws-iam", "gcp-iam", "azure-identity":
+		if err := needsTLS(u); err != nil {
+			return Secret{}, err
+		}
+		tok, err := cloudToken(ctx, kind, arg, u)
+		if err != nil {
+			return Secret{}, err
+		}
+		return Secret{Password: tok, Kind: LoginIAM}, nil
+	case "aws-secret":
+		if arg == "" {
+			return Secret{}, errors.New("name the secret: password: aws-secret:<its ARN>")
+		}
+		if err := needsTLS(u); err != nil && !local(u.Hostname()) {
+			return Secret{}, err
+		}
+		keys, err := cloudlogin.AWSCredentialsFor(ctx)
+		if err != nil {
+			return Secret{}, err
+		}
+		region := cloudlogin.RDSRegion(u.Hostname())
+		if region == "" {
+			region = cloudlogin.AWSRegion(ctx)
+		}
+		pw, err := cloudlogin.AWSSecret(ctx, keys, arg, region)
+		if err != nil {
+			return Secret{}, err
+		}
+		return Secret{Password: pw, Kind: LoginAWSSecret}, nil
+	case "vault":
+		if arg == "" {
+			return Secret{}, errors.New("name the secret: password: vault:<its path>, such as vault:database/creds/kiyesi-ro")
+		}
+		if err := needsTLS(u); err != nil && !local(u.Hostname()) {
+			return Secret{}, err
+		}
+		if c.Vault == nil {
+			return Secret{}, errors.New("no Vault is set: add its address under vault: in /etc/kiyesi/config.yaml")
+		}
+		l, err := c.Vault.Read(ctx, arg)
+		if err != nil {
+			return Secret{}, err
+		}
+		return Secret{Password: l.Password, User: l.Username, Kind: LoginVault}, nil
 	}
 	// Never repeated back: someone may have typed the password itself here.
-	return Secret{}, errors.New("its password setting is not one Kiyesi knows. It names where the password is kept, never the password: use password: credential for one encrypted on this server")
+	return Secret{}, errors.New("its password setting is not one Kiyesi knows. It names where the password is kept, never the password: credential, aws-iam, gcp-iam, azure-identity, aws-secret:<ARN> or vault:<path>")
+}
+
+// addressLogin is the login an address gives by itself: MongoDB's
+// certificate, AWS or workload identity sign-in, the socket, or none.
+func addressLogin(u *url.URL) (Secret, error) {
+	q := u.Query()
+	switch strings.ToUpper(q.Get("authMechanism")) {
+	case "MONGODB-X509":
+		file := q.Get("tlsCertificateKeyFile")
+		if file == "" {
+			return Secret{}, errors.New("a certificate sign-in needs its file: add &tlsCertificateKeyFile=/etc/kiyesi/credentials/<name>.pem")
+		}
+		info, err := os.Stat(file) // #nosec G304 G703 -- a path from root's own settings file
+		if err != nil {
+			return Secret{}, fmt.Errorf("its certificate file %s could not be read", file)
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			return Secret{}, fmt.Errorf("its certificate file %s may be read by other users: sudo chmod 600 %s", file, file)
+		}
+		return Secret{Kind: LoginCertificate}, nil
+	case "MONGODB-AWS", "MONGODB-OIDC":
+		return Secret{Kind: LoginIAM}, nil
+	}
+	if socketAddress(u) {
+		return Secret{Kind: LoginSocket}, nil
+	}
+	return Secret{Kind: LoginNone}, nil
+}
+
+// needsTLS refuses a cloud login over a connection whose certificate is not
+// checked: the token or password would otherwise cross the network open.
+func needsTLS(u *url.URL) error {
+	q := u.Query()
+	switch engineOf(u) {
+	case "postgresql":
+		if m := q.Get("sslmode"); m == "verify-full" || m == "verify-ca" {
+			return nil
+		}
+		return errors.New("its address must check the database's certificate: add ?sslmode=verify-full (with &sslrootcert= for the provider's authority)")
+	case "mysql":
+		if q.Get("tls") == "true" {
+			return nil
+		}
+		return errors.New("its address must use TLS: add ?tls=true (with &ca= for the provider's authority)")
+	case "redis":
+		if u.Scheme == "rediss" {
+			return nil
+		}
+		return errors.New("its address must use TLS: start it with rediss://")
+	case "mongodb":
+		if u.Scheme == "mongodb+srv" || q.Get("tls") == "true" || q.Get("ssl") == "true" {
+			return nil
+		}
+		return errors.New("its address must use TLS: add tls=true")
+	}
+	return nil
+}
+
+// cloudToken makes the token a cloud database takes as its password.
+func cloudToken(ctx context.Context, kind, arg string, u *url.URL) (string, error) {
+	switch kind {
+	case "aws-iam":
+		e := engineOf(u)
+		if e != "postgresql" && e != "mysql" {
+			return "", errors.New("AWS IAM sign-in is for RDS and Aurora PostgreSQL and MySQL")
+		}
+		region := cloudlogin.RDSRegion(u.Hostname())
+		if region == "" {
+			return "", errors.New("AWS IAM sign-in needs the database's RDS address (….rds.amazonaws.com), which names its region")
+		}
+		keys, err := cloudlogin.AWSCredentialsFor(ctx)
+		if err != nil {
+			return "", err
+		}
+		port := u.Port()
+		if port == "" {
+			port = map[string]string{"postgresql": "5432", "mysql": "3306"}[e]
+		}
+		return cloudlogin.RDSToken(keys, u.Hostname(), port, u.User.Username(), region), nil
+	case "gcp-iam":
+		return cloudlogin.GCPToken(ctx)
+	default:
+		return cloudlogin.AzureToken(ctx, "", arg)
+	}
 }
 
 // socketAddress says whether the address reaches the database through its

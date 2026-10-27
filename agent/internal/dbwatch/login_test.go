@@ -3,12 +3,17 @@ package dbwatch
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kiyesi/kiyesi/agent/internal/cloudlogin"
 )
 
 func login(t *testing.T, c Config) (Secret, error) {
@@ -115,5 +120,92 @@ func TestSystemdCredentials(t *testing.T) {
 	}
 	if strings.Join(asked, " ") != "decrypt --name=kiyesi.db.shop "+filepath.Join(CredstoreDir, "kiyesi.db.shop")+" -" {
 		t.Errorf("asked systemd-creds %v", asked)
+	}
+}
+
+// A cloud login is only ever sent inside TLS whose certificate is checked.
+func TestCloudLoginsNeedTLS(t *testing.T) {
+	t.Setenv("AWS_ACCESS_KEY_ID", "AKIDEXAMPLE")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "role-secret")
+	t.Setenv("AWS_SESSION_TOKEN", "role-token")
+	for raw, want := range map[string]string{
+		"postgres://kiyesi_ro@orders.c9x.eu-west-1.rds.amazonaws.com/orders":                               "sslmode=verify-full",
+		"postgres://kiyesi_ro@orders.c9x.eu-west-1.rds.amazonaws.com/orders?sslmode=require":               "sslmode=verify-full",
+		"mysql://kiyesi_ro@shop.c9x.eu-west-1.rds.amazonaws.com/shop":                                      "tls=true",
+		"redis://kiyesi_ro@cache.example.com:6379":                                                         "rediss://",
+		"postgres://kiyesi_ro@10.0.0.5/orders?sslmode=verify-full":                                         "RDS address",
+		"mongodb://kiyesi_ro@cluster0.ab1cd.mongodb.net/shop?tls=true":                                     "RDS and Aurora",
+		"postgres://kiyesi_ro@orders.c9x.eu-west-1.rds.amazonaws.com/orders?sslmode=verify-full&extra=1#x": "",
+	} {
+		s, err := login(t, Config{Name: "orders", URL: raw, Password: "aws-iam"})
+		if want == "" {
+			if err != nil || s.Kind != LoginIAM || !strings.Contains(s.Password, "DBUser=kiyesi_ro") || !strings.Contains(s.Password, "X-Amz-"+"Signature=") {
+				t.Errorf("%s: %+v %v", raw, s, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v, want %q", raw, err, want)
+		}
+	}
+}
+
+// MongoDB's certificate sign-in needs its file, readable by root only.
+func TestCertificateLogin(t *testing.T) {
+	dir := t.TempDir()
+	pem := filepath.Join(dir, "shop.pem")
+	if err := os.WriteFile(pem, []byte("cert"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw := "mongodb+srv://cluster0.ab1cd.mongodb.net/shop?authSource=%24external&authMechanism=MONGODB-X509&tlsCertificateKeyFile=" + pem
+	if _, err := login(t, Config{Name: "shop", URL: raw}); err == nil || !strings.Contains(err.Error(), "sudo chmod 600 "+pem) {
+		t.Errorf("readable by others: %v", err)
+	}
+	_ = os.Chmod(pem, 0o600)
+	if s, err := login(t, Config{Name: "shop", URL: raw}); err != nil || s.Kind != LoginCertificate || s.Password != "" {
+		t.Errorf("certificate: %+v %v", s, err)
+	}
+	if _, err := login(t, Config{Name: "shop", URL: "mongodb+srv://cluster0.ab1cd.mongodb.net/shop?authMechanism=MONGODB-X509"}); err == nil || !strings.Contains(err.Error(), "tlsCertificateKeyFile") {
+		t.Errorf("no file: %v", err)
+	}
+	if s, err := login(t, Config{Name: "shop", URL: "mongodb+srv://cluster0.ab1cd.mongodb.net/shop?authSource=%24external&authMechanism=MONGODB-AWS"}); err != nil || s.Kind != LoginIAM {
+		t.Errorf("AWS: %+v %v", s, err)
+	}
+}
+
+func TestPasswordSettingsNeverEchoed(t *testing.T) {
+	for _, setting := range []string{"hunter2", "vault:", "aws-secret:"} {
+		_, err := login(t, Config{Name: "orders", URL: "postgres://kiyesi_ro@db.example.com/orders?sslmode=verify-full", Password: setting})
+		if err == nil || (setting == "hunter2" && strings.Contains(err.Error(), "hunter2")) {
+			t.Errorf("%q: %v", setting, err)
+		}
+	}
+	if _, err := login(t, Config{Name: "orders", URL: "postgres://kiyesi_ro@db.example.com/orders?sslmode=verify-full", Password: "vault:database/creds/kiyesi-ro"}); err == nil || !strings.Contains(err.Error(), "no Vault is set") {
+		t.Errorf("no vault: %v", err)
+	}
+}
+
+// Vault: one sign-in for the reader, a short-lived user's own name used.
+func TestVaultLoginGivesItsUser(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/auth/approle/login":
+			_, _ = io.WriteString(w, `{"auth":{"client_token":"tok","lease_duration":3600}}`)
+		case "/v1/database/creds/kiyesi-ro":
+			_, _ = io.WriteString(w, `{"lease_id":"l1","lease_duration":900,"data":{"username":"v-approle-kiyesi-ro-x1","password":"dyn"}}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	r := &Reader{}
+	v := r.VaultFor(cloudlogin.VaultSettings{Address: srv.URL, Auth: "approle", Role: "role-1"})
+	v.SecretID = func(context.Context) (string, error) { return "s", nil }
+	if r.VaultFor(cloudlogin.VaultSettings{Address: srv.URL, Auth: "approle", Role: "role-1"}) != v {
+		t.Error("the same settings give the same Vault")
+	}
+	s, err := login(t, Config{Name: "orders", URL: "postgres://kiyesi_ro@127.0.0.1/orders", Password: "vault:database/creds/kiyesi-ro", Vault: v})
+	if err != nil || s.Kind != LoginVault || s.User != "v-approle-kiyesi-ro-x1" || s.Password != "dyn" {
+		t.Errorf("vault: %+v %v", s, err)
 	}
 }
