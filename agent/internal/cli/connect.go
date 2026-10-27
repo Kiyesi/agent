@@ -218,6 +218,11 @@ RestrictRealtime=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallArchitectures=native
+# A database's password encrypted on this server (sudo kiyesi databases
+# setup): systemd 254 and later decrypts it into a folder only this service
+# reads, in memory. Older systemd ignores the line; the agent then reads
+# Kiyesi's own encrypted file.
+ImportCredential=kiyesi.db.*
 
 [Install]
 WantedBy=multi-user.target

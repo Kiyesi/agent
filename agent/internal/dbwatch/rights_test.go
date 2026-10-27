@@ -49,9 +49,9 @@ func TestOnlyKiyesisOwnUserLosesRights(t *testing.T) {
 // The main password, or none, is never Kiyesi's own user: it is told to
 // make one, without connecting.
 func TestRedisDefaultUser(t *testing.T) {
-	for _, raw := range []string{"redis://:main@127.0.0.1:1", "redis://127.0.0.1:1", "redis://default:main@127.0.0.1:1"} {
+	for raw, pw := range map[string]string{"redis://127.0.0.1:1": "main", "redis://127.0.0.1:2": "", "redis://default@127.0.0.1:1": "main"} {
 		u, _ := url.Parse(raw)
-		got := redisExcess(context.Background(), u)
+		got := redisExcess(context.Background(), u, pw)
 		if len(got) != 1 || !got[0].NewUser || got[0].Commands[0] != "ACL SETUSER kiyesi_ro on >CHOOSE-A-PASSWORD -@all +info +ping" {
 			t.Errorf("%s: %+v", raw, got)
 		}
@@ -64,7 +64,7 @@ func TestRedisLimitFromInfo(t *testing.T) {
 	addr := fakeRedisWith(t, "# Server\r\nredis_version:7.4.1\r\n# Clients\r\nconnected_clients:3\r\nmaxclients:500\r\n")
 	u, _ := url.Parse("redis://kiyesi_ro:pw@" + addr)
 	var f Figures
-	if err := readRedis(context.Background(), u, &f, time.Now()); err != nil {
+	if err := readRedis(context.Background(), u, "pw", &f, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if f.MaxConnections == nil || *f.MaxConnections != 500 {
@@ -84,7 +84,7 @@ func TestRealRights(t *testing.T) {
 	ctx := context.Background()
 	whats := func(env string) string {
 		var b strings.Builder
-		for _, x := range TooMuch(ctx, Config{Name: env, URL: os.Getenv(env)}) {
+		for _, x := range TooMuch(ctx, viaCredential(t, "db", os.Getenv(env))) {
 			b.WriteString(x.What + " " + strings.Join(x.Details, " ") + " | " + strings.Join(x.Commands, " ; ") + "\n")
 			if strings.Contains(strings.Join(x.Commands, " "), "ro-pw") || strings.Contains(x.What, "ro-pw") {
 				t.Errorf("%s: a password in the advice", env)
@@ -128,7 +128,7 @@ func TestRealRights(t *testing.T) {
 		}
 	}
 	for _, env := range []string{"KIYESI_DB_POSTGRES_ADMIN", "KIYESI_DB_MYSQL_APP", "KIYESI_DB_REDIS_MAIN"} {
-		x := TooMuch(ctx, Config{Name: env, URL: os.Getenv(env)})
+		x := TooMuch(ctx, viaCredential(t, "db", os.Getenv(env)))
 		if len(x) != 1 || !x[0].NewUser || !strings.Contains(strings.Join(x[0].Commands, " "), "kiyesi_ro") {
 			t.Errorf("%s: want a user of Kiyesi's own: %+v", env, x)
 		}

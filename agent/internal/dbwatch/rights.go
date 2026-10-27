@@ -15,11 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-sql-driver/mysql"
-	"github.com/jackc/pgx/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // Excess is a right the read-only user has beyond what Kiyesi reads, and
@@ -74,15 +71,19 @@ func TooMuch(ctx context.Context, c Config) []Excess {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
+	secret, err := LoginFor(ctx, c, u)
+	if err != nil {
+		return nil
+	}
 	switch engineOf(u) {
 	case "postgresql":
-		return postgresExcess(ctx, c.URL)
+		return postgresExcess(ctx, c.URL, secret.Password)
 	case "mysql":
-		return mysqlExcess(ctx, u)
+		return mysqlExcess(ctx, u, secret.Password)
 	case "mongodb":
-		return mongoExcess(ctx, c.URL, u)
+		return mongoExcess(ctx, c.URL, secret.Password, u)
 	case "redis":
-		return redisExcess(ctx, u)
+		return redisExcess(ctx, u, secret.Password)
 	}
 	return nil
 }
@@ -90,8 +91,8 @@ func TooMuch(ctx context.Context, c Config) []Excess {
 // PostgreSQL needs only to connect: the size, the connection count and the
 // settings are open to every user. pg_read_all_stats (part of pg_monitor)
 // shows every session's query text, and a SELECT on a table its rows.
-func postgresExcess(ctx context.Context, dsn string) []Excess {
-	conn, err := pgx.Connect(ctx, dsn)
+func postgresExcess(ctx context.Context, dsn, password string) []Excess {
+	conn, err := connectPostgres(ctx, dsn, password)
 	if err != nil {
 		return nil
 	}
@@ -189,18 +190,8 @@ func mysqlGrants(lines []string) (global, onDB map[string][]string) {
 	return global, onDB
 }
 
-func mysqlExcess(ctx context.Context, u *url.URL) []Excess {
-	cfg := mysql.NewConfig()
-	cfg.User = u.User.Username()
-	cfg.Passwd, _ = u.User.Password()
-	cfg.Net, cfg.Addr = "tcp", u.Host
-	if u.Port() == "" {
-		cfg.Addr = net.JoinHostPort(u.Hostname(), "3306")
-	}
-	cfg.DBName = strings.TrimPrefix(u.Path, "/")
-	if u.Query().Get("tls") == "true" {
-		cfg.TLSConfig = "true"
-	}
+func mysqlExcess(ctx context.Context, u *url.URL, password string) []Excess {
+	cfg := mysqlConfig(u, password)
 	db, err := sql.Open("mysql", cfg.FormatDSN())
 	if err != nil {
 		return nil
@@ -274,8 +265,8 @@ func mysqlExcess(ctx context.Context, u *url.URL) []Excess {
 // mongoNeeds is everything Kiyesi asks MongoDB for (buildInfo needs no right).
 var mongoNeeds = []string{"dbStats", "serverStatus"}
 
-func mongoExcess(ctx context.Context, uri string, u *url.URL) []Excess {
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetServerSelectionTimeout(10 * time.Second))
+func mongoExcess(ctx context.Context, uri, password string, u *url.URL) []Excess {
+	client, err := mongo.Connect(mongoOptions(uri, password).SetServerSelectionTimeout(10 * time.Second))
 	if err != nil {
 		return nil
 	}
@@ -359,11 +350,11 @@ func dbOf(uri string) string {
 
 // Redis and Valkey need only INFO and PING. CONFIG GET shows every setting,
 // the main password among them, and a read command a key's value.
-func redisExcess(ctx context.Context, u *url.URL) []Excess {
+func redisExcess(ctx context.Context, u *url.URL, password string) []Excess {
 	user := u.User.Username()
 	if user == "" || user == "default" {
 		what := "With the main password, it can read and change everything."
-		if _, ok := u.User.Password(); !ok {
+		if password == "" {
 			what = "With no password, anyone who reaches it can read and change everything."
 		}
 		return ownUserInstead("the default user", []Excess{{What: what}}, "in redis-cli (or valkey-cli), as an admin",
@@ -389,8 +380,8 @@ func redisExcess(ctx context.Context, u *url.URL) []Excess {
 		_ = conn.SetDeadline(deadline)
 	}
 	rd := bufio.NewReader(conn)
-	if pass, ok := u.User.Password(); ok {
-		if _, err := command(conn, rd, "AUTH", user, pass); err != nil {
+	if password != "" {
+		if _, err := command(conn, rd, "AUTH", user, password); err != nil {
 			return nil
 		}
 	}

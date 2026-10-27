@@ -14,7 +14,7 @@ var hostOS = runtime.GOOS
 // runs on any computer.
 var serverOnly = map[string]bool{
 	"kiyesi agent": true, "kiyesi breach-check": true, "kiyesi connect": true,
-	"kiyesi databases check": true, "kiyesi fix": true, "kiyesi fix undo": true,
+	"kiyesi databases check": true, "kiyesi databases encrypt": true, "kiyesi databases setup": true, "kiyesi fix": true, "kiyesi fix undo": true,
 	"kiyesi guard": true, "kiyesi guard list": true, "kiyesi guard undo": true,
 	"kiyesi keys": true, "kiyesi keys remove": true, "kiyesi job done": true, "kiyesi job start": true,
 	"kiyesi scan": true, "kiyesi uninstall": true,

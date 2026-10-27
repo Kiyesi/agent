@@ -37,7 +37,8 @@ type Config struct {
 	// sign-in from a user and address not seen before. On by default.
 	Logins string `yaml:"logins"`
 	// Databases are read by the agent with a read-only user (PRD feature 24).
-	// Their addresses and passwords stay in this file and are never sent.
+	// Their addresses stay in this file and are never sent; a password is
+	// never kept here, only encrypted (see Database.Password).
 	Databases []Database `yaml:"databases"`
 }
 
@@ -54,6 +55,10 @@ type Database struct {
 	Limit string `yaml:"limit"`
 	// Backups is the folder its backups are written to, for the newest one's age.
 	Backups string `yaml:"backups"`
+	// Password names where its password is kept, never the password:
+	// "credential" is one encrypted on this server (sudo kiyesi databases
+	// setup gives the steps). A password in the URL is refused.
+	Password string `yaml:"password"`
 }
 
 // Containers says which containers Kiyesi reads at all: their figures,

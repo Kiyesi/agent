@@ -122,7 +122,7 @@ func newDatabases(io IO) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the result as JSON, for scripts")
-	cmd.AddCommand(newDatabasesCheck(io))
+	cmd.AddCommand(newDatabasesCheck(io), newDatabasesSetup(io), newDatabasesEncrypt(io))
 	cmd.SetContext(context.Background())
 	return cmd
 }
@@ -135,6 +135,13 @@ func unreachable(d api.Database) bool {
 		}
 	}
 	return false
+}
+
+// loginWords say how the agent signs in to a database, never with what.
+var loginWords = map[string]string{
+	dbwatch.LoginSocket:    "through its socket, with no password",
+	dbwatch.LoginEncrypted: "with its password encrypted on this server",
+	dbwatch.LoginNone:      "with no password: the database asks for none",
 }
 
 func newDatabasesCheck(io IO) *cobra.Command {
@@ -151,7 +158,7 @@ func newDatabasesCheck(io IO) *cobra.Command {
 				return usageErr("%v", err)
 			}
 			if len(c.Databases) == 0 {
-				fmt.Fprintf(io.Out, "No databases in %s. Add one:\n\n  databases:\n    - name: orders\n      url: postgres://kiyesi_ro:PASSWORD@127.0.0.1:5432/orders\n", configPath)
+				fmt.Fprintf(io.Out, "No databases in %s. For the steps to add one, with a read-only user and no password kept in plain text:\n\n  sudo kiyesi databases setup\n", configPath)
 				return nil
 			}
 			r := &dbwatch.Reader{DiskBytes: diskBytes(newSystem(os.Geteuid() == 0, stateDir()))}
@@ -167,7 +174,7 @@ func newDatabasesCheck(io IO) *cobra.Command {
 					failed++
 					continue
 				}
-				f := r.Read(cmd.Context(), dbwatch.Config{Name: d.Name, URL: d.URL, Limit: d.Limit, Backups: d.Backups}, time.Now())
+				f := r.Read(cmd.Context(), dbwatch.Config{Name: d.Name, URL: d.URL, Limit: d.Limit, Backups: d.Backups, Password: d.Password}, time.Now())
 				if f.Error != "" {
 					fmt.Fprintf(io.Out, "%s: %s\n", d.Name, f.Error)
 					failed++
@@ -184,8 +191,11 @@ func newDatabasesCheck(io IO) *cobra.Command {
 				if f.NewestBackupAt != "" {
 					fmt.Fprintf(io.Out, ", newest backup %s", f.NewestBackupAt)
 				}
+				if l := loginWords[f.Login]; l != "" {
+					fmt.Fprintf(io.Out, ". Signs in %s, read-only", l)
+				}
 				fmt.Fprintln(io.Out, ".")
-				for _, x := range dbwatch.TooMuch(cmd.Context(), dbwatch.Config{Name: d.Name, URL: d.URL}) {
+				for _, x := range dbwatch.TooMuch(cmd.Context(), dbwatch.Config{Name: d.Name, URL: d.URL, Password: d.Password}) {
 					fmt.Fprintf(io.Out, "  Its user may do more than Kiyesi needs. %s\n", x.What)
 					for _, why := range x.Details {
 						fmt.Fprintf(io.Out, "    - %s\n", why)

@@ -98,7 +98,7 @@ func TestReadRedisFromItsOwnFigures(t *testing.T) {
 	addr := fakeRedis(t)
 	u, _ := url.Parse("redis://:pw@" + addr)
 	var f Figures
-	if err := readRedis(context.Background(), u, &f, time.Now()); err != nil {
+	if err := readRedis(context.Background(), u, "pw", &f, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	if f.Version != "7.0.15" || *f.SizeBytes != 48<<20 || *f.LimitBytes != 256<<20 || f.LimitSource != "maxmemory" {
@@ -136,7 +136,7 @@ func TestRealDatabases(t *testing.T) {
 	}
 	r := &Reader{DiskBytes: func(string) (int64, bool) { return 50 << 30, true }}
 	for engine, u := range urls {
-		f := r.Read(context.Background(), Config{Name: engine, URL: u}, time.Now())
+		f := r.Read(context.Background(), viaCredential(t, engine, u), time.Now())
 		if f.Error != "" {
 			t.Errorf("%s: %s", engine, f.Error)
 			continue
@@ -162,22 +162,22 @@ func TestRealDatabases(t *testing.T) {
 	}
 	// A wrong password says so, without the address.
 	bad := strings.Replace(urls["postgresql"], "ro-pw", "wrong", 1)
-	f := r.Read(context.Background(), Config{Name: "x", URL: bad}, time.Now())
+	f := r.Read(context.Background(), viaCredential(t, "x", bad), time.Now())
 	if !strings.Contains(f.Error, "refused the read-only user") || strings.Contains(f.Error, "wrong") {
 		t.Errorf("wrong password: %q", f.Error)
 	}
 	// The docs' MongoDB user lives in admin: an address that does not say
 	// so is told how, and one for another engine is not.
 	noSource := strings.Replace(urls["mongodb"], "authSource=admin&", "", 1)
-	f = r.Read(context.Background(), Config{Name: "x", URL: noSource}, time.Now())
+	f = r.Read(context.Background(), viaCredential(t, "x", noSource), time.Now())
 	if !strings.Contains(f.Error, "needs ?authSource=admin") {
 		t.Errorf("mongodb without authSource: %q", f.Error)
 	}
-	if strings.Contains(r.Read(context.Background(), Config{Name: "x", URL: bad}, time.Now()).Error, "authSource") {
+	if strings.Contains(r.Read(context.Background(), viaCredential(t, "x", bad), time.Now()).Error, "authSource") {
 		t.Error("the authSource hint shown for PostgreSQL")
 	}
 	// An empty MySQL database is 0 bytes, as the other engines say, not unknown.
-	f = r.Read(context.Background(), Config{Name: "x", URL: os.Getenv("KIYESI_DB_MYSQL_EMPTY")}, time.Now())
+	f = r.Read(context.Background(), viaCredential(t, "x", os.Getenv("KIYESI_DB_MYSQL_EMPTY")), time.Now())
 	if f.Error != "" || f.SizeBytes == nil || *f.SizeBytes != 0 {
 		t.Errorf("empty mysql: %+v", f)
 	}
@@ -185,4 +185,44 @@ func TestRealDatabases(t *testing.T) {
 
 func fmtFigures(f Figures) string {
 	return strings.Join([]string{f.Name, f.Version, f.Error, f.NewestBackupAt}, " ")
+}
+
+// viaCredential keeps an address's password the way the agent reads it, in
+// Kiyesi's own encrypted file in a test folder, and gives the settings
+// without it: a password in an address is refused.
+func viaCredential(t *testing.T, name, raw string) Config {
+	t.Helper()
+	ownTestStore(t)
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pw, ok := u.User.Password()
+	if !ok {
+		return Config{Name: name, URL: raw}
+	}
+	u.User = url.User(u.User.Username())
+	sealed, err := Encrypt(name, pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(OwnCredentialsDir, name+".enc"), []byte(sealed+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return Config{Name: name, URL: u.String(), Password: "credential"}
+}
+
+// ownTestStore points Kiyesi's own encrypted passwords at a test folder,
+// with no systemd store, once per test.
+func ownTestStore(t *testing.T) {
+	t.Helper()
+	if strings.HasPrefix(OwnCredentialsDir, os.TempDir()) {
+		return
+	}
+	dir, key, store := OwnCredentialsDir, KeyPath, CredstoreDir
+	t.Cleanup(func() { OwnCredentialsDir, KeyPath, CredstoreDir = dir, key, store })
+	OwnCredentialsDir = t.TempDir()
+	KeyPath = filepath.Join(t.TempDir(), "db.key")
+	CredstoreDir = filepath.Join(t.TempDir(), "none")
+	t.Setenv("CREDENTIALS_DIRECTORY", "")
 }

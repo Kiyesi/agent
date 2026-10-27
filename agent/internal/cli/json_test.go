@@ -58,6 +58,8 @@ var actionOnly = map[string]string{
 	"kiyesi keys edit-own":         "a hidden helper that prints nothing",
 	"kiyesi guard":                 "runs a command and says what changed; guard list --json is its data",
 	"kiyesi guard undo":            "puts settings files back",
+	"kiyesi databases setup":       "prints numbered steps for a person to review and run",
+	"kiyesi databases encrypt":     "prints one sealed password, for a pipe",
 }
 
 func TestEveryCommandThatPrintsDataHasJSON(t *testing.T) {

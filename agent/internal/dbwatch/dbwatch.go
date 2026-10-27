@@ -35,6 +35,9 @@ type Figures struct {
 	// slow-query lines in the server's logs.
 	SlowLastHour   *int64 `json:"slow_last_hour,omitempty"`
 	NewestBackupAt string `json:"newest_backup_at,omitempty"`
+	// Login is how the agent signs in: socket, encrypted or none. Never
+	// the password, nor where it is kept.
+	Login string `json:"login,omitempty"`
 	// Error says why the database could not be read, in one sentence.
 	Error string `json:"error,omitempty"`
 }
@@ -42,6 +45,9 @@ type Figures struct {
 // Config is one database from the settings file.
 type Config struct {
 	Name, URL, Limit, Backups string
+	// Password names where its password is kept ("credential"), never
+	// the password itself.
+	Password string
 }
 
 // NamePattern is what a database's name may be.
@@ -120,15 +126,21 @@ func (r *Reader) Read(ctx context.Context, c Config, now time.Time) Figures {
 	f.Hosted = u.Scheme == "mongodb+srv" || !local(u.Hostname())
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
+	secret, err := LoginFor(ctx, c, u)
+	if err != nil {
+		f.Error = "It was not read: " + err.Error()
+		return f
+	}
+	f.Login = secret.Kind
 	switch f.Engine {
 	case "postgresql":
-		err = readPostgres(ctx, c.URL, &f)
+		err = readPostgres(ctx, c.URL, secret.Password, &f)
 	case "mysql":
-		err = r.readMySQL(ctx, c.Name, u, &f, now)
+		err = r.readMySQL(ctx, c.Name, u, secret.Password, &f, now)
 	case "mongodb":
-		err = readMongo(ctx, c.URL, &f)
+		err = readMongo(ctx, c.URL, secret.Password, &f)
 	case "redis":
-		err = readRedis(ctx, u, &f, now)
+		err = readRedis(ctx, u, secret.Password, &f, now)
 	}
 	if err != nil {
 		f.Error = plainError(err)
