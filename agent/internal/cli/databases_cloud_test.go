@@ -117,6 +117,10 @@ func TestSetupAtlasCertificateAndAWS(t *testing.T) {
 		"read-only, with a certificate: no password anywhere",
 		"Authentication Method:  Certificate",
 		"atlas dbusers create --username kiyesi_ro --x509Type MANAGED --role kiyesiStats@admin --scope cluster0",
+		"scp ~/Downloads/X509-cert-*.pem root@203.0.113.24:kiyesi-cert.pem",
+		"sudo install -m 600 -o root -g root ~/kiyesi-cert.pem /etc/kiyesi/credentials/shop.pem",
+		"shred -u ~/kiyesi-cert.pem",
+		"sudo grep -c BEGIN /etc/kiyesi/credentials/shop.pem",
 		"sudo install -m 600 /dev/null /etc/kiyesi/credentials/shop.pem",
 		"url: mongodb+srv://cluster0.abcde.mongodb.net/shop?authSource=%24external&authMechanism=MONGODB-X509&tlsCertificateKeyFile=/etc/kiyesi/credentials/shop.pem")
 	if strings.Contains(out, "password: ") || strings.Contains(out, "systemd-ask-password") {

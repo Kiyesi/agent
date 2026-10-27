@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/kiyesi/kiyesi/agent/internal/cloudlogin"
@@ -288,14 +289,30 @@ func (s *setupFor) atlasCertificate() {
 		"Restrict Access to Specific Clusters: on, with only "+cluster,
 		"Then Add User. Atlas downloads the certificate (a .pem file) this once.")
 	fmt.Fprintln(s.out, "   With the Atlas CLI instead: atlas dbusers create --username kiyesi_ro --x509Type MANAGED --role kiyesiStats@admin --scope "+cluster+", then atlas dbusers certs create --username kiyesi_ro --monthsUntilExpiration 12 > kiyesi_ro.pem")
-	s.say("Keep the certificate on this server, readable by root only. Open the downloaded file, copy all of it, run this, paste it, then press Ctrl-D:",
+	// Who signs in to this server over SSH, for the copy command: the user
+	// who ran sudo, else root.
+	who := os.Getenv("SUDO_USER")
+	if who == "" || !containerNamePattern.MatchString(who) {
+		who = "root"
+	}
+	addr := publicIPv4()
+	if addr == "" {
+		addr = `"<this server address>"`
+	}
+	s.say("Send the certificate here from the computer it downloaded to. Atlas names it X509-cert-<numbers>.pem, in Downloads. In a terminal on that computer, not on this server:",
+		"scp ~/Downloads/X509-cert-*.pem "+who+"@"+addr+":kiyesi-cert.pem")
+	fmt.Fprintln(s.out, "   With more than one X509-cert file there, use the newest one's full name. On Windows, in PowerShell, always give its full name: scp $HOME\\Downloads\\X509-cert-<numbers>.pem and the rest as above.")
+	s.say("Back on this server, keep it readable by root only, and erase the copy you sent:",
 		"sudo install -d -m 700 "+dbwatch.OwnCredentialsDir,
-		"sudo install -m 600 /dev/null "+pem,
-		"sudo tee "+pem+" >/dev/null")
-	fmt.Fprintln(s.out, "   Then delete the downloaded file from your computer.")
+		"sudo install -m 600 -o root -g root ~/kiyesi-cert.pem "+pem,
+		"shred -u ~/kiyesi-cert.pem")
+	fmt.Fprintln(s.out, "   Or, without scp: open the file, copy all of it, run sudo install -m 600 /dev/null "+pem+" then sudo tee "+pem+" >/dev/null, paste it, and press Ctrl-D.")
+	s.say("Check the file: the first line shows -rw------- 1 root root, the second prints 2 (the certificate and its key). Then delete the downloaded file from your computer (rm ~/Downloads/X509-cert-*.pem there):",
+		"sudo ls -l "+pem,
+		"sudo grep -c BEGIN "+pem)
 	s.atlasAccess()
 	s.config("mongodb+srv://"+s.host+"/"+s.db+"?authSource=%24external&authMechanism=MONGODB-X509&tlsCertificateKeyFile="+pem, "")
-	fmt.Fprintln(s.out, "Before the certificate's 12 months end, download a new one for kiyesi_ro in Atlas and repeat step 3.")
+	fmt.Fprintln(s.out, "Before the certificate's 12 months end, download a new one for kiyesi_ro in Atlas and send it here the same way.")
 }
 
 // atlasAWS is MongoDB Atlas signed in with the server's AWS role: the
