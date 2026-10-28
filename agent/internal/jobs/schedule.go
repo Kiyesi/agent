@@ -19,6 +19,13 @@ type Schedule struct {
 	Source   string `json:"source"` // "cron" or "systemd"
 	Schedule string `json:"schedule"`
 	NextAt   string `json:"next_at,omitempty"`
+	// For a systemd timer: its service, and how systemd says its last run
+	// went (agent 0.43 and later). A job that fails before kiyesi job start
+	// records it is then known as failed, not as missed.
+	Unit       string `json:"unit,omitempty"`
+	LastRunAt  string `json:"last_run_at,omitempty"`
+	LastResult string `json:"last_result,omitempty"`
+	LastExit   *int   `json:"last_exit,omitempty"`
 }
 
 // The name kiyesi job done is given in a command line.
@@ -249,6 +256,10 @@ func Find(ctx context.Context, fsys fs.FS, run Runner, now time.Time) []Schedule
 					s.NextAt = at.UTC().Format(time.RFC3339)
 				}
 			}
+			s.Unit = e.Name()
+			if b, err := run.Run(ctx, "systemctl", "show", e.Name(), "--property=Result,ExecMainStatus,ExecMainStartTimestamp"); err == nil {
+				lastRun(&s, string(b))
+			}
 			out = append(out, s)
 		}
 	}
@@ -262,6 +273,27 @@ func Find(ctx context.Context, fsys fs.FS, run Runner, now time.Time) []Schedule
 		}
 	}
 	return unique
+}
+
+// lastRun reads systemctl show's Result, ExecMainStatus and
+// ExecMainStartTimestamp: how the service's last run went. A service that
+// never ran has no start time, and gives nothing.
+func lastRun(s *Schedule, out string) {
+	props := map[string]string{}
+	for _, l := range strings.Split(out, "\n") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(l), "="); ok {
+			props[k] = strings.TrimSpace(v)
+		}
+	}
+	at, ok := parseElapse(props["ExecMainStartTimestamp"])
+	if !ok {
+		return
+	}
+	s.LastRunAt = at.UTC().Format(time.RFC3339)
+	s.LastResult = props["Result"]
+	if code, err := strconv.Atoi(props["ExecMainStatus"]); err == nil {
+		s.LastExit = &code
+	}
 }
 
 func onCalendar(timer string) string {

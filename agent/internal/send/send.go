@@ -59,7 +59,7 @@ type Item struct {
 	Metrics *collect.Metrics `json:"metrics,omitempty"`
 	Event   *collect.Event   `json:"event,omitempty"`
 	Logs    *collect.Logs    `json:"logs,omitempty"`
-	// A run of a timed job, recorded by kiyesi run.
+	// A run of a timed job, recorded by kiyesi job start and kiyesi job done.
 	Job *jobs.Run `json:"job,omitempty"`
 	// The timed jobs found in crontabs and systemd timers, with their next run.
 	Jobs []jobs.Schedule `json:"jobs,omitempty"`

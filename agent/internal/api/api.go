@@ -891,7 +891,7 @@ func (c *Client) ResolveIncident(ctx context.Context, ref, note string) error {
 	return c.do(ctx, http.MethodPost, "/v1/incidents/"+url.PathEscape(ref)+"/fix", map[string]string{"note": note}, nil)
 }
 
-// Job is a timed job wrapped with kiyesi run, as the Scheduled jobs screen shows it.
+// Job is a timed job recorded with kiyesi job start and done, as the Scheduled jobs screen shows it.
 type Job struct {
 	ID     string `json:"id"`
 	Name   string `json:"name"`

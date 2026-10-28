@@ -6,7 +6,13 @@ package version
 import "strings"
 
 // Version is the full version, such as 0.19.0.
-var Version = "0.42.2"
+var Version = "0.44.0"
+
+// Security is true in a release that fixes a security problem. The release
+// writes "security yes" into its signed list, so kiyesi on every server and
+// the service can say so, and the owners of servers on older versions are
+// emailed once. Set it in the pull request that makes such a fix.
+const Security = false
 
 // Commit is the git commit the binary was built from, when the build says.
 var Commit = ""

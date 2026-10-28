@@ -177,6 +177,41 @@ func ParseSums(sums []byte, file string) (version, sum string) {
 	return version, sum
 }
 
+// ParseRelease reads the version and whether the release fixes a security
+// problem ("security yes") from the signed list. Older kiyesi skip that
+// line: its second word is not a file name.
+func ParseRelease(sums []byte) (version string, security bool) {
+	version, _ = ParseSums(sums, "")
+	sc := bufio.NewScanner(bytes.NewReader(sums))
+	for sc.Scan() {
+		if f := strings.Fields(sc.Text()); len(f) == 2 && f[0] == "security" && f[1] == "yes" {
+			security = true
+		}
+	}
+	return version, security
+}
+
+// Signed is the newest release as its signed list says: its version, and
+// whether it fixes a security problem. Nothing is believed unsigned.
+func (s Source) Signed(ctx context.Context) (version string, security bool, err error) {
+	sums, err := s.get(ctx, "SHA256SUMS", 64<<10)
+	if err != nil {
+		return "", false, err
+	}
+	sig, err := s.get(ctx, "SHA256SUMS.sig", 64<<10)
+	if err != nil {
+		return "", false, err
+	}
+	if err := Verify(s.Key, Namespace, sums, sig); err != nil {
+		return "", false, err
+	}
+	version, security = ParseRelease(sums)
+	if version == "" {
+		return "", false, errors.New("the release does not name its version in its signed list")
+	}
+	return version, security, nil
+}
+
 // validVersion is three numbers with dots, such as 0.38.0.
 func validVersion(v string) bool {
 	p := strings.Split(v, ".")

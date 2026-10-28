@@ -44,6 +44,8 @@ type IO struct {
 
 // Execute runs the command line and returns the exit code.
 func Execute(args []string, io IO) int {
+	// Asked before the dot wraps the terminal: the update line is for a person.
+	person := stderrIsTerminal(io.Err, io.Environ)
 	// The watchful dot, for a person at a terminal: it goes before anything is printed.
 	spin := newSpinner(io)
 	if spin != nil {
@@ -59,9 +61,14 @@ func Execute(args []string, io IO) int {
 		return nil
 	}
 	root.SetArgs(args)
-	err := root.Execute()
+	ran, err := root.ExecuteC()
 	spin.stop()
 	if err == nil {
+		if person && wantsNotice(ran, io.Environ) {
+			if line := updateNotice(); line != "" {
+				fmt.Fprintln(io.Err, line)
+			}
+		}
 		return ExitOK
 	}
 	var ee *exitError

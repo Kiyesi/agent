@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -171,4 +172,31 @@ func restartAgent(io IO, done, restarted string) error {
 	}
 	fmt.Fprintln(io.Out, restarted)
 	return nil
+}
+
+// updateNotice is the daily line about a newer kiyesi, or "". Tests replace it.
+var updateNotice = func() string {
+	s := update.DefaultSource(runtime.GOOS, runtime.GOARCH)
+	return update.Notice(context.Background(), s, update.NoticePath(), time.Now())
+}
+
+// wantsNotice says whether a command a person ran may end with the update
+// line: not the agent's own service, not kiyesi update itself, not output
+// for scripts (--json), and not when KIYESI_NO_UPDATE_NOTICE is set.
+func wantsNotice(cmd *cobra.Command, environ []string) bool {
+	for _, e := range environ {
+		if strings.HasPrefix(e, "KIYESI_NO_UPDATE_NOTICE=") {
+			return false
+		}
+	}
+	for c := cmd; c != nil; c = c.Parent() {
+		switch c.Name() {
+		case "agent", "update", "mcp", "completion", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+			return false
+		}
+	}
+	if f := cmd.Flags().Lookup("json"); f != nil && f.Changed {
+		return false
+	}
+	return true
 }

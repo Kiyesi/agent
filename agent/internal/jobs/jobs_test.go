@@ -111,6 +111,10 @@ func (fakeRunner) Run(_ context.Context, name string, args ...string) ([]byte, e
 	if name == "systemctl" && args[1] == "kiyesi-backup.timer" {
 		return []byte("Sun 2026-10-11 03:30:00 UTC\n"), nil
 	}
+	// The service's last run: it failed, as a backup whose wrapper broke did.
+	if name == "systemctl" && args[1] == "kiyesi-backup.service" {
+		return []byte("Result=exit-code\nExecMainStatus=2\nExecMainStartTimestamp=Sun 2026-10-11 03:31:40 UTC\n"), nil
+	}
 	return nil, os.ErrNotExist
 }
 
@@ -137,6 +141,28 @@ func TestFindReadsCrontabsAndTimers(t *testing.T) {
 		if line := s.Source + " " + s.Schedule + " " + s.NextAt; line != want[s.Name] {
 			t.Errorf("%s: %q, want %q", s.Name, line, want[s.Name])
 		}
+	}
+}
+
+// A timer's service says how its last run went, so a job that fails before
+// it can record a start is known as failed.
+func TestTimersSayHowTheLastRunWent(t *testing.T) {
+	fsys := fstest.MapFS{
+		"etc/systemd/system/kiyesi-backup.service": {Data: []byte("[Service]\nExecStartPre=/usr/local/bin/kiyesi job start --name kiyesi-backup\nExecStart=/usr/local/sbin/kiyesi-backup\nExecStopPost=/usr/local/bin/kiyesi job done --name kiyesi-backup --exit $EXIT_STATUS\n")},
+		"etc/systemd/system/kiyesi-backup.timer":   {Data: []byte("[Timer]\nOnCalendar=*-*-* 03:30:00 UTC\nRandomizedDelaySec=15min\n")},
+	}
+	got := Find(context.Background(), fsys, fakeRunner{}, time.Date(2026, 10, 11, 4, 10, 0, 0, time.UTC))
+	if len(got) != 1 {
+		t.Fatalf("found %+v", got)
+	}
+	s := got[0]
+	if s.Unit != "kiyesi-backup.service" || s.LastRunAt != "2026-10-11T03:31:40Z" || s.LastResult != "exit-code" || s.LastExit == nil || *s.LastExit != 2 {
+		t.Errorf("last run: %+v", s)
+	}
+	var none Schedule
+	lastRun(&none, "Result=success\nExecMainStatus=0\nExecMainStartTimestamp=\n")
+	if none.LastRunAt != "" || none.LastExit != nil {
+		t.Errorf("a service that never ran: %+v", none)
 	}
 }
 
