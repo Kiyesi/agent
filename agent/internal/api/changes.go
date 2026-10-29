@@ -111,6 +111,14 @@ type Credit struct {
 		Amount int       `json:"amount"`
 		Reason string    `json:"reason"`
 	} `json:"lines"`
+	// Trial is the team's free trial: "active" with its days left, or
+	// "ended"; "none" when it has none or is not told of one.
+	Trial struct {
+		State      string     `json:"state"`
+		ServerName string     `json:"serverName"`
+		EndsAt     *time.Time `json:"endsAt"`
+		DaysLeft   int        `json:"daysLeft"`
+	} `json:"trial"`
 }
 
 // Credit reads the team's credit.

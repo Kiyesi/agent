@@ -40,6 +40,18 @@ func newCredit(io IO) *cobra.Command {
 			if asJSON {
 				return render.JSON(io.Out, cr)
 			}
+			// The trial first: while it runs, its server needs no credit, and
+			// credit already on the team waits for it to end.
+			if cr.Trial.State == "active" && cr.Trial.EndsAt != nil {
+				ends := cr.Trial.EndsAt.Local().Format("2 Jan 2006")
+				fmt.Fprintf(io.Out, "Trial: %s left on %s, until %s.\n", plural(cr.Trial.DaysLeft, "day", "days"), cr.Trial.ServerName, ends)
+				if cr.Balance > 0 {
+					fmt.Fprintln(io.Out, "Your credit starts when the trial ends.")
+				} else {
+					fmt.Fprintln(io.Out, "Add credit before then to keep everything, or stay on the free plan.")
+				}
+				fmt.Fprintln(io.Out)
+			}
 			fmt.Fprintf(io.Out, "Balance: %s\n", plural(cr.Balance, "server-day", "server-days"))
 			// At zero there is nothing left to run out: no days-left line.
 			switch {

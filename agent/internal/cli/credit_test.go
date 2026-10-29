@@ -48,3 +48,24 @@ func TestCreditShowsBundlesOnlyToSomeoneWhoCanBuyThem(t *testing.T) {
 		t.Errorf("topup: exit %d, opened %q", code, opened)
 	}
 }
+
+func TestCreditSaysWhereTheTrialStands(t *testing.T) {
+	signInForTest(t)
+	t.Cleanup(func() { creditBody = "" })
+	trial := `"trial":{"state":"active","serverName":"api-prod","endsAt":"2026-10-30T23:59:00Z","daysLeft":2}`
+	for _, c := range []struct{ body, want, never string }{
+		{`{"live":true,"selling":true,"canBuy":true,"balance":101,"daysLeft":null,"bundles":[],"lines":[],` + trial + `}`,
+			"Your credit starts when the trial ends.", "Add credit before then"},
+		{`{"live":true,"selling":true,"canBuy":true,"balance":0,"daysLeft":null,"state":{"storing":true},"bundles":[],"lines":[],` + trial + `}`,
+			"Add credit before then to keep everything", "Your credit starts"},
+	} {
+		creditBody = c.body
+		code, out, errOut := runCLI(t, "credit")
+		if code != ExitOK {
+			t.Fatalf("exit %d: %s", code, errOut)
+		}
+		if !strings.Contains(out, "Trial: 2 days left on api-prod") || !strings.Contains(out, c.want) || strings.Contains(out, c.never) {
+			t.Errorf("want %q and never %q:\n%s", c.want, c.never, out)
+		}
+	}
+}
