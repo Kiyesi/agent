@@ -26,7 +26,8 @@ func TestDockerClientReadsContainers(t *testing.T) {
 		"Config":{"Image":"redis:7.0","User":"","Labels":{"com.docker.compose.service":"redis"}},
 		"HostConfig":{"Privileged":true,"Memory":268435456,"RestartPolicy":{"Name":"unless-stopped"},"LogConfig":{"Type":"json-file","Config":{"max-size":"20m"}}},
 		"Mounts":[{"Source":"/var/run/docker.sock","Destination":"/var/run/docker.sock"}],
-		"NetworkSettings":{"Ports":{"6379/tcp":[{"HostIp":"0.0.0.0","HostPort":"6379"},{"HostIp":"::","HostPort":"6379"}]}}}`))
+		"NetworkSettings":{"Ports":{"6379/tcp":[{"HostIp":"0.0.0.0","HostPort":"6379"},{"HostIp":"::","HostPort":"6379"}]},
+		"Networks":{"shop_default":{"Aliases":["redis","cache"],"DNSNames":["redis","abc"],"IPAddress":"172.18.0.4"}}}}`))
 	})
 	mux.HandleFunc("GET /events", func(w http.ResponseWriter, _ *http.Request) {
 		enc := json.NewEncoder(w)
@@ -57,7 +58,8 @@ func TestDockerClientReadsContainers(t *testing.T) {
 	}
 	c := cs[0]
 	if c.Name != "redis" || c.Health != "unhealthy" || !c.Privileged || c.ComposeService != "redis" || len(c.Ports) != 2 || c.Mounts[0] != "/var/run/docker.sock" ||
-		c.MemoryLimit != 268435456 || c.LogDriver != "json-file" || c.LogMaxSize != "20m" {
+		c.MemoryLimit != 268435456 || c.LogDriver != "json-file" || c.LogMaxSize != "20m" ||
+		c.Labels["com.docker.compose.service"] != "redis" || len(c.Aliases) != 3 || c.Aliases[1] != "cache" || len(c.IPs) != 1 || c.IPs[0] != "172.18.0.4" {
 		t.Errorf("unexpected container: %+v", c)
 	}
 	dies, err := d.Dies(context.Background(), time.Now().Add(-time.Hour), time.Now())

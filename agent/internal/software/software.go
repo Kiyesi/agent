@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kiyesi/kiyesi/agent/internal/sitelinks"
 	"github.com/kiyesi/kiyesi/agent/internal/system"
 )
 
@@ -44,6 +45,11 @@ type List struct {
 	// of life itself (the end-of-life check), so the service's tips leave
 	// it out rather than say it twice.
 	OSLifeChecked bool `json:"os_life_checked,omitempty"`
+	// SiteLinks say which container serves which site, read from the web
+	// servers' labels and settings (0.46.0 and later). Always sent by an
+	// agent that reads them, empty when it found none, so the service can
+	// tell "none" from an older agent.
+	SiteLinks []sitelinks.Link `json:"site_links"`
 }
 
 // Settings are what kiyesi compare sets side by side, beside the packages.
@@ -138,7 +144,7 @@ type Docker struct {
 
 // Read lists what is installed on the system.
 func Read(ctx context.Context, sys *system.System) List {
-	out := List{Packages: []Package{}, Containers: []Container{}}
+	out := List{Packages: []Package{}, Containers: []Container{}, SiteLinks: []sitelinks.Link{}}
 	fsys := sys.FS
 	out.OS = readOS(fsys)
 	if b, err := fs.ReadFile(fsys, "proc/sys/kernel/osrelease"); err == nil {
@@ -167,6 +173,7 @@ func Read(ctx context.Context, sys *system.System) List {
 			}
 			d := readDocker(fsys)
 			out.Docker = &d
+			out.SiteLinks = sitelinks.Read(ctx, fsys, sys.Hostname, cs)
 		}
 	}
 	return out

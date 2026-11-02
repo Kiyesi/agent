@@ -83,6 +83,14 @@ type Container struct {
 	// its env files. Read for database and service addresses only; values
 	// stay in memory and never reach a report.
 	Env []string
+	// Labels are the container's labels. Read only for the web servers'
+	// own labels (Traefik's and caddy-docker-proxy's), to know which sites
+	// the container serves; they stay in memory and never reach a report.
+	Labels map[string]string
+	// Aliases are the names other containers reach it by on its networks.
+	Aliases []string
+	// IPs are its addresses on its networks.
+	IPs []string
 }
 
 // PublishedPort is a container port published on the host.
@@ -190,6 +198,11 @@ type inspect struct {
 			HostIP   string `json:"HostIp"`
 			HostPort string `json:"HostPort"`
 		} `json:"Ports"`
+		Networks map[string]struct {
+			Aliases   []string `json:"Aliases"`
+			DNSNames  []string `json:"DNSNames"`
+			IPAddress string   `json:"IPAddress"`
+		} `json:"Networks"`
 	} `json:"NetworkSettings"`
 }
 
@@ -213,6 +226,19 @@ func (in inspect) container() Container {
 		StartedAt:      in.State.StartedAt,
 		RestartCount:   in.RestartCount,
 		OOMKilled:      in.State.OOMKilled,
+		Labels:         in.Config.Labels,
+	}
+	seen := map[string]bool{}
+	for _, n := range in.NetworkSettings.Networks {
+		for _, a := range append(append([]string{}, n.Aliases...), n.DNSNames...) {
+			if a != "" && !seen[a] {
+				seen[a] = true
+				c.Aliases = append(c.Aliases, a)
+			}
+		}
+		if n.IPAddress != "" {
+			c.IPs = append(c.IPs, n.IPAddress)
+		}
 	}
 	if in.State.Health != nil {
 		c.Health = in.State.Health.Status

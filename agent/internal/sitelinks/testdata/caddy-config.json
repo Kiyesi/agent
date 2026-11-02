@@ -1,0 +1,54 @@
+{
+  "admin": { "listen": "localhost:2019" },
+  "apps": {
+    "http": {
+      "servers": {
+        "srv0": {
+          "listen": [":443"],
+          "routes": [
+            {
+              "match": [{ "host": ["api.example.com", "www.api.example.com"] }],
+              "handle": [
+                {
+                  "handler": "subroute",
+                  "routes": [
+                    { "handle": [{ "handler": "encode", "encodings": { "gzip": {} } }] },
+                    { "handle": [{ "handler": "reverse_proxy", "upstreams": [{ "dial": "api:3000" }] }] }
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "match": [{ "host": ["billing.example.com"] }],
+              "handle": [
+                {
+                  "handler": "subroute",
+                  "routes": [
+                    {
+                      "match": [{ "path": ["/api/*"] }],
+                      "handle": [{ "handler": "reverse_proxy", "upstreams": [{ "dial": "billing:8080" }] }]
+                    }
+                  ]
+                }
+              ],
+              "terminal": true
+            },
+            {
+              "match": [{ "host": ["ghost.example.com"] }],
+              "handle": [{ "handler": "reverse_proxy", "upstreams": [{ "dial": "gone:9000" }] }]
+            },
+            {
+              "match": [{ "host": ["shop.example.com"] }],
+              "handle": [{ "handler": "reverse_proxy", "upstreams": [{ "dial": "api:3000" }] }]
+            }
+          ]
+        },
+        "srv1": {
+          "listen": [":80"],
+          "routes": [{ "handle": [{ "handler": "static_response", "body": "ok" }] }]
+        }
+      }
+    }
+  }
+}

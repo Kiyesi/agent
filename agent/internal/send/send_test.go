@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/kiyesi/kiyesi/agent/internal/keys"
+	"github.com/kiyesi/kiyesi/agent/internal/sitelinks"
 	"github.com/kiyesi/kiyesi/agent/internal/software"
 	"io"
 	"net/http"
@@ -257,6 +258,11 @@ func TestBatchGoldenForTheAPI(t *testing.T) {
 				Ports: []int{22, 80, 443}, Services: []string{"nginx.service", "ssh.service"},
 				SSH:      &software.SSHSettings{PasswordLogin: false, RootLogin: false, Ports: []int{22}},
 				Firewall: "ufw", Timezone: "Etc/UTC",
+			},
+			// Which container serves which site, read from the web server.
+			SiteLinks: []sitelinks.Link{
+				{Site: "shop.example.com", Container: "checkout-api", Source: "traefik"},
+				{Site: "blog.example.com", Container: "blog", Source: "nginx"},
 			},
 		})),
 	}

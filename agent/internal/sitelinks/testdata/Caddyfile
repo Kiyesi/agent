@@ -1,0 +1,35 @@
+{
+	email ops@example.com
+}
+
+(common) {
+	encode gzip
+	reverse_proxy snippet-host:1
+}
+
+# The API, and its old name.
+api.example.com, https://www.api.example.com {
+	import common
+	reverse_proxy localhost:3000
+}
+
+billing.example.com {
+	handle /api/* {
+		reverse_proxy /api/* billing:8080
+	}
+}
+
+docs.example.com {
+	reverse_proxy {
+		to http://billing:8080
+		lb_policy first
+	}
+}
+
+:80 {
+	respond "ok"
+}
+
+old.example.com {
+	reverse_proxy 10.0.0.9:8080
+}
