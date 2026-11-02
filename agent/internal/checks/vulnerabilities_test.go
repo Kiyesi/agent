@@ -111,3 +111,60 @@ func TestTheAgentReusesAVulnerabilityResult(t *testing.T) {
 		t.Error("a scan by hand reused an old result")
 	}
 }
+
+// Each flaw is named with its package, the version installed and the one
+// that fixes it, so the person knows what to upgrade; an image published by
+// someone else is told to be pulled again or patched on top, one built here
+// to be rebuilt.
+func TestVulnerabilitiesNameEachFlawAndWhoUpdatesTheImage(t *testing.T) {
+	caddy := "caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5"
+	own := "ghcr.io/acme/checkout-api:3.8.1"
+	flaws := `{"Results":[{"Vulnerabilities":[{"VulnerabilityID":"CVE-2026-111497","PkgName":"brotli-libs","InstalledVersion":"1.2.0-r0","FixedVersion":"1.2.1-r0"}]}]}`
+	image := "trivy image --skip-db-update --skip-java-db-update --offline-scan --skip-check-update --scanners vuln --severity CRITICAL --ignore-unfixed --format json --quiet "
+	e := newTestEnv().command("trivy --version", "Version: 0.74.0\n").command(trivyRootfs, `{"Results":[]}`)
+	e.docker = fakeDocker{cs: []system.Container{{Name: "caddy", Image: caddy, Status: "running"}, {Name: "api", Image: own, Status: "running"}}}
+	e.runner.outs[image+caddy] = flaws
+	e.runner.outs[image+own] = flaws
+	r := run(t, vulnerabilitiesCheck{}, e)
+	if len(r.Findings) != 2 {
+		t.Fatalf("findings = %+v", r.Findings)
+	}
+	for _, f := range r.Findings {
+		if f.Vars["flaws"] != "brotli-libs 1.2.0-r0 to 1.2.1-r0 (CVE-2026-111497)" {
+			t.Errorf("flaws = %q", f.Vars["flaws"])
+		}
+		switch f.Vars["image"] {
+		case caddy:
+			if f.Variant != "published" || f.Vars["name"] != "caddy:2.11.7-alpine" {
+				t.Errorf("caddy: variant %q, name %q", f.Variant, f.Vars["name"])
+			}
+		case own:
+			if f.Variant != "" {
+				t.Errorf("the team's own image is rebuilt, not pulled: %q", f.Variant)
+			}
+		}
+	}
+}
+
+func TestPublishedImages(t *testing.T) {
+	for img, want := range map[string]bool{
+		"caddy:2.11.7-alpine":             true,
+		"bitnami/redis:7.2":               true,
+		"docker.io/library/nginx:1.27":    true,
+		"ghcr.io/acme/checkout-api:3.8.1": false,
+		"registry.acme.test:5000/shop:2":  false,
+		"localhost/shop:dev":              false,
+		"kiyesi-caddy:local":              false,
+	} {
+		if got := publishedImage(img); got != want {
+			t.Errorf("%s: %v, want %v", img, got, want)
+		}
+	}
+}
+
+func TestFlawWordsStopAtThree(t *testing.T) {
+	fs := []flaw{{"A", "a", "1", "2"}, {"B", "b", "1", "2"}, {"C", "c", "1", "2"}, {"D", "d", "1", "2"}, {"E", "e", "1", "2"}}
+	if got := flawWords(fs); got != "a 1 to 2 (A), b 1 to 2 (B), c 1 to 2 (C), and 2 more" {
+		t.Errorf("got %q", got)
+	}
+}

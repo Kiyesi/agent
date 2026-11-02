@@ -544,13 +544,15 @@ checks:
         severity: warning
         auto: updates
         sentence: "{count|critical vulnerability|critical vulnerabilities} with a fix available in this server's packages"
-        why: These flaws are public and already fixed. Installing the updates closes them; a new kernel needs a restart afterwards.
+        why: "These flaws are public and already fixed: {flaws}. Installing the updates closes them; a new kernel needs a restart afterwards."
         fix: "sudo apt-get update && sudo apt-get upgrade --with-new-pkgs && sudo apt-get autoremove --purge"
       image:
         severity: warning
         sentence: "{count|critical vulnerability|critical vulnerabilities} with a fix available in image {image}"
-        why: These flaws are public and already fixed in newer packages for this image.
-        fix: "Update the base image of {image}, rebuild it, and restart its containers"
+        why: "These flaws are public and already fixed in newer packages for this image: {flaws}."
+        fix: "Rebuild {image} with its packages upgraded (apk upgrade or apt-get upgrade in its Dockerfile, or a newer base image), and restart its containers"
+        fix-variants:
+          published: "Pull the newest {name} and restart its containers. If its publisher has not built one with the fix yet, build a small image FROM it that runs apk upgrade (Alpine) or apt-get upgrade -y (Debian), and use that until they do"
 
   - id: leftovers
     area: security

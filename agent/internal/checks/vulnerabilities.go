@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"regexp"
 	"sort"
@@ -69,12 +70,12 @@ func (vulnerabilitiesCheck) run(ctx context.Context, env *Env) Result {
 	}
 	var found []Finding
 	args := append([]string{"rootfs", "--pkg-types", "os"}, common...)
-	n, err := runTrivy(ctx, env, append(args, "/"))
+	flaws, err := runTrivy(ctx, env, append(args, "/"))
 	if r, stop := trivyProblem(err); stop {
 		return r
 	}
-	if n > 0 {
-		found = append(found, Found("system", map[string]string{"count": strconv.Itoa(n)}))
+	if len(flaws) > 0 {
+		found = append(found, Found("system", map[string]string{"count": strconv.Itoa(len(flaws)), "flaws": flawWords(flaws)}))
 	}
 
 	cs, err := env.Containers(ctx)
@@ -94,12 +95,18 @@ func (vulnerabilitiesCheck) run(ctx context.Context, env *Env) Result {
 	sort.Strings(names)
 	for _, img := range names {
 		args := append([]string{"image"}, common...)
-		n, err := runTrivy(ctx, env, append(args, img))
+		flaws, err := runTrivy(ctx, env, append(args, img))
 		if r, stop := trivyProblem(err); stop {
 			return r
 		}
-		if n > 0 {
-			found = append(found, Found("image", map[string]string{"count": strconv.Itoa(n), "image": img}))
+		if len(flaws) > 0 {
+			f := Found("image", map[string]string{"count": strconv.Itoa(len(flaws)), "image": img, "flaws": flawWords(flaws), "name": imageName(img)})
+			// An image published by someone else is updated by them, or
+			// patched on top; one built here is rebuilt.
+			if publishedImage(img) {
+				f.Variant = "published"
+			}
+			found = append(found, f)
 		}
 	}
 	if len(found) > 0 {
@@ -144,36 +151,85 @@ func runningKernel(env *Env) string {
 	return m[1]
 }
 
-func runTrivy(ctx context.Context, env *Env, args []string) (int, error) {
+// flaw is one critical vulnerability with a fix: the package it is in,
+// the version installed and the first version that fixes it.
+type flaw struct{ ID, Pkg, Installed, Fixed string }
+
+// flawWords names the flaws, at most three, so the person knows which
+// package to upgrade and to what: "brotli-libs 1.2.0-r0 to 1.2.1-r0
+// (CVE-2026-111497)".
+func flawWords(fs []flaw) string {
+	var parts []string
+	for i, f := range fs {
+		if i == 3 {
+			parts = append(parts, fmt.Sprintf("and %d more", len(fs)-3))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%s %s to %s (%s)", f.Pkg, f.Installed, f.Fixed, f.ID))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// imageName is an image without its digest: what to pull again.
+func imageName(img string) string {
+	name, _, _ := strings.Cut(img, "@")
+	return name
+}
+
+// publishedImage tells an image someone else publishes on Docker Hub's
+// official list or under a vendor's name (caddy, nginx, postgres,
+// bitnami/redis) from one built here (a local name, or one in the team's
+// own registry). Docker Hub names have no registry host before the first
+// slash; a host has a dot or a port, or is localhost.
+func publishedImage(img string) bool {
+	name := imageName(img)
+	// Tagged local: built on this server, so there is nothing to pull.
+	if strings.HasSuffix(name, ":local") {
+		return false
+	}
+	first, _, hasSlash := strings.Cut(name, "/")
+	if !hasSlash {
+		return true
+	}
+	if strings.ContainsAny(first, ".:") || first == "localhost" {
+		return strings.HasPrefix(name, "docker.io/") || strings.HasPrefix(name, "index.docker.io/")
+	}
+	return true
+}
+
+func runTrivy(ctx context.Context, env *Env, args []string) ([]flaw, error) {
 	out, err := env.Sys.Exec.Run(ctx, "trivy", args...)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	var report struct {
 		Results []struct {
 			Vulnerabilities []struct {
-				VulnerabilityID string `json:"VulnerabilityID"`
-				PkgName         string `json:"PkgName"`
-				FixedVersion    string `json:"FixedVersion"`
+				VulnerabilityID  string `json:"VulnerabilityID"`
+				PkgName          string `json:"PkgName"`
+				InstalledVersion string `json:"InstalledVersion"`
+				FixedVersion     string `json:"FixedVersion"`
 			} `json:"Vulnerabilities"`
 		} `json:"Results"`
 	}
 	if err := json.Unmarshal(out, &report); err != nil {
-		return 0, errors.New("trivy's answer was not the expected JSON")
+		return nil, errors.New("trivy's answer was not the expected JSON")
 	}
 	// An old kernel left installed after an update is not running, and
 	// sudo apt-get autoremove removes it: it is not counted.
 	running := runningKernel(env)
 	seen := map[string]bool{}
+	var out2 []flaw
 	for _, r := range report.Results {
 		for _, v := range r.Vulnerabilities {
 			if m := kernelPkgRE.FindStringSubmatch(v.PkgName); m != nil && running != "" && m[1] != running {
 				continue
 			}
-			if v.FixedVersion != "" {
+			if v.FixedVersion != "" && !seen[v.VulnerabilityID] {
 				seen[v.VulnerabilityID] = true
+				out2 = append(out2, flaw{ID: v.VulnerabilityID, Pkg: v.PkgName, Installed: v.InstalledVersion, Fixed: v.FixedVersion})
 			}
 		}
 	}
-	return len(seen), nil
+	return out2, nil
 }

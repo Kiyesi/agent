@@ -58,7 +58,7 @@ func TestCollectWorksOutRatesFromTwoMinutes(t *testing.T) {
 	line := `203.0.113.9 - - [10/Oct/2026:10:00:30 +0000] "GET /api/users/7 HTTP/1.1" 200 5 "-" "ua" 0.040` + "\n"
 	docker := &fakeDocker{
 		list: []system.Container{{ID: id, Name: "checkout-api", Image: "checkout-api:3.8.0", ImageID: "sha256:a", Status: "running", StartedAt: "t1"},
-			{ID: "c2", Name: "caddy", Image: "caddy:2.11.6-alpine", ImageID: "sha256:c", Status: "running", StartedAt: "t1"}},
+			{ID: "c2", Name: "caddy", Image: "caddy:2.11.7-alpine", ImageID: "sha256:c", Status: "running", StartedAt: "t1"}},
 		lines: map[string][]system.LogLine{"c2": {
 			{At: start.Add(30 * time.Second), Text: `{"msg":"handled request","request":{"method":"POST","uri":"/checkout?card=4111"},"duration":0.5,"status":502}`},
 		}},
