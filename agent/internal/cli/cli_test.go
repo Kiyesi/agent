@@ -170,7 +170,7 @@ func TestBadSettingsExitWithTwo(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, _, errOut := runCLI(t, "scan")
-	if code != ExitUsage || !strings.Contains(errOut, "Fix the file") {
+	if code != ExitUsage || !strings.Contains(errOut, "Fix that line of the settings file") {
 		t.Errorf("exit %d, %q", code, errOut)
 	}
 }

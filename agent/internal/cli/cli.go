@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/kiyesi/kiyesi/agent/internal/config"
 	"github.com/kiyesi/kiyesi/agent/internal/render"
 )
 
@@ -29,6 +30,15 @@ type exitError struct {
 }
 
 func (e *exitError) Error() string { return e.msg }
+
+// settingsErr says what to do when the settings cannot be used: run with
+// sudo when only root may read them, else what is wrong with the file.
+func settingsErr(err error, command string) error {
+	if errors.Is(err, config.ErrRootOnly) {
+		return usageErr("Run it with sudo: only root can read Kiyesi's settings, as they hold this server's key.\n\n  sudo kiyesi %s", command)
+	}
+	return usageErr("%v\nFix that line of the settings file, then run it again.", err)
+}
 
 func usageErr(format string, a ...any) error {
 	return &exitError{code: ExitUsage, msg: fmt.Sprintf(format, a...)}

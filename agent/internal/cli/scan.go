@@ -101,7 +101,7 @@ func scanWithEnv(ctx context.Context, configPath string, reuseSlowFor time.Durat
 		cfg.HomeCountry = teamHome()
 	}
 	if err != nil {
-		return r, nil, nil, usageErr("%v\nFix the file, or move it away to use the defaults.", err)
+		return r, nil, nil, settingsErr(err, "scan")
 	}
 	pack, err := packs.English()
 	if err != nil {

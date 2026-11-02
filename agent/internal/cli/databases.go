@@ -159,7 +159,7 @@ func newDatabasesCheck(io IO) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := config.Load(configPath)
 			if err != nil {
-				return usageErr("%v", err)
+				return settingsErr(err, "databases check")
 			}
 			if len(c.Databases) == 0 {
 				fmt.Fprintf(io.Out, "No databases in %s. For the steps to add one, with a read-only user and no password kept in plain text:\n\n  sudo kiyesi databases setup\n", configPath)

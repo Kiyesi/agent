@@ -153,12 +153,19 @@ func Default() Config {
 
 // Load reads the settings at path. A missing file gives the defaults; a
 // file that cannot be read or parsed is an error the user must fix.
+// ErrRootOnly: the settings hold this server's key, so only root may read
+// them. Said without the file's path or the system's own words.
+var ErrRootOnly = errors.New("only root can read Kiyesi's settings, as they hold this server's key")
+
 func Load(path string) (Config, error) {
 	c := Default()
 	// #nosec G304 -- the path is the settings file the user names with --config.
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return c, nil
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		return c, ErrRootOnly
 	}
 	if err != nil {
 		return c, fmt.Errorf("cannot read %s: %w", path, err)

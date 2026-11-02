@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -94,5 +95,24 @@ func TestFixOnOrOff(t *testing.T) {
 	c = Default()
 	if err := Parse([]byte("fix: sometimes\n"), &c); err == nil {
 		t.Error("fix: sometimes was accepted")
+	}
+}
+
+// Settings only root may read: the error names neither the file nor the
+// system's own words, so the command can say "run it with sudo" plainly.
+func TestUnreadableFileIsRootOnly(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every file")
+	}
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(p, []byte("limits: {}\n"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(p)
+	if err != ErrRootOnly {
+		t.Fatalf("err = %v, want ErrRootOnly", err)
+	}
+	if strings.Contains(err.Error(), p) || strings.Contains(err.Error(), "permission denied") {
+		t.Errorf("the message gives away the path or the system's words: %q", err)
 	}
 }
