@@ -217,7 +217,7 @@ func TestExampleForTheDocs(t *testing.T) {
 func TestTerminalMarksAnUntestedSystem(t *testing.T) {
 	r := designReport(t)
 	r.Host.OS, r.Host.Tested = "Debian 12", false
-	if got := terminal(t, r, colorprofile.NoTTY); !strings.Contains(got, "checkout-api-prod · Debian 12 (untested) · ") {
+	if got := terminal(t, r, colorprofile.NoTTY); !strings.Contains(got, "checkout-api-prod · Debian 12 (outside Kiyesi's release checks) · ") {
 		t.Errorf("untested system not marked:\n%s", got)
 	}
 }

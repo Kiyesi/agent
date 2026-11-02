@@ -163,7 +163,7 @@ func fixLines(f scan.Finding, width int) []string {
 func hostLine(r scan.Report) string {
 	os := r.Host.OS
 	if !r.Host.Tested {
-		os += " (untested)"
+		os += " (outside Kiyesi's release checks)"
 	}
 	return fmt.Sprintf("%s · %s · %s in %.1f s", r.Host.Name, os, plural(r.Counts.Run+r.Counts.Skipped, "check", "checks"), r.Seconds)
 }

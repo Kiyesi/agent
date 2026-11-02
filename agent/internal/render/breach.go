@@ -155,7 +155,7 @@ func breachLifeLine(life []scan.CheckResult) string {
 func breachHostLine(r scan.Report, signs int) string {
 	os := r.Host.OS
 	if !r.Host.Tested {
-		os += " (untested)"
+		os += " (outside Kiyesi's release checks)"
 	}
 	took := fmt.Sprintf("%.1f s", r.Seconds)
 	if r.Seconds >= 10 {

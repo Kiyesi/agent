@@ -1,6 +1,6 @@
 
 Kiyesi 0.1.0 · break-in check · nothing leaves this server
-web-1 · Ubuntu 25.04 (untested) · 11 signs checked in 1.0 s
+web-1 · Ubuntu 25.04 (outside Kiyesi's release checks) · 11 signs checked in 1.0 s
 Ubuntu 25.04 stopped getting security fixes on 15 Jan 2026
 How to move to a release that still gets them: sudo kiyesi scan
 
