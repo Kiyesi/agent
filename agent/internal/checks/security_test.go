@@ -42,8 +42,17 @@ func TestOpenPorts(t *testing.T) {
 	e.cfg.Ports.Allowed = append(e.cfg.Ports.Allowed, 8080)
 	ok := run(t, openPortsCheck{}, e)
 	wantStatus(t, ok, StatusPass)
-	if ok.Vars["ports"] != "22, 80, 443, 6379, 8080" {
+	// The database's port is named apart, never as an allowed port.
+	if ok.Vars["ports"] != "22, 80, 443, 8080" {
 		t.Errorf("ports = %q", ok.Vars["ports"])
+	}
+	if ok.Vars["databases"] != "; database port 6379 is judged under Exposed databases" {
+		t.Errorf("databases = %q", ok.Vars["databases"])
+	}
+	none := run(t, openPortsCheck{}, newTestEnv().file("proc/net/tcp", procTCP(22, 443)))
+	wantStatus(t, none, StatusPass)
+	if none.Vars["ports"] != "22, 443" || none.Vars["databases"] != "" {
+		t.Errorf("vars = %v", none.Vars)
 	}
 }
 

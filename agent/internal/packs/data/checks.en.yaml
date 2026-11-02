@@ -317,7 +317,7 @@ checks:
     reads: The ports listening on public addresses, from /proc/net/tcp and /proc/net/tcp6, and the ports Docker publishes.
     root:
       needed: never
-    passed: "Only allowed ports are open ({ports})"
+    passed: "Only allowed ports are open ({ports}){databases}"
     findings:
       provider:
         severity: info

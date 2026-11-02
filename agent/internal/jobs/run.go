@@ -124,12 +124,25 @@ func Take(spool string) []Run {
 	if err != nil {
 		return nil
 	}
-	// A run's start before its end: by name, "end" would sort first.
+	// In the order they were written, a start before an end written in the
+	// same moment: kiyesi job start and kiyesi job done each take a random
+	// id, so by name a run's end sorted before its start half the time.
+	written := map[string]time.Time{}
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil {
+			written[e.Name()] = info.ModTime()
+		}
+	}
 	sort.SliceStable(entries, func(i, j int) bool {
 		a, b := entries[i].Name(), entries[j].Name()
-		ka := strings.Replace(a, ".start.json", ".0.json", 1)
-		kb := strings.Replace(b, ".start.json", ".0.json", 1)
-		return ka < kb
+		if ta, tb := written[a], written[b]; !ta.Equal(tb) {
+			return ta.Before(tb)
+		}
+		sa, sb := strings.HasSuffix(a, ".start.json"), strings.HasSuffix(b, ".start.json")
+		if sa != sb {
+			return sa
+		}
+		return a < b
 	})
 	var out []Run
 	reads := map[uint32]int{}

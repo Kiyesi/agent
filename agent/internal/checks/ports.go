@@ -48,10 +48,17 @@ func (openPortsCheck) Run(ctx context.Context, env *Env) Result {
 	}
 	sort.Ints(ports)
 	var found []Finding
-	var shown []string
+	var shown, dbs []string
 	for _, p := range ports {
+		// A database's port is judged by exposed-databases alone, so it is
+		// named apart: never as an allowed port beside a finding that says
+		// the database is open to the internet.
+		if databases[p] != "" {
+			dbs = append(dbs, strconv.Itoa(p))
+			continue
+		}
 		shown = append(shown, strconv.Itoa(p))
-		if allowed[p] || databases[p] != "" {
+		if allowed[p] {
 			continue
 		}
 		key := "open"
@@ -66,7 +73,15 @@ func (openPortsCheck) Run(ctx context.Context, env *Env) Result {
 	if len(shown) == 0 {
 		shown = []string{"none"}
 	}
-	return Pass(map[string]string{"ports": strings.Join(shown, ", ")})
+	vars := map[string]string{"ports": strings.Join(shown, ", "), "databases": ""}
+	switch len(dbs) {
+	case 0:
+	case 1:
+		vars["databases"] = "; database port " + dbs[0] + " is judged under Exposed databases"
+	default:
+		vars["databases"] = "; database ports " + strings.Join(dbs, ", ") + " are judged under Exposed databases"
+	}
+	return Pass(vars)
 }
 
 type exposedDatabasesCheck struct{}

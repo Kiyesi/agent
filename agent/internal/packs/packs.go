@@ -124,7 +124,7 @@ var placeholder = regexp.MustCompile(`\{([a-z_]+)((?:\|[^{}|]*)*)\}`)
 
 // fillDefaults are the words for a value a finding may not carry, such as
 // one saved by an agent from before the value existed.
-var fillDefaults = map[string]string{"provider_firewall": "your provider's firewall"}
+var fillDefaults = map[string]string{"provider_firewall": "your provider's firewall", "databases": ""}
 
 // Fill replaces each {name} in s with vars[name], or its word in
 // fillDefaults. A placeholder with neither is left as it is, so a missing

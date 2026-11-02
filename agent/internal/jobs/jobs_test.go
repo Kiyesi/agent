@@ -209,3 +209,25 @@ func TestRecordNotesARunWithoutStartingAnything(t *testing.T) {
 		t.Error("a spool that is not there should say so")
 	}
 }
+
+// kiyesi job start and kiyesi job done each take a random id: a run's start
+// is sent before its end whatever the ids, in the order they were written.
+func TestTakeSendsAStartBeforeItsEnd(t *testing.T) {
+	spool := t.TempDir()
+	ids := []string{"zzzz", "aaaa"}
+	next := func() string { id := ids[0]; ids = ids[1:]; return id }
+	at := time.Date(2026, 11, 2, 4, 41, 40, 0, time.UTC)
+	if err := RecordStart(spool, "kiyesi-code-backup", at, next); err != nil {
+		t.Fatal(err)
+	}
+	// Written later, with an id that sorts first.
+	later := time.Now().Add(time.Second)
+	if err := Record(spool, "kiyesi-code-backup", 0, time.Time{}, at.Add(11*time.Second), next); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Chtimes(filepath.Join(spool, "aaaa.end.json"), later, later)
+	runs := Take(spool)
+	if len(runs) != 2 || runs[0].RunID != "zzzz" || runs[1].RunID != "aaaa" {
+		t.Errorf("runs = %+v, want the start (zzzz) before the end (aaaa)", runs)
+	}
+}
