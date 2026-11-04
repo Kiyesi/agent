@@ -180,8 +180,27 @@ func TestOutsideServicesAreListedNeverFlagged(t *testing.T) {
 		}
 		names = append(names, l.Name)
 	}
-	if strings.Join(names, ",") != "Sentry (o12345.ingest.de.sentry.io),Email (SMTP) (smtp.resend.com),Termii" {
+	if strings.Join(names, ",") != "Sentry (o12345.ingest.de.sentry.io),Resend (smtp.resend.com),Termii" {
 		t.Errorf("services = %v", names)
+	}
+}
+
+func TestOutsideServiceFoundTwiceIsOneRow(t *testing.T) {
+	e := newTestEnv()
+	e.fs["srv/shop/.env"] = &fstest.MapFile{Data: []byte(strings.Join([]string{
+		"RESEND_API_KEY=re_" + "test",
+		"SMTP_HOST=smtp.resend.com",
+		"MAIL_HOST=mail.example.org",
+		"SENDGRID_API_KEY=SG." + "test",
+	}, "\n") + "\n"), Mode: 0o600}
+	e.cfg.Secrets.Paths = []string{"/srv"}
+	r := run(t, outsideServicesCheck{}, e)
+	var names []string
+	for _, l := range r.Locations {
+		names = append(names, l.Name)
+	}
+	if got := strings.Join(names, ","); got != "Resend (smtp.resend.com),Email (SMTP) (mail.example.org),SendGrid" {
+		t.Errorf("services = %s", got)
 	}
 }
 

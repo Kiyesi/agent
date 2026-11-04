@@ -589,22 +589,55 @@ var services = []struct {
 	{regexp.MustCompile(`LOKI_(URL|HOST)`), "Loki"},
 }
 
+// mailHosts name an email provider by its SMTP host's end, so SMTP_HOST=
+// smtp.resend.com and a RESEND_ setting are one service, Resend.
+var mailHosts = []struct {
+	end  *regexp.Regexp
+	name string
+}{
+	{regexp.MustCompile(`(^|\.)resend\.(com|dev)$`), "Resend"},
+	{regexp.MustCompile(`(^|\.)sendgrid\.(net|com)$`), "SendGrid"},
+	{regexp.MustCompile(`(^|\.)mailgun\.(org|net)$`), "Mailgun"},
+	{regexp.MustCompile(`(^|\.)postmarkapp\.com$`), "Postmark"},
+	{regexp.MustCompile(`(^|\.)(brevo|sendinblue)\.com$`), "Brevo"},
+}
+
 func (outsideServicesCheck) Run(_ context.Context, env *Env) Result {
-	seen := map[string]bool{}
+	// One row per service: its index in rows, by the service's name alone.
+	seen := map[string]int{}
 	var rows []Location
 	for _, s := range env.Settings().Values {
 		for _, svc := range services {
 			if !svc.key.MatchString(s.Key) {
 				continue
 			}
-			name := svc.name
+			base, host := svc.name, ""
 			if u, err := url.Parse(s.Value); err == nil && u.Host != "" {
-				name += " (" + u.Hostname() + ")"
+				host = u.Hostname()
 			} else if strings.HasSuffix(s.Key, "_HOST") && strings.Contains(s.Value, ".") && !strings.ContainsAny(s.Value, " /") {
-				name += " (" + s.Value + ")"
+				host = strings.ToLower(s.Value)
 			}
-			if !seen[name] {
-				seen[name] = true
+			for _, m := range mailHosts {
+				if base == "Email (SMTP)" && m.end.MatchString(host) {
+					base = m.name
+				}
+			}
+			name := base
+			if host != "" {
+				name += " (" + host + ")"
+			}
+			// A known provider is one row, however often it is found; a mail
+			// server no one knows is one row per host.
+			key := base
+			if base == "Email (SMTP)" {
+				key = name
+			}
+			if i, ok := seen[key]; ok {
+				if host != "" && rows[i].Name == base {
+					rows[i].Name = name
+				}
+			} else {
+				seen[key] = len(rows)
 				rows = append(rows, Location{Kind: "Service", Name: name, Review: true})
 			}
 			break

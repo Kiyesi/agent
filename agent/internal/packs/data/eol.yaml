@@ -1,5 +1,5 @@
 # When each release stops getting security fixes, for the end-of-life check.
-# From https://endoflife.date on 2026-10-24 by scripts/eol-pack.py, with the
+# From https://endoflife.date on 2026-11-04 by scripts/eol-pack.py, with the
 # vendors' own days where they differ (marked "vendor"; sources in the script).
 # "fixes" is the last day of free security fixes (Debian: of long-term support;
 # Red Hat: of Maintenance Support); "regular" is Debian's last day of the
@@ -7,7 +7,7 @@
 # when it is switched on. A release not listed is reported as not known, never
 # as fine.
 
-fetched: 2026-10-24
+fetched: 2026-11-04
 systems:
   ubuntu:
     "26.10": { fixes: 2027-07-01 }
@@ -157,8 +157,9 @@ systems:
     "2011.09": { fixes: 2023-12-31 }
     "2010.11": { fixes: 2023-12-31 }
   fedora:
+    "45": { fixes: 2027-12-08 }
     "44": { fixes: 2027-06-02 }
-    "43": { fixes: 2026-12-09 }
+    "43": { fixes: 2026-12-01 }
     "42": { fixes: 2026-05-27 }
     "41": { fixes: 2025-12-15 }
     "40": { fixes: 2025-05-13 }
