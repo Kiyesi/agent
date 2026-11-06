@@ -236,3 +236,30 @@ func TestRefreshServiceWritesThisVersionsSettings(t *testing.T) {
 		t.Errorf("calls %v", *calls)
 	}
 }
+
+func TestUpdateBackPutsTheVersionBeforeBack(t *testing.T) {
+	exe := useReleases(t, fakeReleases{latest: "99.0.0", bin: []byte("new")})
+	oldFirst := firstLine
+	firstLine = func(string) string { return "" }
+	t.Cleanup(func() { firstLine = oldFirst })
+	// Nothing kept yet: it says so, and changes nothing.
+	if code, out, errOut := runCLI(t, "update", "--back"); code != ExitUsage || !strings.Contains(out+errOut, "No earlier version is kept here yet") {
+		t.Fatalf("%d %s %s", code, out, errOut)
+	}
+	if code, _, _ := runCLI(t, "update"); code != ExitOK {
+		t.Fatal("update failed")
+	}
+	if got, _ := os.ReadFile(exe + previousSuffix); string(got) != "old" {
+		t.Fatalf("the version before was not kept: %q", got)
+	}
+	if code, out, errOut := runCLI(t, "update", "--back"); code != ExitOK || !strings.Contains(out, "Put back the version before") {
+		t.Fatalf("%d %s %s", code, out, errOut)
+	}
+	if got, _ := os.ReadFile(exe); string(got) != "old" {
+		t.Errorf("program is %q after going back", got)
+	}
+	// Going back can itself be undone: the newer one is kept in its place.
+	if got, _ := os.ReadFile(exe + previousSuffix); string(got) != "new" {
+		t.Errorf("kept is %q", got)
+	}
+}

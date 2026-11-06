@@ -40,8 +40,10 @@ func TestTheUpdateLineAtMostOnceADayAndTheCheckToo(t *testing.T) {
 	src := Source{Base: srv.URL, Key: s.pub, HTTP: srv.Client(), Running: "0.43.0"}
 	path := filepath.Join(t.TempDir(), "update-check.json")
 	now := time.Date(2026, 10, 28, 9, 0, 0, 0, time.UTC)
-	if got := Notice(context.Background(), src, path, now); got != "kiyesi 0.44.0 is out: run sudo kiyesi update" {
-		t.Fatalf("first: %q", got)
+	// An ordinary release is not announced in its first three days, as the
+	// dashboard's badge is staged: a bad one reaches few servers.
+	if got := Notice(context.Background(), src, path, now); got != "" {
+		t.Fatalf("announced at once: %q", got)
 	}
 	if got := Notice(context.Background(), src, path, now.Add(time.Hour)); got != "" {
 		t.Fatalf("the same day again: %q", got)
@@ -49,12 +51,19 @@ func TestTheUpdateLineAtMostOnceADayAndTheCheckToo(t *testing.T) {
 	if asked != 1 {
 		t.Fatalf("asked get.kiyesi.dev %d times in a day", asked)
 	}
-	if got := Notice(context.Background(), src, path, now.Add(25*time.Hour)); !strings.Contains(got, "0.44.0") {
+	settled := now.Add(SettleFor + time.Hour)
+	if got := Notice(context.Background(), src, path, settled); got != "kiyesi 0.44.0 is out: run sudo kiyesi update" {
+		t.Fatalf("after three days: %q", got)
+	}
+	if got := Notice(context.Background(), src, path, settled.Add(time.Hour)); got != "" {
+		t.Fatalf("twice in a day: %q", got)
+	}
+	if got := Notice(context.Background(), src, path, settled.Add(25*time.Hour)); !strings.Contains(got, "0.44.0") {
 		t.Fatalf("the next day: %q", got)
 	}
 	// Up to date: nothing.
 	src.Running = "0.44.0"
-	if got := Notice(context.Background(), src, path, now.Add(50*time.Hour)); got != "" {
+	if got := Notice(context.Background(), src, path, settled.Add(50*time.Hour)); got != "" {
 		t.Fatalf("up to date: %q", got)
 	}
 }

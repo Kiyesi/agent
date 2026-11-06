@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kiyesi/kiyesi/agent/internal/budget"
 	"github.com/kiyesi/kiyesi/agent/internal/system"
 )
 
@@ -30,6 +31,8 @@ type Metrics struct {
 	HTTPSource string `json:"http_source,omitempty"`
 	// CPUCores is how many CPU cores the server has, for cost watch.
 	CPUCores int `json:"cpu_cores,omitempty"`
+	// Agent is the agent's own use this minute, and what it skipped.
+	Agent *budget.Use `json:"agent,omitempty"`
 }
 
 type Memory struct {
@@ -274,7 +277,8 @@ func (c *Collector) Collect(ctx context.Context) (Metrics, []Event) {
 	var reqs Requests
 	m.HTTPSource = c.readAccessLogs(ctx, now, list, &reqs)
 	m.HTTP = reqs.Stats()
-	if c.Logs {
+	// The agent close to its memory limit: the system log waits a minute.
+	if c.Logs && !budget.Skip(budget.Logs) {
 		c.journal.read(ctx, c.Sys, c.Journal, now, &c.buf)
 		journalOn := c.Journal.On && c.Sys.Exec != nil && c.Sys.Exec.Has("journalctl")
 		for _, e := range events {
@@ -290,6 +294,7 @@ func (c *Collector) Collect(ctx context.Context) (Metrics, []Event) {
 		events = append(events, c.Signins.Read(ctx, c.Sys, now)...)
 	}
 	c.at, c.cpu, c.net = now, cpu, net
+	m.Agent = budget.Measure(now)
 	return m, events
 }
 

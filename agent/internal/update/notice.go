@@ -15,7 +15,15 @@ type noticeState struct {
 	Latest    string    `json:"latest"`
 	Security  bool      `json:"security"`
 	ToldAt    time.Time `json:"told_at"`
+	// SeenAt is when this machine first saw Latest: an ordinary release is
+	// announced only once it has been out a few days, as the dashboard's
+	// badge is, so a bad one reaches few servers.
+	SeenAt time.Time `json:"seen_at"`
 }
+
+// SettleFor is how long an ordinary release is out before it is announced
+// here; a security release is announced at once.
+const SettleFor = 3 * 24 * time.Hour
 
 // NoticePath is where the daily check is remembered: Kiyesi's own folder
 // as root, the person's cache folder otherwise.
@@ -50,11 +58,15 @@ func Notice(ctx context.Context, s Source, path string, now time.Time) string {
 		// wait three seconds on every command.
 		st.CheckedAt = now
 		if err == nil {
+			if v != st.Latest {
+				st.SeenAt = now
+			}
 			st.Latest, st.Security = v, sec
 		}
 	}
 	line := ""
-	if st.Latest != "" && Newer(st.Latest, s.Running) && now.Sub(st.ToldAt) >= 24*time.Hour {
+	settled := st.Security || now.Sub(st.SeenAt) >= SettleFor
+	if st.Latest != "" && Newer(st.Latest, s.Running) && settled && now.Sub(st.ToldAt) >= 24*time.Hour {
 		if st.Security {
 			line = fmt.Sprintf("kiyesi %s is out and fixes a security problem: run sudo kiyesi update", st.Latest)
 		} else {

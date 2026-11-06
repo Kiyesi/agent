@@ -1305,8 +1305,12 @@
     "use": "kiyesi update [flags]",
     "short": "Install the newest kiyesi, after checking its signature",
     "long": "Downloads the newest release from get.kiyesi.dev, checks its signature with\nthe release key built into this program and the file's checksum, then\nreplaces this program in one step and restarts the agent if it runs.\nNothing is changed if any check fails. Updates never happen by themselves.",
-    "example": "  kiyesi update --check\n  sudo kiyesi update",
+    "example": "  kiyesi update --check\n  sudo kiyesi update\n  sudo kiyesi update --back",
     "flags": [
+      {
+        "name": "back",
+        "usage": "put back the version that ran before the last update"
+      },
       {
         "name": "check",
         "usage": "only say whether a newer version is out"

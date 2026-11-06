@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kiyesi/kiyesi/agent/internal/budget"
 	"github.com/kiyesi/kiyesi/agent/internal/system"
 )
 
@@ -39,6 +40,11 @@ const trivyCache = "/var/lib/kiyesi/trivy"
 func (c vulnerabilitiesCheck) Run(ctx context.Context, env *Env) Result {
 	if r, ok := env.remembered(c.ID()); ok {
 		return r
+	}
+	// The agent close to its memory limit: the scan, the heaviest check,
+	// waits for its next turn rather than slow the server.
+	if budget.Skip(budget.Vulnerabilities) {
+		return Skip("busy", nil)
 	}
 	r := c.run(ctx, env)
 	env.remember(c.ID(), r)

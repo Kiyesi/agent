@@ -171,9 +171,9 @@ func hasTrivy() bool {
 }
 
 func unitFileFor(exe string, trivy bool) string {
-	memory := "256M"
+	memory, high := "256M", "200M"
 	if trivy {
-		memory = "640M"
+		memory, high = "640M", "520M"
 	}
 	return `[Unit]
 Description=Kiyesi agent: read-only health and security checks
@@ -189,7 +189,10 @@ IOSchedulingClass=idle
 CPUQuota=20%
 # 256 MB for the agent and the programs its checks run (apt-get alone needs
 # about 120 MB); 640 MB when Trivy is installed, which runs inside it. A
-# limit, not a reservation: the agent itself uses far less.
+# limit, not a reservation: the agent itself uses far less. Before it, a
+# softer limit: past it the system reclaims the service's memory gently
+# instead of swapping the agent out, so its reports never stall.
+MemoryHigh=` + high + `
 MemoryMax=` + memory + `
 TasksMax=64
 NoNewPrivileges=yes

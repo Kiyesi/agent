@@ -15,6 +15,7 @@ skips:
   not-linux: "runs only on Linux"
   timeout: "took too long and was stopped"
   failed: "could not finish: {reason}"
+  busy: "waits for a quieter moment: the agent is close to its memory limit"
 
 checks:
   # ---------------------------------------------------------------- Health

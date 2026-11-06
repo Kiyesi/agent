@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kiyesi/kiyesi/agent/internal/budget"
 	"github.com/kiyesi/kiyesi/agent/internal/collect"
 	"github.com/kiyesi/kiyesi/agent/internal/dbwatch"
 	"github.com/kiyesi/kiyesi/agent/internal/jobs"
@@ -319,6 +320,7 @@ func (c *Client) deliver(ctx context.Context, body []byte) error {
 	case resp.StatusCode == http.StatusAccepted || resp.StatusCode == http.StatusOK:
 		c.hearHome(reply)
 		c.hearPace(reply)
+		hearPause(reply)
 		return nil
 	case resp.StatusCode == http.StatusUnauthorized:
 		return ErrNotAllowed
@@ -373,6 +375,19 @@ func (c *Client) hearHome(reply []byte) {
 	case len(*code) == 2 && strings.ToUpper(*code) == *code && strings.Trim(*code, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") == "":
 		c.OnHome(*code)
 	}
+}
+
+// hearPause takes the service's remote off switch: optional work it names
+// skips its turns until a reply no longer names it. A reply without the
+// field (an older service) changes nothing.
+func hearPause(reply []byte) {
+	var r struct {
+		Pause *[]string `json:"pause"`
+	}
+	if json.Unmarshal(reply, &r) != nil || r.Pause == nil {
+		return
+	}
+	budget.Pause(*r.Pause)
 }
 
 // hearPace passes on the pace when the reply says one within bounds: a

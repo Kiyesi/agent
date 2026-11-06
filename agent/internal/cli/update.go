@@ -61,7 +61,7 @@ type releaseSource interface {
 }
 
 func newUpdate(io IO) *cobra.Command {
-	var check, refresh bool
+	var check, refresh, back bool
 	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Install the newest kiyesi, after checking its signature",
@@ -69,9 +69,12 @@ func newUpdate(io IO) *cobra.Command {
 			"the release key built into this program and the file's checksum, then\n" +
 			"replaces this program in one step and restarts the agent if it runs.\n" +
 			"Nothing is changed if any check fails. Updates never happen by themselves.",
-		Example: "  kiyesi update --check\n  sudo kiyesi update",
+		Example: "  kiyesi update --check\n  sudo kiyesi update\n  sudo kiyesi update --back",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if back {
+				return goBack(io)
+			}
 			if refresh {
 				// Run by the update before, as the program it just installed.
 				exe, err := executable()
@@ -129,6 +132,11 @@ func newUpdate(io IO) *cobra.Command {
 			if err != nil {
 				return &exitError{code: ExitNoAccess, msg: err.Error() + "."}
 			}
+			// The version running now is kept beside it, so kiyesi update
+			// --back can put it back in one step.
+			if cur, err := os.ReadFile(exe); err == nil { // #nosec G304 -- this program's own file
+				_ = update.Replace(exe+previousSuffix, cur)
+			}
 			if err := update.Replace(exe, bin); err != nil {
 				if errors.Is(err, update.ErrPermission) {
 					return &exitError{code: ExitNoAccess, msg: fmt.Sprintf("Cannot change %s as this user. Run: sudo kiyesi update", exe)}
@@ -147,10 +155,56 @@ func newUpdate(io IO) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&check, "check", false, "only say whether a newer version is out")
+	cmd.Flags().BoolVar(&back, "back", false, "put back the version that ran before the last update")
 	cmd.Flags().BoolVar(&refresh, "refresh-service", false, "bring the agent's service file up to date (run by update itself)")
 	_ = cmd.Flags().MarkHidden("refresh-service")
 	cmd.SetContext(context.Background())
 	return cmd
+}
+
+// previousSuffix names the version kept from before the last update.
+const previousSuffix = ".previous"
+
+// goBack puts back the version that ran before the last update, keeping the
+// one it replaces in its place, so going back can itself be undone.
+func goBack(io IO) error {
+	exe, err := executable()
+	if err != nil {
+		return err
+	}
+	prev, err := os.ReadFile(exe + previousSuffix) // #nosec G304 -- this program's own kept copy
+	if err != nil || len(prev) == 0 {
+		return &exitError{code: ExitUsage, msg: "No earlier version is kept here yet: kiyesi keeps one from its next update on."}
+	}
+	cur, err := os.ReadFile(exe) // #nosec G304 -- this program's own file
+	if err != nil {
+		return err
+	}
+	if err := update.Replace(exe, prev); err != nil {
+		if errors.Is(err, update.ErrPermission) {
+			return &exitError{code: ExitNoAccess, msg: fmt.Sprintf("Cannot change %s as this user. Run: sudo kiyesi update --back", exe)}
+		}
+		return err
+	}
+	_ = update.Replace(exe+previousSuffix, cur)
+	was := strings.TrimSpace(firstLine(exe))
+	fmt.Fprintf(io.Out, "Put back the version before %s%s.\n", version.Version, map[bool]string{true: ": " + was, false: ""}[was != ""])
+	if _, err := os.Stat(unitPath); err == nil && hasSystemctl() {
+		if err := refreshWith(exe); err != nil {
+			fmt.Fprintln(io.Out, "The agent's service settings could not be brought back: run sudo kiyesi update --back once more.")
+		}
+	}
+	return restartAgent(io, "", "The agent restarted on it.")
+}
+
+// firstLine is what a kiyesi program says its version is, or "".
+var firstLine = func(exe string) string {
+	out, err := exec.Command(exe, "--version").Output() // #nosec G204 -- this program's own file, fixed argument
+	if err != nil {
+		return ""
+	}
+	line, _, _ := strings.Cut(string(out), "\n")
+	return line
 }
 
 // restartAgent restarts a running agent, so it runs the new version and

@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
 
+	"github.com/kiyesi/kiyesi/agent/internal/budget"
 	"github.com/kiyesi/kiyesi/agent/internal/checks"
 	"github.com/kiyesi/kiyesi/agent/internal/collect"
 	"github.com/kiyesi/kiyesi/agent/internal/config"
@@ -143,7 +144,8 @@ func newAgent(io IO) *cobra.Command {
 					if schedules != nil {
 						now := time.Now()
 						list := software.Read(ctx, col.Sys)
-						if now.Sub(started) >= langFirstAfter && now.Sub(langRead) >= langEvery {
+						if now.Sub(started) >= langFirstAfter && now.Sub(langRead) >= langEvery &&
+							!budget.Skip(budget.Languages) {
 							langRead = now
 							r := readLanguages(ctx, col.Sys)
 							lang = &r
