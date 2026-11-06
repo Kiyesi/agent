@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kiyesi/kiyesi/agent/internal/langpkg"
 	"github.com/kiyesi/kiyesi/agent/internal/sitelinks"
 	"github.com/kiyesi/kiyesi/agent/internal/system"
 )
@@ -50,6 +51,13 @@ type List struct {
 	// agent that reads them, empty when it found none, so the service can
 	// tell "none" from an older agent.
 	SiteLinks []sitelinks.Link `json:"site_links"`
+	// LangSources are the language packages installed on the server and in
+	// its running containers (0.47.0 and later), for the service's malicious
+	// package check. Always sent, empty when none were found, so the service
+	// can tell "none" from an older agent.
+	LangSources []langpkg.Source `json:"lang_sources"`
+	// LanguagesRead are the languages looked for, found or not.
+	LanguagesRead []string `json:"languages_read"`
 }
 
 // Settings are what kiyesi compare sets side by side, beside the packages.
@@ -144,7 +152,7 @@ type Docker struct {
 
 // Read lists what is installed on the system.
 func Read(ctx context.Context, sys *system.System) List {
-	out := List{Packages: []Package{}, Containers: []Container{}, SiteLinks: []sitelinks.Link{}}
+	out := List{Packages: []Package{}, Containers: []Container{}, SiteLinks: []sitelinks.Link{}, LangSources: []langpkg.Source{}}
 	fsys := sys.FS
 	out.OS = readOS(fsys)
 	if b, err := fs.ReadFile(fsys, "proc/sys/kernel/osrelease"); err == nil {
@@ -163,6 +171,7 @@ func Read(ctx context.Context, sys *system.System) List {
 		on := autoUpdates(fsys, out.Packages)
 		out.AutoUpdates = &on
 	}
+	langRoots := []langpkg.Root{{}}
 	if sys.Docker != nil {
 		if cs, err := sys.Docker.Containers(ctx); err == nil {
 			for _, c := range cs {
@@ -174,9 +183,35 @@ func Read(ctx context.Context, sys *system.System) List {
 			d := readDocker(fsys)
 			out.Docker = &d
 			out.SiteLinks = sitelinks.Read(ctx, fsys, sys.Hostname, cs)
+			langRoots = append(langRoots, containerRoots(cs)...)
 		}
 	}
+	// The language packages: the server's own, then each running container's.
+	lp := langpkg.Read(ctx, fsys, langRoots, LangBudget)
+	if lp.Sources != nil {
+		out.LangSources = lp.Sources
+	}
+	out.LanguagesRead = lp.Read
 	return out
+}
+
+// LangBudget is how long reading the language packages may take, in all.
+var LangBudget = 20 * time.Second
+
+// containerRoots are the running containers' files on the host, at most 50.
+func containerRoots(cs []system.Container) []langpkg.Root {
+	var roots []langpkg.Root
+	for _, c := range cs {
+		dir := strings.TrimPrefix(c.RootDir, "/")
+		if dir == "" || strings.Contains(dir, "..") {
+			continue
+		}
+		roots = append(roots, langpkg.Root{Dir: dir, Container: c.Name})
+		if len(roots) == 50 {
+			break
+		}
+	}
+	return roots
 }
 
 // Print is a short fingerprint, so the list is sent only when it changed.

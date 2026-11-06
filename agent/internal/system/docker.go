@@ -91,6 +91,10 @@ type Container struct {
 	Aliases []string
 	// IPs are its addresses on its networks.
 	IPs []string
+	// RootDir is where the running container's files are on the host
+	// (overlay2's merged folder), read for its installed packages; empty
+	// when Docker does not say or the container is stopped.
+	RootDir string
 }
 
 // PublishedPort is a container port published on the host.
@@ -193,6 +197,9 @@ type inspect struct {
 		Source      string `json:"Source"`
 		Destination string `json:"Destination"`
 	} `json:"Mounts"`
+	GraphDriver struct {
+		Data map[string]string `json:"Data"`
+	} `json:"GraphDriver"`
 	NetworkSettings struct {
 		Ports map[string][]struct {
 			HostIP   string `json:"HostIp"`
@@ -227,6 +234,9 @@ func (in inspect) container() Container {
 		RestartCount:   in.RestartCount,
 		OOMKilled:      in.State.OOMKilled,
 		Labels:         in.Config.Labels,
+	}
+	if in.State.Status == "running" {
+		c.RootDir = in.GraphDriver.Data["MergedDir"]
 	}
 	seen := map[string]bool{}
 	for _, n := range in.NetworkSettings.Networks {
