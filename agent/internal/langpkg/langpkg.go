@@ -33,8 +33,8 @@ var All = []string{Npm, PyPI, Go, Maven, RubyGems, Crates, NuGet, Packagist}
 const (
 	MaxPackages = 15000
 	maxSources  = 500
-	maxFile     = 24 << 20 // a big lockfile, never a log
-	maxEntries  = 60000    // directory entries looked at, per scan
+	maxFile     = 8 << 20 // a big lockfile, never a log
+	maxEntries  = 60000   // directory entries looked at, per scan
 	maxDepth    = 6
 )
 

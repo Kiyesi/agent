@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"syscall"
@@ -24,6 +25,7 @@ import (
 	"github.com/kiyesi/kiyesi/agent/internal/dbwatch"
 	"github.com/kiyesi/kiyesi/agent/internal/jobs"
 	"github.com/kiyesi/kiyesi/agent/internal/keys"
+	"github.com/kiyesi/kiyesi/agent/internal/langpkg"
 	"github.com/kiyesi/kiyesi/agent/internal/render"
 	"github.com/kiyesi/kiyesi/agent/internal/scan"
 	"github.com/kiyesi/kiyesi/agent/internal/send"
@@ -39,6 +41,30 @@ const (
 	// Slow checks (Trivy) run at most this often in the background.
 	slowChecksEvery = 6 * time.Hour
 )
+
+// When the language packages are read: never in the agent's first minutes,
+// then every six hours, as installed packages rarely change.
+var (
+	langFirstAfter = 10 * time.Minute
+	langEvery      = 6 * time.Hour
+)
+
+// readLanguages reads them, never letting a failure stop the agent, and
+// gives the memory it took back to the system at once.
+func readLanguages(ctx context.Context, sys *system.System) (r langpkg.Result) {
+	defer func() {
+		if recover() != nil {
+			r = langpkg.Result{}
+		}
+		debug.FreeOSMemory()
+	}()
+	return software.ReadLanguages(ctx, sys)
+}
+
+// agentMemory is the Go heap the agent keeps to, well under its service's
+// 256 MB: without it Go grows to about twice what it uses before it frees
+// any, and the system then swaps the agent out and its reports stall.
+const agentMemory = 150 << 20
 
 func newAgent(io IO) *cobra.Command {
 	var configPath string
@@ -65,6 +91,10 @@ func newAgent(io IO) *cobra.Command {
 			if err != nil {
 				return &exitError{code: ExitUsage, msg: err.Error()}
 			}
+			// A GOMEMLIMIT set for the service wins.
+			if os.Getenv("GOMEMLIMIT") == "" {
+				debug.SetMemoryLimit(agentMemory)
+			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			// Measurements each minute, from the same read-only view of the
@@ -81,7 +111,11 @@ func newAgent(io IO) *cobra.Command {
 					fmt.Fprintf(io.Err, "timed jobs cannot be recorded: %v\n", err)
 				}
 			}
-			var lastJobScan, lastDBRead, softwareSent, keysSent time.Time
+			var lastJobScan, lastDBRead, softwareSent, keysSent, langRead time.Time
+			// The language packages, read rarely and kept: never in the
+			// first ten minutes, so reports always flow first, then every six hours.
+			started := time.Now()
+			var lang *langpkg.Result
 			softwarePrint, keysPrint := "", ""
 			dbs := &dbwatch.Reader{DiskBytes: diskBytes(col.Sys)}
 			a := agentLoop{
@@ -109,6 +143,14 @@ func newAgent(io IO) *cobra.Command {
 					if schedules != nil {
 						now := time.Now()
 						list := software.Read(ctx, col.Sys)
+						if now.Sub(started) >= langFirstAfter && now.Sub(langRead) >= langEvery {
+							langRead = now
+							r := readLanguages(ctx, col.Sys)
+							lang = &r
+						}
+						if lang != nil {
+							list.LangSources, list.LanguagesRead = lang.Sources, lang.Read
+						}
 						list.Settings = serverSettings(ctx, col.Sys)
 						list.OSLifeChecked = true
 						if p := list.Print(); p != softwarePrint || now.Sub(softwareSent) >= 24*time.Hour {

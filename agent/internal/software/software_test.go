@@ -134,3 +134,23 @@ func TestSourceOfRpm(t *testing.T) {
 		}
 	}
 }
+
+func TestLanguagePackagesAreReadApartAndNeverWithTheRegularList(t *testing.T) {
+	fsys := fstest.MapFS{
+		"etc/os-release":            &fstest.MapFile{Data: []byte("ID=ubuntu\nVERSION_ID=\"24.04\"\n")},
+		"srv/app/package-lock.json": &fstest.MapFile{Data: []byte(`{"packages":{"node_modules/left-pad":{"version":"1.3.0"}}}`)},
+	}
+	sys := &system.System{FS: fsys}
+	// The regular list never reads them: null, which the service takes as "not read yet".
+	if l := Read(context.Background(), sys); l.LangSources != nil || l.LanguagesRead != nil {
+		t.Errorf("the regular list read language packages: %+v", l.LangSources)
+	}
+	r := ReadLanguages(context.Background(), sys)
+	if len(r.Sources) != 1 || r.Sources[0].Where != "/srv/app/package-lock.json" || len(r.Read) != 8 {
+		t.Errorf("languages = %+v", r)
+	}
+	// None found is an empty list, not null.
+	if r := ReadLanguages(context.Background(), &system.System{FS: fstest.MapFS{}}); r.Sources == nil {
+		t.Error("no packages should be an empty list")
+	}
+}

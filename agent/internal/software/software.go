@@ -53,8 +53,8 @@ type List struct {
 	SiteLinks []sitelinks.Link `json:"site_links"`
 	// LangSources are the language packages installed on the server and in
 	// its running containers (0.47.0 and later), for the service's malicious
-	// package check. Always sent, empty when none were found, so the service
-	// can tell "none" from an older agent.
+	// package check: an empty list when none were found, and null until the
+	// agent has read them (never at start, see ReadLanguages).
 	LangSources []langpkg.Source `json:"lang_sources"`
 	// LanguagesRead are the languages looked for, found or not.
 	LanguagesRead []string `json:"languages_read"`
@@ -152,7 +152,7 @@ type Docker struct {
 
 // Read lists what is installed on the system.
 func Read(ctx context.Context, sys *system.System) List {
-	out := List{Packages: []Package{}, Containers: []Container{}, SiteLinks: []sitelinks.Link{}, LangSources: []langpkg.Source{}}
+	out := List{Packages: []Package{}, Containers: []Container{}, SiteLinks: []sitelinks.Link{}}
 	fsys := sys.FS
 	out.OS = readOS(fsys)
 	if b, err := fs.ReadFile(fsys, "proc/sys/kernel/osrelease"); err == nil {
@@ -171,7 +171,6 @@ func Read(ctx context.Context, sys *system.System) List {
 		on := autoUpdates(fsys, out.Packages)
 		out.AutoUpdates = &on
 	}
-	langRoots := []langpkg.Root{{}}
 	if sys.Docker != nil {
 		if cs, err := sys.Docker.Containers(ctx); err == nil {
 			for _, c := range cs {
@@ -183,20 +182,30 @@ func Read(ctx context.Context, sys *system.System) List {
 			d := readDocker(fsys)
 			out.Docker = &d
 			out.SiteLinks = sitelinks.Read(ctx, fsys, sys.Hostname, cs)
-			langRoots = append(langRoots, containerRoots(cs)...)
 		}
 	}
-	// The language packages: the server's own, then each running container's.
-	lp := langpkg.Read(ctx, fsys, langRoots, LangBudget)
-	if lp.Sources != nil {
-		out.LangSources = lp.Sources
-	}
-	out.LanguagesRead = lp.Read
 	return out
 }
 
 // LangBudget is how long reading the language packages may take, in all.
 var LangBudget = 20 * time.Second
+
+// ReadLanguages reads the language packages on the server and in its running
+// containers. Kept apart from Read: it reads many files, so the agent does it
+// rarely, never at start, and gives the memory back after.
+func ReadLanguages(ctx context.Context, sys *system.System) langpkg.Result {
+	roots := []langpkg.Root{{}}
+	if sys.Docker != nil {
+		if cs, err := sys.Docker.Containers(ctx); err == nil {
+			roots = append(roots, containerRoots(cs)...)
+		}
+	}
+	r := langpkg.Read(ctx, sys.FS, roots, LangBudget)
+	if r.Sources == nil {
+		r.Sources = []langpkg.Source{}
+	}
+	return r
+}
 
 // containerRoots are the running containers' files on the host, at most 50.
 func containerRoots(cs []system.Container) []langpkg.Root {
