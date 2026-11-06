@@ -91,3 +91,30 @@ func TestTheServiceCanPauseOptionalWork(t *testing.T) {
 		t.Error("still paused after the service took it off")
 	}
 }
+
+func TestTheWholeServiceIsMeasuredAsSystemdShowsIt(t *testing.T) {
+	root := t.TempDir()
+	Root = root
+	defer func() { Root = "/" }()
+	dir := "sys/fs/cgroup/system.slice/kiyesi.service/"
+	write(t, root, "proc/self/cgroup", "0::/system.slice/kiyesi.service\n")
+	write(t, root, "proc/self/status", "VmRSS:\t4096 kB\n")
+	write(t, root, dir+"memory.stat", "anon 163840\nfile 202223616\n")
+	write(t, root, dir+"memory.current", "202387456\n")
+	write(t, root, dir+"cpu.stat", "usage_usec 1000000\nuser_usec 600000\n")
+	t0 := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	Measure(t0)
+	// A minute later the service, with what it runs, used 11.4 seconds: 19%.
+	write(t, root, dir+"cpu.stat", "usage_usec 12400000\n")
+	u := Measure(t0.Add(time.Minute))
+	if u.ServiceTotalBytes != 202387456 || u.ServiceBytes != 163840 {
+		t.Errorf("memory = %+v", u)
+	}
+	if u.ServiceCPUPercent == nil || *u.ServiceCPUPercent != 19 {
+		t.Errorf("service cpu = %v", u.ServiceCPUPercent)
+	}
+	// Mostly cached files: not tight, as the cache is the system's to free.
+	if Tight() {
+		t.Error("tight on cache alone")
+	}
+}

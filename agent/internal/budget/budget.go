@@ -30,7 +30,12 @@ type Use struct {
 	CPUPercent      *float64 `json:"cpu_percent"`
 	ServiceBytes    uint64   `json:"service_bytes,omitempty"`
 	ServiceMaxBytes uint64   `json:"service_max_bytes,omitempty"`
-	Skipped         []string `json:"skipped,omitempty"`
+	// The whole service, with the programs it runs: its memory as systemd
+	// shows it (cached files too) and its CPU, so the server's page and
+	// systemctl say the same.
+	ServiceTotalBytes uint64   `json:"service_total_bytes,omitempty"`
+	ServiceCPUPercent *float64 `json:"service_cpu_percent,omitempty"`
+	Skipped           []string `json:"skipped,omitempty"`
 }
 
 // The optional work that skips its turn when the agent is tight.
@@ -50,6 +55,8 @@ var (
 	last struct {
 		at    time.Time
 		ticks uint64
+		// usec is the service's CPU time, from cgroup's cpu.stat.
+		usec uint64
 	}
 )
 
@@ -96,11 +103,19 @@ func Measure(now time.Time) *Use {
 			p = float64(int(p*10)) / 10
 			u.CPUPercent = &p
 		}
-		last.at, last.ticks = now, t
+		last.ticks = t
 		mu.Unlock()
 	}
-	u.ServiceBytes, u.ServiceMaxBytes = service()
+	var usec uint64
+	u.ServiceBytes, u.ServiceMaxBytes, u.ServiceTotalBytes, usec = service()
 	mu.Lock()
+	if usec > 0 && last.usec > 0 && usec >= last.usec && !last.at.IsZero() && now.After(last.at) {
+		p := float64(usec-last.usec) / 1e6 / now.Sub(last.at).Seconds() * 100
+		p = float64(int(p*10)) / 10
+		u.ServiceCPUPercent = &p
+	}
+	last.usec = usec
+	last.at = now
 	tight = u.MemoryBytes > TightBytes ||
 		(u.ServiceMaxBytes > 0 && float64(u.ServiceBytes) > TightShare*float64(u.ServiceMaxBytes))
 	for name := range skipped {
@@ -151,7 +166,7 @@ func cpuTicks() (uint64, bool) {
 // service is the memory the agent's service holds that cannot be freed
 // (anon and shared memory, not cached files), and its limit; zeros when
 // not under systemd with cgroup v2, or with no limit.
-func service() (held, max uint64) {
+func service() (held, max, total, cpuUsec uint64) {
 	var group string
 	for _, line := range strings.Split(string(read("proc/self/cgroup")), "\n") {
 		if g, ok := strings.CutPrefix(line, "0::"); ok {
@@ -159,7 +174,7 @@ func service() (held, max uint64) {
 		}
 	}
 	if group == "" || strings.Contains(group, "..") {
-		return 0, 0
+		return 0, 0, 0, 0
 	}
 	dir := path.Join("sys/fs/cgroup", group)
 	if v := strings.TrimSpace(string(read(path.Join(dir, "memory.max")))); v != "" && v != "max" {
@@ -173,5 +188,12 @@ func service() (held, max uint64) {
 			held += n
 		}
 	}
-	return held, max
+	total, _ = strconv.ParseUint(strings.TrimSpace(string(read(path.Join(dir, "memory.current")))), 10, 64)
+	sc = bufio.NewScanner(bytes.NewReader(read(path.Join(dir, "cpu.stat"))))
+	for sc.Scan() {
+		if v, ok := strings.CutPrefix(sc.Text(), "usage_usec "); ok {
+			cpuUsec, _ = strconv.ParseUint(strings.TrimSpace(v), 10, 64)
+		}
+	}
+	return held, max, total, cpuUsec
 }

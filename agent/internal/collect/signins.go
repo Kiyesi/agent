@@ -78,30 +78,39 @@ func (w *SigninWatch) Read(ctx context.Context, sys *system.System, now time.Tim
 		}
 		w.since = max(w.since, usec)
 		msg, _ := e.Message.(string)
-		m := accepted.FindStringSubmatch(msg)
-		if m == nil {
-			continue
-		}
-		method, user, address := m[1], m[2], m[3]
-		ip, err := netip.ParseAddr(address)
-		if err != nil || len(user) > 64 {
-			continue
-		}
-		address = ip.Unmap().String()
-		at := time.UnixMicro(usec).UTC()
-		key := user + "@" + address
-		_, known := w.seen[key]
-		w.seen[key] = at
+		ev, ok := w.accept(msg, usec)
 		changed = true
-		if known {
-			continue
+		if ok {
+			events = append(events, ev)
 		}
-		events = append(events, Event{Kind: "signin", Subject: user, Detail: method, Address: address, At: at.Format(time.RFC3339)})
 	}
 	if changed {
 		w.save()
 	}
 	return events
+}
+
+// accept reads one SSH line: a "signin" event for a user and address pair
+// not seen before, remembering the pair either way.
+func (w *SigninWatch) accept(msg string, usec int64) (Event, bool) {
+	m := accepted.FindStringSubmatch(msg)
+	if m == nil {
+		return Event{}, false
+	}
+	method, user, address := m[1], m[2], m[3]
+	ip, err := netip.ParseAddr(address)
+	if err != nil || len(user) > 64 {
+		return Event{}, false
+	}
+	address = ip.Unmap().String()
+	at := time.UnixMicro(usec).UTC()
+	key := user + "@" + address
+	_, known := w.seen[key]
+	w.seen[key] = at
+	if known {
+		return Event{}, false
+	}
+	return Event{Kind: "signin", Subject: user, Detail: method, Address: address, At: at.Format(time.RFC3339)}, true
 }
 
 func (w *SigninWatch) load() map[string]time.Time {

@@ -58,6 +58,8 @@ var firewallLine = regexp.MustCompile(`^\[(UFW (BLOCK|AUDIT|ALLOW|LIMIT BLOCK)|U
 // journal keeps where each query read up to, in microseconds since 1970.
 type journal struct {
 	all, own int64
+	// units are your own services, as the follower last asked for them.
+	units map[string]bool
 }
 
 // ownUnits are the services the server's people installed: unit files
@@ -122,16 +124,7 @@ func (j *journal) query(ctx context.Context, sys *system.System, after int64, fi
 	sc := bufio.NewScanner(bytes.NewReader(out))
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
 	for sc.Scan() {
-		var e struct {
-			Message    any    `json:"MESSAGE"`
-			Priority   string `json:"PRIORITY"`
-			Unit       string `json:"_SYSTEMD_UNIT"`
-			Identifier string `json:"SYSLOG_IDENTIFIER"`
-			Transport  string `json:"_TRANSPORT"`
-			Facility   string `json:"SYSLOG_FACILITY"`
-			Container  string `json:"CONTAINER_ID"`
-			Realtime   string `json:"__REALTIME_TIMESTAMP"`
-		}
+		var e journalEntry
 		if json.Unmarshal(sc.Bytes(), &e) != nil {
 			continue
 		}
@@ -140,35 +133,71 @@ func (j *journal) query(ctx context.Context, sys *system.System, after int64, fi
 			continue
 		}
 		newest = max(newest, usec)
-		// Both queries can return the same line: a warning from your own service.
-		key := e.Realtime + e.Unit + e.Identifier
-		msg, ok := e.Message.(string)
-		if !ok || seen[key+msg] || e.Container != "" {
-			continue
-		}
-		seen[key+msg] = true
-		if !rules.Firewall && e.Transport == "kernel" && firewallLine.MatchString(msg) {
-			continue
-		}
-		facility, _ := strconv.Atoi(e.Facility)
-		if !rules.Auth && (authUnits[e.Unit] || authIdentifiers[e.Identifier] || facility == 4 || facility == 10) {
-			continue
-		}
-		source := strings.TrimSuffix(e.Unit, ".service")
-		switch {
-		case e.Transport == "kernel":
-			source = "kernel"
-		case source == "" || strings.HasPrefix(source, "session-") || strings.HasPrefix(source, "user@"):
-			source = e.Identifier
-		}
-		if source == "" {
-			source = "system"
-		}
-		p, err := strconv.Atoi(e.Priority)
-		if err != nil {
-			p = 6
-		}
-		b.add(LogLine{At: time.UnixMicro(usec).UTC(), Source: source, Kind: "journal", Level: priorityLevel(p), Text: msg})
+		addJournalLine(e, usec, rules, seen, b)
 	}
 	return newest
+}
+
+// journalEntry is one system log entry, as journalctl --output=json gives it.
+type journalEntry struct {
+	Message    any    `json:"MESSAGE"`
+	Priority   string `json:"PRIORITY"`
+	Unit       string `json:"_SYSTEMD_UNIT"`
+	Identifier string `json:"SYSLOG_IDENTIFIER"`
+	Transport  string `json:"_TRANSPORT"`
+	Facility   string `json:"SYSLOG_FACILITY"`
+	Container  string `json:"CONTAINER_ID"`
+	Realtime   string `json:"__REALTIME_TIMESTAMP"`
+}
+
+// fromStream adds the entries the follower read since the last minute,
+// with the same rules as the queries: what is sent does not change.
+func (j *journal) fromStream(entries []journalEntry, rules JournalRules, b *logBuffer) {
+	seen := map[string]bool{}
+	for _, e := range entries {
+		usec, err := strconv.ParseInt(e.Realtime, 10, 64)
+		if err != nil {
+			continue
+		}
+		// The follower also carries sign-ins for the sign-in watch; as log
+		// lines they count only when they are warnings or from your services.
+		p, perr := strconv.Atoi(e.Priority)
+		if (e.Identifier == "sshd" || e.Identifier == "sshd-session") && (perr != nil || p > 4) && !j.units[e.Unit] {
+			continue
+		}
+		addJournalLine(e, usec, rules, seen, b)
+	}
+}
+
+// addJournalLine keeps one entry as a log line, by the rules above.
+func addJournalLine(e journalEntry, usec int64, rules JournalRules, seen map[string]bool, b *logBuffer) {
+	// Both queries can return the same line: a warning from your own service.
+	key := e.Realtime + e.Unit + e.Identifier
+	msg, ok := e.Message.(string)
+	if !ok || seen[key+msg] || e.Container != "" {
+		return
+	}
+	seen[key+msg] = true
+	if !rules.Firewall && e.Transport == "kernel" && firewallLine.MatchString(msg) {
+		return
+	}
+	facility, _ := strconv.Atoi(e.Facility)
+	if !rules.Auth && (authUnits[e.Unit] || authIdentifiers[e.Identifier] || facility == 4 || facility == 10) {
+		return
+	}
+	source := strings.TrimSuffix(e.Unit, ".service")
+	switch {
+	case e.Transport == "kernel":
+		source = "kernel"
+	case source == "" || strings.HasPrefix(source, "session-") || strings.HasPrefix(source, "user@"):
+		source = e.Identifier
+	}
+	if source == "" {
+		source = "system"
+	}
+	p, err := strconv.Atoi(e.Priority)
+	if err != nil {
+		p = 6
+	}
+	b.add(LogLine{At: time.UnixMicro(usec).UTC(), Source: source, Kind: "journal", Level: priorityLevel(p), Text: msg})
 }

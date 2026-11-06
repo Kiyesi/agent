@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 )
@@ -84,4 +85,37 @@ func (e *CommandError) Error() string {
 		return fmt.Sprintf("%s exited with code %d", e.Name, e.Code)
 	}
 	return fmt.Sprintf("%s exited with code %d: %s", e.Name, e.Code, e.Stderr)
+}
+
+// Streamer starts a long-running read-only program and hands back its
+// output as it comes: journalctl --follow, which replaces running
+// journalctl again and again (decisions log, 2026-11-06).
+type Streamer interface {
+	Stream(ctx context.Context, name string, args ...string) (io.ReadCloser, func() error, error)
+}
+
+// streamable are the programs that may run without end: only journalctl.
+var streamable = map[string]bool{"journalctl": true}
+
+// Stream starts name with args; its output is read until ctx ends or it
+// stops. wait returns how it stopped.
+func (ExecRunner) Stream(ctx context.Context, name string, args ...string) (io.ReadCloser, func() error, error) {
+	if !allowed[name] || !streamable[name] {
+		return nil, nil, fmt.Errorf("%s may not run without end", name)
+	}
+	path, err := Find(name)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s is not installed in %s", name, strings.Join(ProgramDirs, ", "))
+	}
+	// #nosec G204 -- journalctl only, from root's own folders, with fixed arguments.
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Env = append(cmd.Environ(), "LC_ALL=C", "SYSTEMD_PAGER=", "NO_COLOR=1")
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, err
+	}
+	return out, cmd.Wait, nil
 }

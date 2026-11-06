@@ -208,6 +208,8 @@ type Collector struct {
 
 	// Signins, when set, watches for SSH sign-ins not seen before.
 	Signins *SigninWatch
+	// stream is the system log's one follower, when the system can run it.
+	stream journalStream
 }
 
 // TakeLogs returns the log lines gathered since the last call, or nil.
@@ -277,9 +279,31 @@ func (c *Collector) Collect(ctx context.Context) (Metrics, []Event) {
 	var reqs Requests
 	m.HTTPSource = c.readAccessLogs(ctx, now, list, &reqs)
 	m.HTTP = reqs.Stats()
+	// The system log and SSH sign-ins come from one follower where the
+	// system can run it; elsewhere from a query each minute, as before.
+	logsOn := c.Logs && c.Journal.On
+	var units []string
+	if logsOn {
+		units = ownUnits(c.Sys.FS, c.Journal.Include)
+	}
+	streaming := (logsOn || c.Signins != nil) && c.Sys.Exec != nil && c.stream.ensure(c.Sys, units, now)
+	var streamed []journalEntry
+	if streaming {
+		streamed = c.stream.take()
+	}
 	// The agent close to its memory limit: the system log waits a minute.
 	if c.Logs && !budget.Skip(budget.Logs) {
-		c.journal.read(ctx, c.Sys, c.Journal, now, &c.buf)
+		if streaming {
+			if logsOn {
+				c.journal.units = map[string]bool{}
+				for _, u := range units {
+					c.journal.units[u] = true
+				}
+				c.journal.fromStream(streamed, c.Journal, &c.buf)
+			}
+		} else {
+			c.journal.read(ctx, c.Sys, c.Journal, now, &c.buf)
+		}
 		journalOn := c.Journal.On && c.Sys.Exec != nil && c.Sys.Exec.Has("journalctl")
 		for _, e := range events {
 			// The kernel's own line says the same, when the system log is read.
@@ -291,7 +315,11 @@ func (c *Collector) Collect(ctx context.Context) (Metrics, []Event) {
 	}
 
 	if c.Signins != nil {
-		events = append(events, c.Signins.Read(ctx, c.Sys, now)...)
+		if streaming {
+			events = append(events, c.Signins.fromStream(streamed, now)...)
+		} else {
+			events = append(events, c.Signins.Read(ctx, c.Sys, now)...)
+		}
 	}
 	c.at, c.cpu, c.net = now, cpu, net
 	m.Agent = budget.Measure(now)
