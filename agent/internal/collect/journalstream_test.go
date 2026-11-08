@@ -126,3 +126,84 @@ func TestTheFollowerKeepsAtMostItsBuffer(t *testing.T) {
 		t.Error("taken twice")
 	}
 }
+
+// Memory kills come from the same follower, as they happen, so the memory
+// check never searches the log. The kernel's notices it carries for that
+// are never log lines, and a kill made by Kiyesi's own memory limit is
+// left out, even when the kernel's line naming the limit came the minute
+// before.
+func TestTheFollowerRecordsMemoryKills(t *testing.T) {
+	j := &streamJournal{}
+	path := filepath.Join(t.TempDir(), "kills.json")
+	c := &Collector{
+		Sys:     &system.System{FS: fstest.MapFS{}, Exec: j, Now: time.Now},
+		Logs:    true,
+		Journal: JournalRules{On: true},
+		Kills:   &system.KillLog{Path: path},
+	}
+	c.Collect(context.Background())
+	if len(j.starts) != 1 {
+		t.Fatalf("followers started: %d", len(j.starts))
+	}
+	if args := strings.Join(j.starts[0], " "); !strings.Contains(args, "+ _TRANSPORT=kernel PRIORITY=6") {
+		t.Errorf("follower args lack the kernel's notices: %s", args)
+	}
+	// Watching from the first minute, with nothing killed.
+	since, kills, err := (system.KillLog{Path: path}).Load(time.Now())
+	if err != nil || since.IsZero() || len(kills) != 0 {
+		t.Fatalf("after the first minute: %v %v %v", since, kills, err)
+	}
+	at := time.Now().Add(-time.Minute).Truncate(time.Microsecond)
+	usec := strconv.FormatInt(at.UnixMicro(), 10)
+	j.write(t, map[string]string{"MESSAGE": "oom-kill:constraint=CONSTRAINT_MEMCG,nodemask=(null),cpuset=/,mems_allowed=0,oom_memcg=/system.slice/kiyesi.service,task_memcg=/system.slice/kiyesi.service,task=apt-get,pid=4211,uid=0", "PRIORITY": "6", "_TRANSPORT": "kernel", "__REALTIME_TIMESTAMP": usec})
+	time.Sleep(50 * time.Millisecond)
+	c.Collect(context.Background())
+	j.write(t, map[string]string{"MESSAGE": "Memory cgroup out of memory: Killed process 4211 (apt-get) total-vm:1kB", "PRIORITY": "3", "_TRANSPORT": "kernel", "__REALTIME_TIMESTAMP": usec})
+	j.write(t, map[string]string{"MESSAGE": "Out of memory: Killed process 48211 (node) total-vm:1834448kB", "PRIORITY": "3", "_TRANSPORT": "kernel", "__REALTIME_TIMESTAMP": usec})
+	j.write(t, map[string]string{"MESSAGE": "eth0: link becomes ready", "PRIORITY": "6", "_TRANSPORT": "kernel", "__REALTIME_TIMESTAMP": usec})
+	time.Sleep(50 * time.Millisecond)
+	j.mu.Lock()
+	c.stream.mu.Lock()
+	for _, e := range c.stream.entries {
+		if msg, _ := e.Message.(string); strings.Contains(msg, "link becomes ready") {
+			t.Error("a kernel info line took room in the buffer")
+		}
+	}
+	c.stream.mu.Unlock()
+	j.mu.Unlock()
+	c.Collect(context.Background())
+	_, kills, _ = (system.KillLog{Path: path}).Load(time.Now())
+	if len(kills) != 1 || kills[0].Process != "node" || !kills[0].At.Equal(at) {
+		t.Errorf("kills = %+v", kills)
+	}
+	// The kernel's info lines never became log lines, and those other than
+	// the memory limit's were dropped as read; the kill itself, an error,
+	// is one as before.
+	if n := len(c.stream.take()); n != 0 {
+		t.Errorf("%d entries left", n)
+	}
+	var texts []string
+	for _, l := range c.TakeLogs().Lines {
+		texts = append(texts, l.Text)
+	}
+	got := strings.Join(texts, "|")
+	if strings.Contains(got, "oom-kill:") || strings.Contains(got, "link becomes ready") || !strings.Contains(got, "(node)") {
+		t.Errorf("lines = %s", got)
+	}
+	if j.runs != 0 {
+		t.Errorf("journalctl ran %d times", j.runs)
+	}
+}
+
+// With logs and sign-ins both off, the follower still runs for the kills.
+func TestTheFollowerRunsForKillsAlone(t *testing.T) {
+	j := &streamJournal{}
+	c := &Collector{
+		Sys:   &system.System{FS: fstest.MapFS{}, Exec: j, Now: time.Now},
+		Kills: &system.KillLog{Path: filepath.Join(t.TempDir(), "kills.json")},
+	}
+	c.Collect(context.Background())
+	if len(j.starts) != 1 {
+		t.Fatalf("followers started: %d", len(j.starts))
+	}
+}

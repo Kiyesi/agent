@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/kiyesi/kiyesi/agent/internal/system"
 )
 
 // Where a connected agent keeps its settings and its outbox. Tests point
@@ -14,6 +16,12 @@ func etcDir() string {
 		return d
 	}
 	return "/etc/kiyesi"
+}
+
+// agentKillLog is the background agent's record of memory kills: its
+// collector writes it, its scans read it.
+func agentKillLog() *system.KillLog {
+	return &system.KillLog{Path: filepath.Join(stateDir(), "kills.json")}
 }
 
 func stateDir() string {

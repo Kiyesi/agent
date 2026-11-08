@@ -165,6 +165,11 @@ func (j *journal) fromStream(entries []journalEntry, rules JournalRules, b *logB
 		if (e.Identifier == "sshd" || e.Identifier == "sshd-session") && (perr != nil || p > 4) && !j.units[e.Unit] {
 			continue
 		}
+		// The kernel's info lines it carries are for the memory kill record
+		// only: never log lines.
+		if e.Transport == "kernel" && (perr != nil || p > 4) {
+			continue
+		}
 		addJournalLine(e, usec, rules, seen, b)
 	}
 }

@@ -208,6 +208,10 @@ type Collector struct {
 
 	// Signins, when set, watches for SSH sign-ins not seen before.
 	Signins *SigninWatch
+	// Kills, when set, records memory kills from the follower's kernel
+	// lines, for the memory check (agent mode).
+	Kills *system.KillLog
+	kills killWatch
 	// stream is the system log's one follower, when the system can run it.
 	stream journalStream
 }
@@ -286,10 +290,13 @@ func (c *Collector) Collect(ctx context.Context) (Metrics, []Event) {
 	if logsOn {
 		units = ownUnits(c.Sys.FS, c.Journal.Include)
 	}
-	streaming := (logsOn || c.Signins != nil) && c.Sys.Exec != nil && c.stream.ensure(c.Sys, units, now)
+	streaming := (logsOn || c.Signins != nil || c.Kills != nil) && c.Sys.Exec != nil && c.stream.ensure(c.Sys, units, now)
 	var streamed []journalEntry
 	if streaming {
 		streamed = c.stream.take()
+		if c.Kills != nil {
+			c.kills.fromStream(streamed, c.Kills, now)
+		}
 	}
 	// The agent close to its memory limit: the system log waits a minute.
 	if c.Logs && !budget.Skip(budget.Logs) {

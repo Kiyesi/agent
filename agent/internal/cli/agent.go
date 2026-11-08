@@ -100,7 +100,7 @@ func newAgent(io IO) *cobra.Command {
 			defer stop()
 			// Measurements each minute, from the same read-only view of the
 			// server as the scan.
-			col := &collect.Collector{Sys: newSystem(os.Geteuid() == 0, stateDir())}
+			col := &collect.Collector{Sys: newSystem(os.Geteuid() == 0, stateDir()), Kills: agentKillLog()}
 			docker := col.Sys.Docker
 			applied := false
 			// The folder kiyesi job done drops its records in. Only as root, as the service runs.

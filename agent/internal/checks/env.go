@@ -18,6 +18,9 @@ type Env struct {
 	// ReuseSlowFor lets a slow check reuse its last result for this long.
 	// The background agent sets it; a scan run by hand never does.
 	ReuseSlowFor time.Duration
+	// Kills, set for the background agent, is its record of memory kills,
+	// read by the memory check instead of the system log.
+	Kills *system.KillLog
 
 	containersOnce sync.Once
 	containers     []system.Container

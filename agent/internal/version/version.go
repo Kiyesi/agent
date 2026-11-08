@@ -6,7 +6,7 @@ package version
 import "strings"
 
 // Version is the full version, such as 0.19.0.
-var Version = "0.48.4"
+var Version = "0.48.5"
 
 // Security is true in a release that fixes a security problem. The release
 // writes "security yes" into its signed list, so kiyesi on every server and

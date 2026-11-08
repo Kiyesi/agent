@@ -38,7 +38,9 @@ type journalStream struct {
 
 // streamArgs are the follower's arguments: only new entries, as JSON, with
 // the fields the agent reads, and journald's own matches (the same field is
-// "or"; "+" starts another set): warnings and worse, your units, and SSH.
+// "or"; "+" starts another set, and different fields in one set must all
+// match): warnings and worse, your units, SSH, and the kernel's info lines,
+// which carry the line naming the memory limit behind a kill.
 func streamArgs(units []string) []string {
 	args := []string{
 		"--follow", "--lines=0", "--output=json", "--no-pager", "--quiet",
@@ -48,7 +50,8 @@ func streamArgs(units []string) []string {
 	for _, u := range units {
 		args = append(args, "+", "_SYSTEMD_UNIT="+u)
 	}
-	return append(args, "+", "SYSLOG_IDENTIFIER=sshd", "SYSLOG_IDENTIFIER=sshd-session")
+	return append(args, "+", "SYSLOG_IDENTIFIER=sshd", "SYSLOG_IDENTIFIER=sshd-session",
+		"+", "_TRANSPORT=kernel", "PRIORITY=6")
 }
 
 // ensure keeps a follower running for these units, starting or restarting
@@ -86,7 +89,7 @@ func (s *journalStream) ensure(sys *system.System, units []string, now time.Time
 		sc.Buffer(make([]byte, 64<<10), 1<<20)
 		for sc.Scan() {
 			var e journalEntry
-			if json.Unmarshal(sc.Bytes(), &e) != nil {
+			if json.Unmarshal(sc.Bytes(), &e) != nil || !wanted(e) {
 				continue
 			}
 			s.mu.Lock()
@@ -108,6 +111,17 @@ func (s *journalStream) ensure(sys *system.System, units []string, now time.Time
 		cancel()
 	}()
 	return true
+}
+
+// wanted drops the kernel's info lines other than the one naming the
+// memory limit behind a kill, before they take room in the buffer: some
+// servers write many.
+func wanted(e journalEntry) bool {
+	if e.Transport != "kernel" || e.Priority != "6" {
+		return true
+	}
+	msg, _ := e.Message.(string)
+	return strings.HasPrefix(strings.TrimSpace(msg), "oom-kill:")
 }
 
 // take hands over the entries read since the last minute, oldest first.
@@ -148,4 +162,47 @@ func (w *SigninWatch) fromStream(entries []journalEntry, now time.Time) []Event 
 		w.save()
 	}
 	return events
+}
+
+// killWatch turns the follower's kernel lines into the record of memory
+// kills the memory check reads. A kill made by the kiyesi service's own
+// memory limit is left out: the kernel names that limit in the line just
+// before, which may come in the minute before.
+type killWatch struct {
+	own map[string]time.Time // pid -> when its limit line was seen
+}
+
+func (w *killWatch) fromStream(entries []journalEntry, log *system.KillLog, now time.Time) {
+	if w.own == nil {
+		w.own = map[string]time.Time{}
+	}
+	for pid, at := range w.own {
+		if now.Sub(at) > 10*time.Minute {
+			delete(w.own, pid)
+		}
+	}
+	var kills []system.Kill
+	for _, e := range entries {
+		msg, ok := e.Message.(string)
+		if !ok || e.Transport != "kernel" {
+			continue
+		}
+		if m := system.OwnLimitRE.FindStringSubmatch(msg); m != nil {
+			w.own[m[1]] = now
+			continue
+		}
+		m := system.KilledRE.FindStringSubmatch(msg)
+		if m == nil {
+			continue
+		}
+		if _, own := w.own[m[1]]; own {
+			continue
+		}
+		usec, err := strconv.ParseInt(e.Realtime, 10, 64)
+		if err != nil {
+			continue
+		}
+		kills = append(kills, system.Kill{Process: m[2], At: time.UnixMicro(usec).UTC()})
+	}
+	_ = log.Record(now, kills)
 }

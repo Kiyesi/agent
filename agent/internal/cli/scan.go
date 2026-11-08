@@ -113,6 +113,9 @@ func scanWithEnv(ctx context.Context, configPath string, reuseSlowFor time.Durat
 	sys.Docker = system.FilterDocker(sys.Docker, cfg.Containers.Include, cfg.Containers.Exclude)
 	env = checks.NewEnv(sys, cfg)
 	env.ReuseSlowFor = reuseSlowFor
+	if by == render.ByAgent {
+		env.Kills = agentKillLog()
+	}
 	r = scan.Run(ctx, env, checks.Default(), pack)
 	// Kiyesi only suggests: no report offers kiyesi fix, only the commands a
 	// person reviews and runs.

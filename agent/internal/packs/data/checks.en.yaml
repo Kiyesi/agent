@@ -127,14 +127,16 @@ checks:
     name: Out-of-memory kills
     reads: >-
       The kernel log for the last 24 hours, through journalctl or
-      /var/log/kern.log (in the background, the day once, then only what is new
-      at each scan).
+      /var/log/kern.log. In the background, kills are noted as they happen from
+      the system log the agent already follows, so the log is never searched;
+      a scan by hand searches the last 24 hours.
     root:
       needed: sometimes
       why: On Ubuntu the kernel log can be read only by root and the adm group.
     passed: "No process was killed for memory in the last 24 hours"
     skips:
       no-kernel-log: "found no kernel log: neither journald nor /var/log/kern.log is on this system"
+      starting: "the agent has just started noting memory kills as they happen; to search the last 24 hours now, run sudo kiyesi scan"
     findings:
       killed-no-swap:
         severity: critical
