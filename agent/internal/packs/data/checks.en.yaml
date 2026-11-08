@@ -125,7 +125,10 @@ checks:
   - id: oom
     area: health
     name: Out-of-memory kills
-    reads: The kernel log for the last 24 hours, through journalctl or /var/log/kern.log.
+    reads: >-
+      The kernel log for the last 24 hours, through journalctl or
+      /var/log/kern.log (in the background, the day once, then only what is new
+      at each scan).
     root:
       needed: sometimes
       why: On Ubuntu the kernel log can be read only by root and the adm group.

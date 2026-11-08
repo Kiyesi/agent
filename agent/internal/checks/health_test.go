@@ -1,8 +1,10 @@
 package checks
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -125,6 +127,99 @@ func TestOOMLeavesOutKiyesisOwnLimit(t *testing.T) {
 	}
 	only := strings.Join(strings.Split(mustRead(t, "journal-k-own-limit.txt"), "\n")[:5], "\n")
 	wantStatus(t, run(t, oomCheck{}, newTestEnv().command("journalctl -k --since -24h --no-pager -q -o short-iso", only)), StatusPass)
+}
+
+// The background agent reads the kernel log's last 24 hours once, then at
+// each scan only what came after the place it stopped, and keeps the kills
+// it saw for 24 hours. A scan by hand still reads the whole day.
+func TestOOMBackgroundReadsOnlyWhatIsNew(t *testing.T) {
+	day := "journalctl -k --since -24h --show-cursor --no-pager -q -o short-iso"
+	after := func(c string) string {
+		return "journalctl -k --after-cursor=" + c + " --show-cursor --no-pager -q -o short-iso"
+	}
+	e := newTestEnv().saved(t, "proc/meminfo", "meminfo-1gb-noswap")
+	e.file("var/log/journal/abc/system.journal", "journal")
+	e.command(day, mustRead(t, "journal-k.txt")+"-- cursor: s=one\n")
+	background := func() Result {
+		t.Helper()
+		env := e.env()
+		env.ReuseSlowFor = 6 * time.Hour
+		return (oomCheck{}).Run(t.Context(), env)
+	}
+	ran := func(cmd string) int {
+		n := 0
+		for _, c := range e.runner.ran {
+			if c == cmd {
+				n++
+			}
+		}
+		return n
+	}
+	// The first scan reads the day and keeps its place.
+	r := background()
+	wantStatus(t, r, StatusFail, "killed-no-swap")
+	if r.Findings[0].Vars["process"] != "node" || e.state.M[oomCursorKey] != "s=one" {
+		t.Fatalf("first scan: %+v, state %v", r.Findings, e.state.M)
+	}
+	// The next scan reads only what is new: nothing. The kill seen before
+	// is still reported, and the place is kept.
+	e.command(after("s=one"), "")
+	r = background()
+	wantStatus(t, r, StatusFail, "killed-no-swap")
+	if ran(day) != 1 || ran(after("s=one")) != 1 || e.state.M[oomCursorKey] != "s=one" {
+		t.Fatalf("second scan ran %v, state %v", e.runner.ran, e.state.M)
+	}
+	// A new kill after the place is added, and the place moves on.
+	e.command(after("s=one"), "2026-10-08T14:50:00+0000 host kernel: Out of memory: Killed process 9100 (php-fpm) total-vm:1kB\n-- cursor: s=two\n")
+	r = background()
+	if len(r.Findings) != 2 || r.Findings[0].Vars["process"] != "php-fpm" || e.state.M[oomCursorKey] != "s=two" {
+		t.Fatalf("third scan: %+v, state %v", r.Findings, e.state.M)
+	}
+	// journald no longer knows the place (its files were trimmed): read
+	// from the last scan's time. The kill read twice counts once.
+	e.runner.errs[after("s=two")] = &system.CommandError{Name: "journalctl", Code: 1}
+	since := "journalctl -k --since @" + strconv.FormatInt(now.Unix(), 10) + " --show-cursor --no-pager -q -o short-iso"
+	e.command(since, "2026-10-08T14:50:00+0000 host kernel: Out of memory: Killed process 9100 (php-fpm) total-vm:1kB\n-- cursor: s=three\n")
+	r = background()
+	if ran(since) != 1 || len(r.Findings) != 2 || e.state.M[oomCursorKey] != "s=three" {
+		t.Fatalf("after a lost place: ran %v, %+v, state %v", e.runner.ran, r.Findings, e.state.M)
+	}
+	// Kills older than 24 hours are forgotten.
+	var kept []savedKill
+	if err := json.Unmarshal([]byte(e.state.M[oomKillsKey]), &kept); err != nil || len(kept) != 2 {
+		t.Fatalf("kept %v, %v", kept, err)
+	}
+	for i := range kept {
+		kept[i].At = now.Add(-25 * time.Hour)
+	}
+	data, _ := json.Marshal(kept)
+	e.state.M[oomKillsKey] = string(data)
+	e.command(after("s=three"), "")
+	wantStatus(t, background(), StatusPass)
+	// A day without a scan: the whole day is read again.
+	e.state.M[oomAtKey] = now.Add(-25 * time.Hour).Format(time.RFC3339)
+	background()
+	if ran(day) != 2 {
+		t.Fatalf("after a day away: ran %v", e.runner.ran)
+	}
+	// A scan by hand reads the whole day, as before.
+	e.command("journalctl -k --since -24h --no-pager -q -o short-iso", "")
+	run(t, oomCheck{}, e)
+	if ran("journalctl -k --since -24h --no-pager -q -o short-iso") != 1 {
+		t.Fatalf("by hand: ran %v", e.runner.ran)
+	}
+}
+
+// Kiyesi's own limit is still left out when the log is read in parts.
+func TestOOMBackgroundLeavesOutKiyesisOwnLimit(t *testing.T) {
+	e := newTestEnv().saved(t, "proc/meminfo", "meminfo-1gb-noswap")
+	e.command("journalctl -k --since -24h --show-cursor --no-pager -q -o short-iso", mustRead(t, "journal-k-own-limit.txt")+"-- cursor: s=one\n")
+	env := e.env()
+	env.ReuseSlowFor = 6 * time.Hour
+	r := (oomCheck{}).Run(t.Context(), env)
+	if len(r.Findings) != 1 || r.Findings[0].Vars["process"] != "node" {
+		t.Errorf("findings = %+v", r.Findings)
+	}
 }
 
 func mustRead(tb testing.TB, name string) string {
