@@ -279,3 +279,79 @@ func (d deniedFS) ReadDir(name string) ([]fs.DirEntry, error) {
 }
 
 var _ = errors.New
+
+// The background agent asks apt only when its answer can differ: a new
+// package list, a package installed or removed, or a day gone by. apt-get
+// may read every package list from disk, so every 15 minutes was too often.
+func TestUpdatesAsksAptOnlyWhenSomethingChanged(t *testing.T) {
+	apt := "apt-get -s -o Debug::NoLocking=1 upgrade"
+	e := newTestEnv().command(apt, mustRead(t, "apt-upgrade-security.txt"))
+	e.fs["var/lib/dpkg/status"] = &fstest.MapFile{Data: []byte("Package: openssl\n"), ModTime: now.Add(-time.Hour)}
+	e.fs["var/lib/apt/lists/security_Packages"] = &fstest.MapFile{Data: []byte("Package: openssl\n"), ModTime: now.Add(-time.Hour)}
+	background := func() Result {
+		t.Helper()
+		env := e.env()
+		env.ReuseSlowFor = 6 * time.Hour
+		return (updatesCheck{}).Run(t.Context(), env)
+	}
+	aptRuns := func() int {
+		n := 0
+		for _, c := range e.runner.ran {
+			if c == apt {
+				n++
+			}
+		}
+		return n
+	}
+	wantStatus(t, background(), StatusPass)
+	if aptRuns() != 1 {
+		t.Fatalf("first scan: apt ran %d times", aptRuns())
+	}
+	// The next scans, nothing changed: the same answer, apt not started.
+	e.state.M["security-update/openssl"] = now.Add(-8 * 24 * time.Hour).Format(time.RFC3339)
+	e.state.M["security-update/libssl3"] = now.Add(-8 * 24 * time.Hour).Format(time.RFC3339)
+	r := background()
+	wantStatus(t, r, StatusFail, "waiting")
+	if r.Findings[0].Vars["count"] != "2" || aptRuns() != 1 {
+		t.Fatalf("reused: %+v, apt ran %d times", r.Findings[0].Vars, aptRuns())
+	}
+	// New package lists (apt update ran): apt is asked again.
+	e.fs["var/lib/apt/lists/security_Packages"] = &fstest.MapFile{Data: []byte("Package: openssl\nVersion: 2\n"), ModTime: now}
+	background()
+	if aptRuns() != 2 {
+		t.Fatalf("after new lists: apt ran %d times", aptRuns())
+	}
+	// A package installed: asked again.
+	e.fs["var/lib/dpkg/status"] = &fstest.MapFile{Data: []byte("Package: openssl\nPackage: nginx\n"), ModTime: now}
+	background()
+	if aptRuns() != 3 {
+		t.Fatalf("after an install: apt ran %d times", aptRuns())
+	}
+	// A day later with nothing changed: asked again.
+	e.state.M[aptAtKey] = now.Add(-25 * time.Hour).Format(time.RFC3339)
+	background()
+	if aptRuns() != 4 {
+		t.Fatalf("a day later: apt ran %d times", aptRuns())
+	}
+	// A scan by hand always asks apt.
+	run(t, updatesCheck{}, e)
+	if aptRuns() != 5 {
+		t.Fatalf("by hand: apt ran %d times", aptRuns())
+	}
+}
+
+// No security update waiting is an answer worth keeping too.
+func TestUpdatesReusesAnEmptyAnswer(t *testing.T) {
+	apt := "apt-get -s -o Debug::NoLocking=1 upgrade"
+	e := newTestEnv().command(apt, "Reading package lists...\n")
+	env := e.env()
+	env.ReuseSlowFor = 6 * time.Hour
+	wantStatus(t, (updatesCheck{}).Run(t.Context(), env), StatusPass)
+	e.runner.ran = nil
+	env = e.env()
+	env.ReuseSlowFor = 6 * time.Hour
+	wantStatus(t, (updatesCheck{}).Run(t.Context(), env), StatusPass)
+	if len(e.runner.ran) != 0 {
+		t.Fatalf("apt ran again: %v", e.runner.ran)
+	}
+}

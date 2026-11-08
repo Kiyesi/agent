@@ -245,7 +245,9 @@ checks:
     name: Pending updates
     reads: >-
       The security updates apt has waiting, from a dry run that changes nothing
-      (apt-get -s upgrade), and the date Kiyesi first saw each one.
+      (apt-get -s upgrade, in the background only when the package lists or the
+      installed packages changed, and at least once a day), and the date Kiyesi
+      first saw each one.
     root:
       needed: never
     passed: "No security update has waited more than {limit} days"

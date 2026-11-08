@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"io/fs"
 	"slices"
 	"sort"
@@ -58,19 +61,29 @@ func (updatesCheck) Run(ctx context.Context, env *Env) Result {
 	if limit := ownMemoryLimit(env.Sys.FS); limit > 0 && limit < aptNeeds {
 		return Skip("memory-limit", nil)
 	}
-	// -s simulates: apt prints what it would install and changes nothing.
-	out, err := env.Sys.Exec.Run(ctx, "apt-get", "-s", "-o", "Debug::NoLocking=1", "upgrade")
-	if err != nil {
-		return Failed(err)
+	now := env.Sys.Now()
+	print := aptPrint(env.Sys.FS)
+	pending, ok := lastApt(env, print, now)
+	if !ok {
+		// -s simulates: apt prints what it would install and changes nothing.
+		out, err := env.Sys.Exec.Run(ctx, "apt-get", "-s", "-o", "Debug::NoLocking=1", "upgrade")
+		dropAptCache(env.Sys.FS)
+		if err != nil {
+			return Failed(err)
+		}
+		pending = securityUpdates(out)
 	}
-	pending := securityUpdates(out)
 
 	// apt does not record when an update appeared, so the scan notes the
 	// day it first sees each one.
-	now := env.Sys.Now()
 	limit := time.Duration(env.Cfg.Limits.UpdateDays) * 24 * time.Hour
 	old := 0
-	err = env.EditState(func(state map[string]string) {
+	err := env.EditState(func(state map[string]string) {
+		if !ok {
+			state[aptPrintKey] = print
+			state[aptAtKey] = now.UTC().Format(time.RFC3339)
+			state[aptPendingKey] = strings.Join(pending, ",")
+		}
 		// Updates no longer waiting are forgotten; the rest keep their first day.
 		for k := range state {
 			if strings.HasPrefix(k, statePrefix) && !slices.Contains(pending, strings.TrimPrefix(k, statePrefix)) {
@@ -97,6 +110,84 @@ func (updatesCheck) Run(ctx context.Context, env *Env) Result {
 		return Fail(Found("waiting", vars))
 	}
 	return Pass(vars)
+}
+
+// The background agent's last apt answer, kept in the scan's state file.
+const (
+	aptPrintKey   = "apt/print"
+	aptAtKey      = "apt/at"
+	aptPendingKey = "apt/pending"
+)
+
+// aptEvery is how long the background agent reuses apt's answer while
+// nothing apt reads has changed.
+const aptEvery = 24 * time.Hour
+
+// aptPrint stands for everything apt-get -s upgrade reads: the installed
+// packages, the package lists and apt's own cache. Only their sizes and
+// dates are read, never their contents.
+func aptPrint(fsys fs.FS) string {
+	h := sha256.New()
+	stamp := func(name string) {
+		if info, err := fs.Stat(fsys, name); err == nil {
+			_, _ = fmt.Fprintf(h, "%s %d %d\n", name, info.Size(), info.ModTime().UnixNano())
+		}
+	}
+	stamp("var/lib/dpkg/status")
+	stamp("var/cache/apt/pkgcache.bin")
+	stamp("etc/apt/sources.list")
+	for _, dir := range []string{"var/lib/apt/lists", "etc/apt/sources.list.d", "etc/apt/preferences.d"} {
+		entries, _ := fs.ReadDir(fsys, dir)
+		for _, e := range entries {
+			if e.Type().IsRegular() {
+				stamp(dir + "/" + e.Name())
+			}
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// lastApt is apt's last answer, for the background agent, when nothing it
+// reads has changed and it is less than a day old. apt-get rebuilds its
+// cache in memory when the lists changed and it may not write it, reading
+// every package list: on a small server, a few hundred megabytes from disk
+// each time, so it runs only when its answer can differ. A scan by hand
+// always asks apt.
+func lastApt(env *Env, print string, now time.Time) ([]string, bool) {
+	if env.ReuseSlowFor <= 0 || env.Sys.State == nil {
+		return nil, false
+	}
+	state, err := env.Sys.State.Load()
+	if err != nil || state[aptPrintKey] != print {
+		return nil, false
+	}
+	at, err := time.Parse(time.RFC3339, state[aptAtKey])
+	if err != nil || now.Sub(at) > aptEvery || now.Before(at) {
+		return nil, false
+	}
+	pending := []string{}
+	if v := state[aptPendingKey]; v != "" {
+		pending = strings.Split(v, ",")
+	}
+	return pending, true
+}
+
+// dropAptCache lets go of the package lists and apt's cache files that
+// apt-get just read, so they are not kept in the system's cache on the
+// agent's account (see system.RootFS): opening and closing is enough.
+func dropAptCache(fsys fs.FS) {
+	names := []string{"var/cache/apt/pkgcache.bin", "var/cache/apt/srcpkgcache.bin", "var/lib/dpkg/status"}
+	entries, _ := fs.ReadDir(fsys, "var/lib/apt/lists")
+	for _, e := range entries {
+		if e.Type().IsRegular() {
+			names = append(names, "var/lib/apt/lists/"+e.Name())
+		}
+	}
+	for _, n := range names {
+		if f, err := fsys.Open(n); err == nil {
+			_ = f.Close()
+		}
+	}
 }
 
 // securityUpdates reads `apt-get -s upgrade` lines such as
