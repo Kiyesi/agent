@@ -1,9 +1,13 @@
 package checks
 
 import (
+	"bufio"
 	"context"
+	"crypto/md5" // #nosec G501 -- compared with dpkg's own md5sums lists, not used to protect anything
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"path"
 	"regexp"
@@ -145,7 +149,7 @@ func verifyPackages(ctx context.Context, env *Env) (verified, error) {
 	var err error
 	switch {
 	case env.Sys.Exec.Has("dpkg"):
-		out, err = env.Sys.Exec.Run(ctx, "dpkg", "--verify")
+		return dpkgVerify(ctx, env.Sys.FS)
 	case env.Sys.Exec.Has("rpm"):
 		out, err = env.Sys.Exec.Run(ctx, "rpm", "-Va", "--nomtime", "--nosize", "--nouser", "--nogroup", "--nomode", "--nordev", "--nocaps")
 	default:
@@ -157,6 +161,104 @@ func verifyPackages(ctx context.Context, env *Env) (verified, error) {
 		return verified{}, err
 	}
 	return parseVerify(string(out)), nil
+}
+
+// dpkgInfo is where dpkg keeps each package's list of files and checksums.
+const dpkgInfo = "var/lib/dpkg/info"
+
+// dpkgVerify compares the programs in programDirs with the checksums their
+// packages installed, as dpkg --verify does for every file of every
+// package. Reading only the programs is a small part of that, and each one
+// read is dropped from the system's cache when closed, so the daily
+// comparison neither loads the disk nor fills the agent's memory limit with
+// cache. Settings files are not in the lists; files a diversion moved are
+// left out; a missing file is not a sign. A program that is now a link, a
+// pipe or a device, or that cannot be read, counts as changed.
+func dpkgVerify(ctx context.Context, fsys fs.FS) (verified, error) {
+	entries, err := fs.ReadDir(fsys, dpkgInfo)
+	if err != nil {
+		return verified{}, err
+	}
+	diverted := dpkgDiversions(fsys)
+	seen := map[string]bool{}
+	var paths []string
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".md5sums") {
+			continue
+		}
+		list, err := fs.ReadFile(fsys, dpkgInfo+"/"+e.Name())
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(list), "\n") {
+			sum, name, ok := strings.Cut(line, "  ")
+			if !ok || len(sum) != 32 || name == "" || !fs.ValidPath(name) {
+				continue
+			}
+			p := "/" + name
+			if seen[p] || diverted[p] || !underAny(p, programDirs) {
+				continue
+			}
+			seen[p] = true
+			if err := ctx.Err(); err != nil {
+				return verified{}, err
+			}
+			if !sameSum(fsys, name, sum) {
+				paths = append(paths, p)
+			}
+		}
+	}
+	sort.Strings(paths)
+	v := verified{Count: len(paths)}
+	if len(paths) > 0 {
+		v.First = paths[0]
+	}
+	return v, nil
+}
+
+// sameSum says whether the file at name has the md5 sum dpkg recorded. A
+// file that is gone is not a change, as dpkg --verify reports it apart.
+func sameSum(fsys fs.FS, name, want string) bool {
+	var f fs.File
+	var err error
+	if nf, ok := fsys.(noFollowFS); ok {
+		f, err = nf.OpenNoFollow(name)
+	} else {
+		f, err = fsys.Open(name)
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }()
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	h := md5.New() // #nosec G401 -- dpkg's lists hold md5 sums
+	if _, err := io.Copy(h, f); err != nil {
+		return false
+	}
+	return hex.EncodeToString(h.Sum(nil)) == strings.ToLower(want)
+}
+
+// dpkgDiversions are the paths dpkg-divert moved: the list holds three
+// lines each, the path, where it went, and the package.
+func dpkgDiversions(fsys fs.FS) map[string]bool {
+	out := map[string]bool{}
+	f, err := fsys.Open("var/lib/dpkg/diversions")
+	if err != nil {
+		return out
+	}
+	defer func() { _ = f.Close() }()
+	sc := bufio.NewScanner(f)
+	for i := 0; sc.Scan(); i++ {
+		if i%3 != 2 {
+			out[sc.Text()] = true
+		}
+	}
+	return out
 }
 
 // parseVerify reads dpkg --verify and rpm -V lines: nine flags, an optional

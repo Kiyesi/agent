@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kiyesi/kiyesi/agent/internal/osfile"
 )
@@ -20,15 +21,15 @@ func NewRootFS(dir string) RootFS { return RootFS{Dir: dir} }
 
 func (r RootFS) dirFS() fs.FS { return os.DirFS(r.Dir) }
 
-// Open opens a file; a large one, once closed, is not kept in the system's
-// cache on the agent's account (see dropCache).
+// Open opens a file; once closed, it is not kept in the system's cache on
+// the agent's account (see dropCache), unless it is a shared setting.
 func (r RootFS) Open(name string) (fs.File, error) {
 	f, err := r.dirFS().Open(name)
 	if err != nil {
 		return nil, err
 	}
 	if of, ok := f.(*os.File); ok {
-		return lightFile{of}, nil
+		return lightFile{of, keepCached(name)}, nil
 	}
 	return f, nil
 }
@@ -42,17 +43,37 @@ func (r RootFS) ReadFile(name string) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
-// lightFile drops a large file's cached pages when the agent is done with it.
-type lightFile struct{ *os.File }
+// lightFile drops a file's cached pages when the agent is done with it:
+// logs, lockfiles, package lists, programs compared with their packages,
+// files searched for secrets. Read once a minute or once a scan, they would
+// otherwise sit in the agent's service as cache, up to its memory limit.
+type lightFile struct {
+	*os.File
+	keep bool
+}
 
-// cacheFrom is the size from which a file read once is not kept cached:
-// logs, lockfiles, files searched for secrets. Smaller files, such as the
-// settings other programs read too, are left as they are.
-const cacheFrom = 256 << 10
+// keptCached are the folders whose files stay cached: /etc holds small
+// settings that the server's own programs read all the time, and /proc,
+// /sys, /dev and /run are not on disk, so there is nothing to drop.
+var keptCached = []string{"etc/", "proc/", "sys/", "dev/", "run/"}
+
+func keepCached(name string) bool {
+	for _, p := range keptCached {
+		if strings.HasPrefix(name, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// drop is dropCache; a test watches it.
+var drop = dropCache
 
 func (f lightFile) Close() error {
-	if info, err := f.File.Stat(); err == nil && info.Mode().IsRegular() && info.Size() >= cacheFrom {
-		dropCache(f.File)
+	if !f.keep {
+		if info, err := f.File.Stat(); err == nil && info.Mode().IsRegular() && info.Size() > 0 {
+			drop(f.File)
+		}
 	}
 	return f.File.Close()
 }
@@ -91,5 +112,5 @@ func (r RootFS) OpenNoFollow(name string) (fs.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return lightFile{f}, nil
+	return lightFile{f, keepCached(name)}, nil
 }

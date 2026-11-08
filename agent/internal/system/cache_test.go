@@ -5,8 +5,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// cacheFrom was the size from which 0.48.1 dropped a file's cache; files
+// that large must still read, seek and list as before.
+const cacheFrom = 256 << 10
 
 func TestLargeFilesAreReadNormallyAndLeaveNoCache(t *testing.T) {
 	dir := t.TempDir()
@@ -48,5 +53,53 @@ func TestLargeFilesAreReadNormallyAndLeaveNoCache(t *testing.T) {
 	}
 	if err := g.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestEveryFileReadLeavesNoCacheButSharedSettings(t *testing.T) {
+	dir := t.TempDir()
+	for _, p := range []string{"srv/app/package-lock.json", "var/lib/dpkg/status", "usr/bin/ps", "etc/passwd", "etc/ssh/sshd_config", "empty"} {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(p)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		data := []byte("x\n")
+		if p == "empty" {
+			data = nil
+		}
+		if err := os.WriteFile(filepath.Join(dir, p), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var dropped []string
+	drop = func(f *os.File) {
+		rel, _ := filepath.Rel(dir, f.Name())
+		dropped = append(dropped, filepath.ToSlash(rel))
+	}
+	defer func() { drop = dropCache }()
+	r := NewRootFS(dir)
+	for _, p := range []string{"srv/app/package-lock.json", "var/lib/dpkg/status", "etc/passwd", "empty"} {
+		if _, err := r.ReadFile(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, p := range []string{"usr/bin/ps", "etc/ssh/sshd_config"} {
+		f, err := r.OpenNoFollow(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = f.Close()
+	}
+	// A folder opened to list is not a file to drop.
+	if _, err := fs.ReadDir(r, "srv"); err != nil {
+		t.Fatal(err)
+	}
+	d, err := r.Open("srv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = d.Close()
+	want := "srv/app/package-lock.json var/lib/dpkg/status usr/bin/ps"
+	if got := strings.Join(dropped, " "); got != want {
+		t.Errorf("dropped %q, want %q: small files too, never /etc, never an empty file or a folder", got, want)
 	}
 }

@@ -627,8 +627,8 @@ checks:
     area: security
     name: Signs of a break-in
     reads: >-
-      The checksums dpkg --verify or rpm -V compare for programs in the system folders (once a
-      day in the background); each running process's name, program path and command line, to
+      The programs in the system folders, compared with the checksums their packages installed
+      (dpkg's lists, or rpm -V; once a day in the background); each running process's name, program path and command line, to
       look for a miner's words (only the name and path are kept); /etc/crontab, /etc/cron.d,
       the cron folders and users' cron tables, systemd's units in /etc/systemd/system and
       users' own, and /etc/rc.local; /etc/passwd; the dates of users' authorized_keys files;

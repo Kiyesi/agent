@@ -1,11 +1,17 @@
 package checks
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
+
+	"github.com/kiyesi/kiyesi/agent/internal/system"
 )
 
 // cleanServer is an ordinary Ubuntu server: two people who sign in, the
@@ -45,8 +51,27 @@ func cleanServer() *testEnv {
 	t.fs["proc/990/exe"] = &fstest.MapFile{Data: []byte("/usr/local/bin/kiyesi"), Mode: fs.ModeSymlink}
 	// A program replaced by an update while running reads as deleted: not a sign.
 	t.fs["proc/812/exe"] = &fstest.MapFile{Data: []byte("/usr/sbin/nginx (deleted)"), Mode: fs.ModeSymlink}
-	t.command("dpkg --verify", "??5??????  c /etc/nginx/nginx.conf\n??5??????  c /etc/ssh/sshd_config\n")
+	// Programs as their packages installed them; settings files are not in
+	// dpkg's lists, so nginx.conf and sshd_config may differ freely.
+	t.runner.has["dpkg"] = true
+	t.file("etc/nginx/nginx.conf", "worker_processes 4;\n")
+	t.file("etc/ssh/sshd_config", "PasswordAuthentication no\n")
+	installed(t, "procps", "usr/bin/ps", "ps program")
+	installed(t, "openssh-server", "usr/sbin/sshd", "sshd program")
 	return t
+}
+
+// installed puts a package's file on the server with dpkg's checksum of
+// it, as it was installed.
+func installed(t *testEnv, pkg, name, data string) {
+	sum := md5.Sum([]byte(data))
+	list := "var/lib/dpkg/info/" + pkg + ".md5sums"
+	old := ""
+	if f, ok := t.fs[list]; ok {
+		old = string(f.Data)
+	}
+	t.file(list, old+hex.EncodeToString(sum[:])+"  "+name+"\n")
+	t.file(name, data)
 }
 
 func proc(t *testEnv, pid, comm, cmdline string) {
@@ -69,9 +94,13 @@ func TestBreakInNeedsRoot(t *testing.T) {
 }
 
 func TestBreakInChangedProgram(t *testing.T) {
-	e := cleanServer().command("dpkg --verify", "??5??????  c /etc/nginx/nginx.conf\n"+
-		"??5??????   /usr/sbin/sshd\n??5??????   /usr/bin/ps\n"+
-		"??5??????   /usr/share/doc/x/README\nmissing     /usr/bin/old\n")
+	e := cleanServer()
+	e.file("usr/sbin/sshd", "sshd with a back door")
+	e.file("usr/bin/ps", "ps that hides a process")
+	installed(e, "x", "usr/share/doc/x/README", "read me")
+	e.file("usr/share/doc/x/README", "edited")
+	installed(e, "old", "usr/bin/old", "old program")
+	delete(e.fs, "usr/bin/old")
 	r := run(t, breachCheck{}, e)
 	wantStatus(t, r, StatusFail, "changed-program")
 	if v := r.Findings[0].Vars; v["count"] != "2" || v["path"] != "/usr/bin/ps" {
@@ -92,29 +121,42 @@ func TestBreakInChangedProgramOnRedHat(t *testing.T) {
 }
 
 func TestBreakInVerifyIsReusedForADay(t *testing.T) {
-	e := cleanServer().command("dpkg --verify", "??5??????   /usr/bin/ps\n")
+	e := cleanServer()
+	e.file("usr/bin/ps", "ps that hides a process")
 	env := e.env()
 	env.ReuseSlowFor = 6 * time.Hour
 	if r := (breachCheck{}).Run(t.Context(), env); len(r.Findings) != 1 {
 		t.Fatalf("first run: %+v", r)
 	}
-	e.runner.ran = nil
+	// Put back as installed: within a day the agent reuses the comparison,
+	// so it still reports the change, without reading the programs again.
+	e.file("usr/bin/ps", "ps program")
 	env2 := e.env()
 	env2.ReuseSlowFor = 6 * time.Hour
 	if r := (breachCheck{}).Run(t.Context(), env2); len(r.Findings) != 1 || r.Findings[0].Key != "changed-program" {
-		t.Fatalf("second run: %+v", r)
-	}
-	for _, c := range e.runner.ran {
-		if strings.HasPrefix(c, "dpkg") {
-			t.Fatalf("dpkg ran again within a day: %v", e.runner.ran)
-		}
+		t.Fatalf("second run: %+v, want the day's comparison reused", r)
 	}
 	// A scan by hand always compares afresh.
-	e.runner.ran = nil
+	r := run(t, breachCheck{}, e)
+	wantStatus(t, r, StatusPass)
+}
+
+func TestBreakInNeverRunsDpkgVerify(t *testing.T) {
+	e := cleanServer()
 	run(t, breachCheck{}, e)
-	if len(e.runner.ran) == 0 {
-		t.Fatal("a scan by hand reused the comparison")
+	for _, c := range e.runner.ran {
+		if strings.HasPrefix(c, "dpkg") {
+			t.Fatalf("ran %q: dpkg --verify reads every file of every package; the agent reads only the programs", c)
+		}
 	}
+}
+
+func TestBreakInDivertedProgramIsNotAChange(t *testing.T) {
+	e := cleanServer()
+	// A local diversion: the admin's own ps, the package's moved aside.
+	e.file("var/lib/dpkg/diversions", "/usr/bin/ps\n/usr/bin/ps.distrib\n:\n")
+	e.file("usr/bin/ps", "the admin's own ps")
+	wantStatus(t, run(t, breachCheck{}, e), StatusPass)
 }
 
 func TestBreakInMiner(t *testing.T) {
@@ -238,5 +280,36 @@ func TestBreakInNamesArePrintable(t *testing.T) {
 	}
 	if n := r.Findings[0].Vars["name"]; strings.ContainsAny(n, "\x1b{}") {
 		t.Errorf("name = %q, want control characters and braces removed", n)
+	}
+}
+
+func TestDpkgVerifyOnRealFiles(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, data string) {
+		p := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sum := func(data string) string { s := md5.Sum([]byte(data)); return hex.EncodeToString(s[:]) }
+	write("usr/bin/ps", "ps program")
+	write("usr/bin/ls", "ls program")
+	write("tmp/evil", "ls program")
+	if err := os.Symlink(filepath.Join(dir, "tmp/evil"), filepath.Join(dir, "usr/bin/top")); err != nil {
+		t.Fatal(err)
+	}
+	write("var/lib/dpkg/info/procps:amd64.md5sums",
+		sum("ps program")+"  usr/bin/ps\n"+sum("top program")+"  usr/bin/top\n")
+	write("var/lib/dpkg/info/coreutils.md5sums", sum("ls program")+"  usr/bin/ls\n"+"not a line\n")
+	write("var/lib/dpkg/info/coreutils.list", "/usr/bin/ls\n")
+	v, err := dpkgVerify(t.Context(), system.NewRootFS(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.Count != 1 || v.First != "/usr/bin/top" {
+		t.Errorf("got %+v, want the program swapped for a link, never followed", v)
 	}
 }
