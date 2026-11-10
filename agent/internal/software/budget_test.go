@@ -52,8 +52,10 @@ func TestTheAgentStaysWithinItsBudgetOnABusyServer(t *testing.T) {
 	defer debug.SetMemoryLimit(old)
 
 	stop := make(chan struct{})
+	done := make(chan struct{})
 	peak := uint64(0)
 	go func() {
+		defer close(done)
 		var m runtime.MemStats
 		for {
 			select {
@@ -81,6 +83,7 @@ func TestTheAgentStaysWithinItsBudgetOnABusyServer(t *testing.T) {
 	}
 	took := time.Since(start)
 	close(stop)
+	<-done // the sampler has stopped: peak is read only after its last write
 	used := (peak - min(peak, base.HeapInuse)) >> 20
 	t.Logf("peak %d MB above the made-up server, %s for three reads", used, took.Round(time.Millisecond))
 	if used > 100 {
