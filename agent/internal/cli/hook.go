@@ -62,8 +62,8 @@ const hookLong = "A git pre-push hook that checks what each push adds, on this c
 	"push, with the fix; install scripts and workflow advice are shown and the\n" +
 	"push goes on. git push --no-verify skips the check, as it skips any hook.\n\n" +
 	"The malicious-package list is kept in your cache folder and refreshed when it\n" +
-	"is over 6 hours old, waiting at most 3 seconds. Offline, the copy is used and\n" +
-	"its age is shown. Nothing from your repository is sent anywhere."
+	"is over 6 hours old: a push waits at most 3 seconds for an answer, and 30 for\n" +
+	"a new list to arrive. Offline, the copy is used and its age is shown. Nothing from your repository is sent anywhere."
 
 func newHook(io IO) *cobra.Command {
 	cmd := &cobra.Command{
@@ -111,6 +111,7 @@ func newHookInstall(io IO) *cobra.Command {
 			switch res.Action {
 			case "team":
 				printTeamLine(out, res.Repo, res.LinePresent)
+				installList(hookCtx(cmd), out)
 				return nil
 			case "unchanged":
 				fmt.Fprintf(out, "Kiyesi's pre-push hook is already in %s.\n", res.Repo.Top)
@@ -127,6 +128,7 @@ func newHookInstall(io IO) *cobra.Command {
 				fmt.Fprintln(out, render.Grey("  This folder is core.hooksPath ("+res.Repo.HooksPath+"), so the hook checks pushes from every repository that uses it."))
 			}
 			fmt.Fprintln(out, render.Grey("  To skip the check for one push: git push --no-verify. To remove it: kiyesi hook uninstall"))
+			installList(hookCtx(cmd), out)
 			return nil
 		},
 	}
@@ -261,6 +263,11 @@ func listAge(st githook.ListState) string {
 	return s
 }
 
+// ageOnly is listAge after a sentence that already names the list.
+func ageOnly(st githook.ListState) string {
+	return strings.TrimPrefix(listAge(st), "the malicious-package list is ")
+}
+
 func newHookUpdate(io IO) *cobra.Command {
 	return &cobra.Command{
 		Use:   "update",
@@ -274,6 +281,7 @@ func newHookUpdate(io IO) *cobra.Command {
 			if err != nil {
 				return usageErr("Kiyesi has no cache folder to keep the list in: %v", err)
 			}
+			l.Patient = true
 			st := l.Refresh(hookCtx(cmd), true)
 			if st.Failed != "" {
 				msg := "Kiyesi could not get the malicious-package list: " + st.Failed + "."
@@ -282,7 +290,7 @@ func newHookUpdate(io IO) *cobra.Command {
 				}
 				return &exitError{code: ExitNoAccess, msg: msg}
 			}
-			fmt.Fprintf(io.Out, "The malicious-package list is current: %s.\n", listAge(st))
+			fmt.Fprintf(io.Out, "The malicious-package list is current: %s.\n", ageOnly(st))
 			return nil
 		},
 	}
@@ -345,12 +353,34 @@ func runHook(ctx context.Context, rw IO, remote string) error {
 	return nil
 }
 
+// installList gets the malicious-package list as the hook is installed, so
+// the first push does not wait for it. Its trouble never fails the install:
+// each push tries again.
+func installList(ctx context.Context, out io.Writer) {
+	l, err := hookList()
+	if err != nil {
+		return
+	}
+	l.Patient = true
+	st := l.Refresh(ctx, !l.State().Present)
+	switch {
+	case st.Present && st.Failed == "":
+		fmt.Fprintln(out, render.Grey("  The malicious-package list is ready: "+ageOnly(st)+"."))
+	case st.Present:
+		fmt.Fprintln(out, render.Grey("  The malicious-package list is "+githook.Ago(hookNow().Sub(st.FetchedAt))+" old: "+whyNoList(st.Failed)+". Each push tries again."))
+	default:
+		fmt.Fprintln(out, "Kiyesi could not get the malicious-package list yet ("+whyNoList(st.Failed)+"). Until it has it, packages are not checked against it. Each push tries again, or run: kiyesi hook update")
+	}
+}
+
 func whyNoList(failed string) string {
 	switch {
 	case failed == "":
 		return "Kiyesi could not get it"
-	case strings.HasPrefix(failed, "could not reach") || strings.HasPrefix(failed, "no answer"):
+	case strings.HasPrefix(failed, "could not reach"):
 		return "Kiyesi could not reach the internet"
+	case strings.HasPrefix(failed, "no answer"), strings.HasPrefix(failed, "the list did not arrive"):
+		return failed + "; kiyesi hook update waits longer"
 	default:
 		return "Kiyesi could not get a newer one: " + failed
 	}

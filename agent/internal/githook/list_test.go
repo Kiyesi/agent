@@ -195,3 +195,65 @@ func TestAgo(t *testing.T) {
 		}
 	}
 }
+
+// A slow connection: the service answers at once and the list trickles in
+// for longer than the answer wait. The list is kept. A list that stops
+// arriving is given up after arriveTimeout, and the copy stays.
+func TestListSlowToArriveIsStillKept(t *testing.T) {
+	oldAnswer, oldArrive := fetchTimeout, arriveTimeout
+	fetchTimeout, arriveTimeout = 200*time.Millisecond, 3*time.Second
+	t.Cleanup(func() { fetchTimeout, arriveTimeout = oldAnswer, oldArrive })
+	stall := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("ETag", `"slow"`)
+		w.WriteHeader(http.StatusOK)
+		fl := w.(http.Flusher)
+		fl.Flush()
+		for i := 0; i < len(listBody); i += 10 {
+			if stall && i > 0 {
+				<-r.Context().Done()
+				return
+			}
+			time.Sleep(40 * time.Millisecond)
+			_, _ = w.Write([]byte(listBody[i:min(i+10, len(listBody))]))
+			fl.Flush()
+		}
+	}))
+	defer srv.Close()
+	l := &List{Dir: t.TempDir(), API: srv.URL}
+	start := time.Now()
+	st := l.Refresh(ctx, false)
+	if st.Failed != "" || !st.Present || !st.Refreshed {
+		t.Fatalf("a slow list was not kept: %+v", st)
+	}
+	if time.Since(start) < fetchTimeout {
+		t.Errorf("the list arrived in %v: the test did not make it slow", time.Since(start))
+	}
+
+	stall = true
+	st = l.Refresh(ctx, true)
+	if !strings.HasPrefix(st.Failed, "the list did not arrive within 3 seconds") || !st.Present {
+		t.Errorf("a stalled list: %+v", st)
+	}
+	if b, _ := os.ReadFile(l.Path()); string(b) != listBody {
+		t.Errorf("the copy changed: %q", b)
+	}
+}
+
+// install and update wait longer than a push.
+func TestListPatientWaitsLongerForAnAnswer(t *testing.T) {
+	old := fetchTimeout
+	fetchTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { fetchTimeout = old })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(400 * time.Millisecond)
+		_, _ = w.Write([]byte(listBody))
+	}))
+	defer srv.Close()
+	if st := (&List{Dir: t.TempDir(), API: srv.URL}).Refresh(ctx, true); !strings.HasPrefix(st.Failed, "no answer within 1 second") {
+		t.Errorf("a push: %+v", st)
+	}
+	if st := (&List{Dir: t.TempDir(), API: srv.URL, Patient: true}).Refresh(ctx, true); st.Failed != "" || !st.Present {
+		t.Errorf("a person waiting: %+v", st)
+	}
+}

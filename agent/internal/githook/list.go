@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/kiyesi/kiyesi/agent/internal/version"
@@ -26,8 +27,13 @@ const (
 	listMeta     = "malicious-packages.json"
 	ListPath     = "/v1/public/malicious-packages"
 	RefreshAfter = 6 * time.Hour
-	// FetchTimeout is the longest a push waits for the list.
+	// FetchTimeout is the longest a push waits for the service to answer.
 	FetchTimeout = 3 * time.Second
+	// ArriveTimeout is the longest a push waits, once the service has
+	// answered, for a new list to finish arriving: about 2.5 MB compressed.
+	ArriveTimeout = 30 * time.Second
+	// CommandTimeout is the longest kiyesi hook install and update wait.
+	CommandTimeout = 60 * time.Second
 	// RetryAfter is how long a failed refresh waits before the next try,
 	// so a push without the internet does not wait 3 seconds every time.
 	RetryAfter = 30 * time.Minute
@@ -35,8 +41,12 @@ const (
 	maxList = 64 << 20
 )
 
-// fetchTimeout is FetchTimeout; tests shorten it.
-var fetchTimeout = FetchTimeout
+// fetchTimeout and arriveTimeout are FetchTimeout and ArriveTimeout; tests
+// shorten them.
+var (
+	fetchTimeout  = FetchTimeout
+	arriveTimeout = ArriveTimeout
+)
 
 // List is the cached copy of the malicious-package list.
 type List struct {
@@ -46,6 +56,10 @@ type List struct {
 	API    string
 	Client *http.Client
 	Now    func() time.Time
+	// Patient is set by kiyesi hook install and update, which a person runs
+	// and watches: they wait up to CommandTimeout, where a push waits
+	// FetchTimeout for an answer and ArriveTimeout for the list.
+	Patient bool
 }
 
 // listMetaData is what is kept beside the list.
@@ -114,7 +128,7 @@ func (l *List) saveMeta(m listMetaData) {
 }
 
 // Refresh asks the service for the list when the copy is over RefreshAfter
-// old, or always when force is set, waiting at most FetchTimeout. A failure
+// old, or always when force is set, waiting as fetch says. A failure
 // leaves the copy as it was and is said in Failed.
 func (l *List) Refresh(ctx context.Context, force bool) ListState {
 	st := l.State()
@@ -149,13 +163,23 @@ func (l *List) Refresh(ctx context.Context, force bool) ListState {
 }
 
 // fetch gets the list, or hears it has not changed (304). It returns the
-// new version tag.
+// new version tag. The service must answer within fetchTimeout, and the list
+// then arrive within arriveTimeout of the start (both CommandTimeout when
+// Patient), so a push without the internet does not wait long while a slow
+// connection still gets the list.
 func (l *List) fetch(ctx context.Context, have bool, etag string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	answer, arrive := fetchTimeout, arriveTimeout
+	if l.Patient {
+		answer, arrive = CommandTimeout, CommandTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, arrive)
 	defer cancel()
+	var late atomic.Bool
+	timer := time.AfterFunc(answer, func() { late.Store(true); cancel() })
 	url := strings.TrimRight(l.API, "/") + ListPath
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
+		timer.Stop()
 		return "", err
 	}
 	req.Header.Set("User-Agent", "kiyesi-cli/"+version.Version)
@@ -171,9 +195,10 @@ func (l *List) fetch(ctx context.Context, have bool, etag string) (string, error
 		c = &http.Client{}
 	}
 	resp, err := c.Do(req)
+	timer.Stop()
 	if err != nil {
-		if ctx.Err() != nil {
-			return "", fmt.Errorf("no answer within %d seconds", int(fetchTimeout/time.Second))
+		if late.Load() || ctx.Err() != nil {
+			return "", fmt.Errorf("no answer within %s", seconds(answer))
 		}
 		return "", errors.New("could not reach " + req.URL.Host)
 	}
@@ -190,6 +215,9 @@ func (l *List) fetch(ctx context.Context, have bool, etag string) (string, error
 	if strings.EqualFold(resp.Header.Get("Content-Encoding"), "gzip") || bytes.Equal(magic, []byte{0x1f, 0x8b}) {
 		zr, err := gzip.NewReader(body)
 		if err != nil {
+			if ctx.Err() != nil {
+				return "", fmt.Errorf("the list did not arrive within %s", seconds(arrive))
+			}
 			return "", errors.New("the list was not sent whole")
 		}
 		defer zr.Close()
@@ -198,7 +226,7 @@ func (l *List) fetch(ctx context.Context, have bool, etag string) (string, error
 	data, err := io.ReadAll(io.LimitReader(r, maxList+1))
 	if err != nil {
 		if ctx.Err() != nil {
-			return "", fmt.Errorf("no answer within %d seconds", int(fetchTimeout/time.Second))
+			return "", fmt.Errorf("the list did not arrive within %s", seconds(arrive))
 		}
 		return "", errors.New("the list was not sent whole")
 	}
@@ -215,6 +243,15 @@ func (l *List) fetch(ctx context.Context, have bool, etag string) (string, error
 		return "", fmt.Errorf("could not keep the list: %w", err)
 	}
 	return resp.Header.Get("ETag"), nil
+}
+
+// seconds says a wait in whole seconds, at least one.
+func seconds(d time.Duration) string {
+	n := int(d / time.Second)
+	if n <= 1 {
+		return "1 second"
+	}
+	return fmt.Sprintf("%d seconds", n)
 }
 
 // headOf reads the list's first line: {"sha","fetchedAt"}.

@@ -130,6 +130,10 @@ func TestGitHookStopsAMaliciousPackageEndToEnd(t *testing.T) {
 	if !strings.Contains(out.String(), "Kiyesi's pre-push hook is installed.") {
 		t.Errorf("install said %q", out.String())
 	}
+	// Install gets the list, so the first push does not wait for it.
+	if !strings.Contains(out.String(), "The malicious-package list is ready:") {
+		t.Errorf("install did not get the list: %q", out.String())
+	}
 
 	writeRepoFile(t, dir, "package.json", evilPackage)
 	gitIn(t, dir, "commit", "-q", "-am", "add a package")
@@ -294,6 +298,36 @@ func TestHookStatusAndUninstallFromTheCommandLine(t *testing.T) {
 	}
 	if code, out := run("hook", "install", "--path", t.TempDir()); code != ExitUsage || !strings.Contains(out, "not in a git repository") {
 		t.Errorf("outside a repository: %d %s", code, out)
+	}
+}
+
+// Install without the internet: the hook is installed, the person is told
+// the list is missing and how to get it, and nothing fails.
+func TestHookInstallOfflineSaysTheListIsMissing(t *testing.T) {
+	hookEnv(t, "http://127.0.0.1:1")
+	dir := remoteAndClone(t)
+	var out, errOut bytes.Buffer
+	if code := Execute([]string{"hook", "install", "--path", dir}, IO{Out: &out, Err: &errOut, Environ: []string{"NO_COLOR=1"}}); code != ExitOK {
+		t.Fatalf("exit %d: %s %s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "Kiyesi's pre-push hook is installed.") ||
+		!strings.Contains(out.String(), "Kiyesi could not get the malicious-package list yet (Kiyesi could not reach the internet)") ||
+		!strings.Contains(out.String(), "kiyesi hook update") {
+		t.Errorf("said:\n%s", out.String())
+	}
+}
+
+// A timeout is not "no internet": it says how long Kiyesi waited.
+func TestWhyNoListSaysATimeoutAsOne(t *testing.T) {
+	for failed, want := range map[string]string{
+		"could not reach api.kiyesi.dev":            "Kiyesi could not reach the internet",
+		"no answer within 3 seconds":                "no answer within 3 seconds; kiyesi hook update waits longer",
+		"the list did not arrive within 30 seconds": "the list did not arrive within 30 seconds; kiyesi hook update waits longer",
+		"the service answered 503":                  "Kiyesi could not get a newer one: the service answered 503",
+	} {
+		if got := whyNoList(failed); got != want {
+			t.Errorf("%q: %q, want %q", failed, got, want)
+		}
 	}
 }
 
