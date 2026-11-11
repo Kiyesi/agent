@@ -549,8 +549,8 @@
     "path": "kiyesi hook",
     "use": "kiyesi hook",
     "short": "Check each push for malicious packages and hidden code before it leaves this computer",
-    "long": "A git pre-push hook that checks what each push adds, on this computer, with the\nrules of Kiyesi's pull-request check: malicious packages, lockfile tampering,\nhidden code, install scripts and risky workflows. It is free and needs no\naccount. A malicious package, hidden code or a tampered lockfile stops the\npush, with the fix; install scripts and workflow advice are shown and the\npush goes on. git push --no-verify skips the check, as it skips any hook.\n\nThe malicious-package list is kept in your cache folder and refreshed when it\nis over 6 hours old: a push waits at most 3 seconds for an answer, and 30 for\na new list to arrive. Offline, the copy is used and its age is shown. Nothing from your repository is sent anywhere.",
-    "example": "  kiyesi hook install\n  kiyesi hook status\n  git push --no-verify     skip the check for one push"
+    "long": "A git pre-push hook that checks what each push adds, on this computer, with the\nrules of Kiyesi's pull-request check: malicious packages, lockfile tampering,\nhidden code, install scripts and risky workflows. It is free and needs no\naccount. A malicious package, hidden code or a tampered lockfile stops the\npush, with the fix; install scripts and workflow advice are shown and the\npush goes on. git push --no-verify skips the check, as it skips any hook.\n\nThe malicious-package list is kept in your cache folder and refreshed when it\nis over 6 hours old: a push waits at most 3 seconds for an answer, and 30 for\na new list to arrive. Offline, the copy is used and its age is shown. Nothing from your repository is sent anywhere.\n\nOnce a day, Kiyesi sends anonymous counts: how many pushes were checked and\nstopped, findings by rule, and the name and version of each malicious package\nstopped, with a random number for this computer. Never a repository, file,\nbranch or person. kiyesi hook usage off, KIYESI_NO_USAGE=1 or DO_NOT_TRACK=1\nturns it off.",
+    "example": "  kiyesi hook install\n  kiyesi hook status\n  kiyesi hook usage off    stop the anonymous counts\n  git push --no-verify     skip the check for one push"
   },
   {
     "path": "kiyesi hook install",
@@ -602,6 +602,19 @@
     "short": "Get the newest malicious-package list now",
     "long": "Gets the newest malicious-package list from Kiyesi, as each push does when\nits copy is over 6 hours old. No account is needed.",
     "example": "  kiyesi hook update"
+  },
+  {
+    "path": "kiyesi hook usage",
+    "use": "kiyesi hook usage [on|off] [flags]",
+    "short": "Turn the anonymous counts on or off, or say whether they are on",
+    "long": "Once a day Kiyesi sends anonymous counts of what the hook did: pushes checked\nand stopped, findings by rule, and the name and version of each malicious\npackage stopped, with a random number for this computer. Never a repository,\nfile, branch, line or person. Off forgets the number and the counts; on again\nstarts with a new number. KIYESI_NO_USAGE=1 or DO_NOT_TRACK=1 also turn it off.",
+    "example": "  kiyesi hook usage\n  kiyesi hook usage off\n  kiyesi hook usage --json",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print whether the counts are on as JSON, for scripts"
+      }
+    ]
   },
   {
     "path": "kiyesi incident",

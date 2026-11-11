@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -368,5 +370,87 @@ func TestHookUpdate(t *testing.T) {
 	errOut.Reset()
 	if code := Execute([]string{"hook", "update"}, IO{Out: &out, Err: &errOut}); code != ExitNoAccess || !strings.Contains(errOut.String(), "The copy it has is used") {
 		t.Errorf("offline update: exit %d: %s", code, errOut.String())
+	}
+}
+
+// The anonymous counts: install says so and sends the first report; a
+// stopped push is counted (sent the next day, not now); off forgets the
+// install, and nothing more is sent.
+func TestHookCountsAnonymouslyAndTurnsOff(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the hook runs under sh; Git for Windows' sh is not on the test machines")
+	}
+	list := listSrv(t)
+	var mu sync.Mutex
+	var reports []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == githook.UsagePath {
+			b, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			reports = append(reports, string(b))
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		list.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	cache := hookEnv(t, srv.URL)
+	t.Setenv("KIYESI_TEST_AS_KIYESI", "1")
+	t.Setenv("DO_NOT_TRACK", "")
+	t.Setenv("KIYESI_NO_USAGE", "")
+	dir := remoteAndClone(t)
+
+	var out, errOut bytes.Buffer
+	if code := Execute([]string{"hook", "install", "--path", dir}, IO{Out: &out, Err: &errOut, Environ: os.Environ()}); code != ExitOK {
+		t.Fatalf("install: exit %d: %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "Kiyesi counts anonymously") || !strings.Contains(out.String(), "kiyesi hook usage off") {
+		t.Errorf("install did not say it counts: %q", out.String())
+	}
+	mu.Lock()
+	if len(reports) != 1 || !strings.Contains(reports[0], `"checked":0`) {
+		t.Fatalf("install's report: %v", reports)
+	}
+	mu.Unlock()
+
+	writeRepoFile(t, dir, "package.json", evilPackage)
+	gitIn(t, dir, "commit", "-q", "-am", "add a package")
+	if pushed, err := gitTry(dir, nil, "push", "origin", "main"); err == nil {
+		t.Fatalf("the push went through:\n%s", pushed)
+	}
+	b, err := os.ReadFile(filepath.Join(cache, githook.UsageFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"checked":1`, `"stopped":1`, `"name":"left-pad-x"`} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("the count does not hold %s: %s", want, b)
+		}
+	}
+	if strings.Contains(string(b), "package.json") || strings.Contains(string(b), dir) {
+		t.Errorf("the count names the repository: %s", b)
+	}
+	mu.Lock()
+	if len(reports) != 1 {
+		t.Errorf("a second report on the same day: %v", reports)
+	}
+	mu.Unlock()
+
+	out.Reset()
+	if code := Execute([]string{"hook", "usage", "off"}, IO{Out: &out, Err: &errOut, Environ: os.Environ()}); code != ExitOK {
+		t.Fatalf("usage off: exit %d", code)
+	}
+	if !strings.Contains(out.String(), "Anonymous counts: off") {
+		t.Errorf("usage off said %q", out.String())
+	}
+	b, _ = os.ReadFile(filepath.Join(cache, githook.UsageFile))
+	if strings.Contains(string(b), "install") || strings.Contains(string(b), "left-pad-x") {
+		t.Errorf("off kept the install or counts: %s", b)
+	}
+	out.Reset()
+	_ = Execute([]string{"hook", "status", "--path", dir}, IO{Out: &out, Err: &errOut, Environ: os.Environ()})
+	if !strings.Contains(out.String(), "Counts: off (kiyesi hook usage on to turn on)") {
+		t.Errorf("status said %q", out.String())
 	}
 }

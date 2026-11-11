@@ -55,6 +55,18 @@ func hookList() (*githook.List, error) {
 	return &githook.List{Dir: dir, API: hookAPI(), Now: hookNow}, nil
 }
 
+// hookUsage is the anonymous count, kept beside the list.
+func hookUsage() (*githook.Usage, error) {
+	dir, err := hookCacheDir()
+	if err != nil {
+		return nil, err
+	}
+	return &githook.Usage{Dir: dir, API: hookAPI(), Now: hookNow}, nil
+}
+
+// usageLine says, once at install, what is counted and how to stop it.
+const usageLine = "  Kiyesi counts anonymously how many pushes it checks and stops, with a random number for this computer, never your code. To turn it off: kiyesi hook usage off"
+
 const hookLong = "A git pre-push hook that checks what each push adds, on this computer, with the\n" +
 	"rules of Kiyesi's pull-request check: malicious packages, lockfile tampering,\n" +
 	"hidden code, install scripts and risky workflows. It is free and needs no\n" +
@@ -63,7 +75,12 @@ const hookLong = "A git pre-push hook that checks what each push adds, on this c
 	"push goes on. git push --no-verify skips the check, as it skips any hook.\n\n" +
 	"The malicious-package list is kept in your cache folder and refreshed when it\n" +
 	"is over 6 hours old: a push waits at most 3 seconds for an answer, and 30 for\n" +
-	"a new list to arrive. Offline, the copy is used and its age is shown. Nothing from your repository is sent anywhere."
+	"a new list to arrive. Offline, the copy is used and its age is shown. Nothing from your repository is sent anywhere.\n\n" +
+	"Once a day, Kiyesi sends anonymous counts: how many pushes were checked and\n" +
+	"stopped, findings by rule, and the name and version of each malicious package\n" +
+	"stopped, with a random number for this computer. Never a repository, file,\n" +
+	"branch or person. kiyesi hook usage off, KIYESI_NO_USAGE=1 or DO_NOT_TRACK=1\n" +
+	"turns it off."
 
 func newHook(io IO) *cobra.Command {
 	cmd := &cobra.Command{
@@ -72,10 +89,11 @@ func newHook(io IO) *cobra.Command {
 		Long:  hookLong,
 		Example: "  kiyesi hook install\n" +
 			"  kiyesi hook status\n" +
+			"  kiyesi hook usage off    stop the anonymous counts\n" +
 			"  git push --no-verify     skip the check for one push",
 		Args: cobra.NoArgs,
 	}
-	cmd.AddCommand(newHookInstall(io), newHookUninstall(io), newHookStatus(io), newHookUpdate(io), newHookRun(io))
+	cmd.AddCommand(newHookInstall(io), newHookUninstall(io), newHookStatus(io), newHookUpdate(io), newHookUsage(io), newHookRun(io))
 	return cmd
 }
 
@@ -112,6 +130,7 @@ func newHookInstall(io IO) *cobra.Command {
 			case "team":
 				printTeamLine(out, res.Repo, res.LinePresent)
 				installList(hookCtx(cmd), out)
+				installUsage(hookCtx(cmd), out)
 				return nil
 			case "unchanged":
 				fmt.Fprintf(out, "Kiyesi's pre-push hook is already in %s.\n", res.Repo.Top)
@@ -129,6 +148,7 @@ func newHookInstall(io IO) *cobra.Command {
 			}
 			fmt.Fprintln(out, render.Grey("  To skip the check for one push: git push --no-verify. To remove it: kiyesi hook uninstall"))
 			installList(hookCtx(cmd), out)
+			installUsage(hookCtx(cmd), out)
 			return nil
 		},
 	}
@@ -197,7 +217,8 @@ func newHookUninstall(io IO) *cobra.Command {
 // hookStatusData is kiyesi hook status --json.
 type hookStatusData struct {
 	githook.HookStatus
-	List githook.ListState `json:"list"`
+	List  githook.ListState  `json:"list"`
+	Usage githook.UsageState `json:"usage"`
 }
 
 func newHookStatus(io IO) *cobra.Command {
@@ -216,6 +237,9 @@ func newHookStatus(io IO) *cobra.Command {
 			d := hookStatusData{HookStatus: s}
 			if l, err := hookList(); err == nil {
 				d.List = l.State()
+			}
+			if u, err := hookUsage(); err == nil {
+				d.Usage = u.State()
 			}
 			if asJSON {
 				return render.JSON(io.Out, d)
@@ -240,8 +264,10 @@ func newHookStatus(io IO) *cobra.Command {
 			}
 			if !s.Repo.Team {
 				fmt.Fprintln(out, "  List:   "+listAge(d.List))
+				fmt.Fprintln(out, "  Counts: "+usageWords(d.Usage))
 			} else {
 				fmt.Fprintln(out, render.Grey("List: "+listAge(d.List)))
+				fmt.Fprintln(out, render.Grey("Counts: "+usageWords(d.Usage)))
 			}
 			return nil
 		},
@@ -347,6 +373,12 @@ func runHook(ctx context.Context, rw IO, remote string) error {
 	}
 	rep := githook.CheckPush(ctx, ".", remote, updates, listPath)
 	printPush(out, rep, listNote)
+	// The anonymous count, after the person has their answer: at most once a
+	// day it is sent, waiting at most 2 seconds, and its trouble is never said.
+	if u, err := hookUsage(); err == nil {
+		u.Count(rep)
+		_ = u.Send(ctx, false)
+	}
 	if rep.Stop {
 		return &exitError{code: ExitFindings}
 	}
@@ -371,6 +403,72 @@ func installList(ctx context.Context, out io.Writer) {
 	default:
 		fmt.Fprintln(out, "Kiyesi could not get the malicious-package list yet ("+whyNoList(st.Failed)+"). Until it has it, packages are not checked against it. Each push tries again, or run: kiyesi hook update")
 	}
+}
+
+// installUsage says what is counted, and sends the first report, so an
+// install is counted even before its first push.
+func installUsage(ctx context.Context, out io.Writer) {
+	u, err := hookUsage()
+	if err != nil || !u.State().On {
+		return
+	}
+	fmt.Fprintln(out, render.Grey(usageLine))
+	_ = u.Send(ctx, false)
+}
+
+// usageWords says whether the anonymous counts are on.
+func usageWords(st githook.UsageState) string {
+	switch st.OffBy {
+	case "":
+		s := "on, anonymous (kiyesi hook usage off to stop)"
+		if !st.SentAt.IsZero() {
+			s += ", last sent " + githook.Ago(hookNow().Sub(st.SentAt)) + " ago"
+		}
+		return s
+	case "turned off":
+		return "off (kiyesi hook usage on to turn on)"
+	default:
+		return "off, by " + st.OffBy
+	}
+}
+
+func newHookUsage(io IO) *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "usage [on|off]",
+		Short: "Turn the anonymous counts on or off, or say whether they are on",
+		Long: "Once a day Kiyesi sends anonymous counts of what the hook did: pushes checked\n" +
+			"and stopped, findings by rule, and the name and version of each malicious\n" +
+			"package stopped, with a random number for this computer. Never a repository,\n" +
+			"file, branch, line or person. Off forgets the number and the counts; on again\n" +
+			"starts with a new number. KIYESI_NO_USAGE=1 or DO_NOT_TRACK=1 also turn it off.",
+		Example:   "  kiyesi hook usage\n  kiyesi hook usage off\n  kiyesi hook usage --json",
+		Args:      cobra.MaximumNArgs(1),
+		ValidArgs: []string{"on", "off"},
+		RunE: func(_ *cobra.Command, args []string) error {
+			u, err := hookUsage()
+			if err != nil {
+				return usageErr("Kiyesi has no cache folder: %v", err)
+			}
+			if len(args) == 1 {
+				switch args[0] {
+				case "on", "off":
+					if err := u.SetOff(args[0] == "off"); err != nil {
+						return usageErr("Kiyesi could not change it: %v", err)
+					}
+				default:
+					return usageErr("Say on or off, such as: kiyesi hook usage off")
+				}
+			}
+			if asJSON {
+				return render.JSON(io.Out, u.State())
+			}
+			fmt.Fprintln(io.Out, "Anonymous counts: "+usageWords(u.State())+".")
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print whether the counts are on as JSON, for scripts")
+	return cmd
 }
 
 func whyNoList(failed string) string {
