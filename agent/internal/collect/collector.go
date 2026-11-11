@@ -329,7 +329,10 @@ func (c *Collector) Collect(ctx context.Context) (Metrics, []Event) {
 		}
 	}
 	c.at, c.cpu, c.net = now, cpu, net
-	m.Agent = budget.Measure(now)
+	// The agent's CPU is read now, at the round's end: its time is this
+	// moment's, not the round's start, or a slower round than the last
+	// would show more CPU than was used.
+	m.Agent = budget.Measure(c.Sys.Now())
 	return m, events
 }
 
