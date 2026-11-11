@@ -252,3 +252,16 @@ func dedupe(pkgs [][2]string) [][2]string {
 	})
 	return out
 }
+
+// ParseLockfile reads one lockfile's packages by its file name, for the
+// pull-request checks: the same readers a scan uses. ok is false for a
+// name that is not a lockfile.
+func ParseLockfile(name string, b []byte) (ecosystem string, pkgs [][2]string, ok bool) {
+	base := path.Base(name)
+	for _, f := range lockfiles {
+		if f.name == base && base != "installed.json" {
+			return f.ecosystem, dedupe(f.parse(b)), true
+		}
+	}
+	return "", nil, false
+}

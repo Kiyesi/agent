@@ -60,6 +60,11 @@ var actionOnly = map[string]string{
 	"kiyesi guard undo":            "puts settings files back",
 	"kiyesi databases setup":       "prints numbered steps for a person to review and run",
 	"kiyesi databases encrypt":     "prints one sealed password, for a pipe",
+	"kiyesi pullcheck":             "a hidden helper for the service's worker: it only ever prints JSON",
+	"kiyesi hook install":          "adds the hook, or prints the line to add",
+	"kiyesi hook uninstall":        "removes the hook",
+	"kiyesi hook update":           "gets the list; hook status --json is its data",
+	"kiyesi hook run":              "a hidden helper git runs: it prints a push's findings on git's screen",
 }
 
 func TestEveryCommandThatPrintsDataHasJSON(t *testing.T) {

@@ -9,6 +9,10 @@ import (
 // No test asks get.kiyesi.dev: the daily update line is replaced for all of them.
 func TestMain(m *testing.M) {
 	updateNotice = func() string { return "" }
+	// The git hook's end-to-end test runs this test program as kiyesi.
+	if os.Getenv("KIYESI_TEST_AS_KIYESI") == "1" {
+		os.Exit(Execute(os.Args[1:], IO{Out: os.Stdout, Err: os.Stderr, Environ: os.Environ(), In: os.Stdin}))
+	}
 	os.Exit(m.Run())
 }
 

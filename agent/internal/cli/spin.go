@@ -197,12 +197,14 @@ var noSpinner = map[string]bool{
 	"kiyesi connect": true, "kiyesi job done": true, "kiyesi job start": true, "kiyesi uninstall": true, "kiyesi version": true,
 	"kiyesi help": true, "kiyesi completion": true, "kiyesi __complete": true, "kiyesi __completeNoDesc": true,
 	"kiyesi open": true, "kiyesi fix undo": true, "kiyesi mcp": true, "kiyesi credit topup": true, "kiyesi team use": true,
+	"kiyesi pullcheck": true, "kiyesi hook run": true, "kiyesi hook install": true, "kiyesi hook uninstall": true, "kiyesi hook status": true,
 }
 
 // spinWords is what each command is doing, in a few plain words.
 var spinWords = map[string]string{
 	"kiyesi":             "Looking at what needs you",
 	"kiyesi scan":        "Checking this server",
+	"kiyesi hook update": "Getting the malicious-package list",
 	"kiyesi fix":         "Checking what needs fixing",
 	"kiyesi servers":     "Reading your servers",
 	"kiyesi server":      "Reading %s",

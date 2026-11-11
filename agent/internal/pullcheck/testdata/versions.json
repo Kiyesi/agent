@@ -1,0 +1,448 @@
+{
+  "about": "Version and name cases shared by agent/internal/pullcheck (Go) and api/src/features/malware/list.ts (TypeScript). compare is the sign of compareVersions(a, b).",
+  "compare": [
+    {
+      "a": "1.0.0",
+      "b": "1.0.0",
+      "want": 0
+    },
+    {
+      "a": "1.0.0",
+      "b": "1.0.1",
+      "want": -1
+    },
+    {
+      "a": "1.0.10",
+      "b": "1.0.9",
+      "want": 1
+    },
+    {
+      "a": "v1.2.3",
+      "b": "1.2.3",
+      "want": 0
+    },
+    {
+      "a": "V1.2.3",
+      "b": "1.2.4",
+      "want": -1
+    },
+    {
+      "a": "1.0",
+      "b": "1.0.0",
+      "want": 0
+    },
+    {
+      "a": "1",
+      "b": "1.0.1",
+      "want": -1
+    },
+    {
+      "a": "1.0.0-alpha",
+      "b": "1.0.0",
+      "want": -1
+    },
+    {
+      "a": "1.0.0",
+      "b": "1.0.0-rc.1",
+      "want": 1
+    },
+    {
+      "a": "1.0.0-alpha",
+      "b": "1.0.0-beta",
+      "want": -1
+    },
+    {
+      "a": "1.0.0-beta",
+      "b": "1.0.0-alpha",
+      "want": 1
+    },
+    {
+      "a": "1.0.0-rc.1",
+      "b": "1.0.0-rc.1",
+      "want": 0
+    },
+    {
+      "a": "1.0.0+build",
+      "b": "1.0.0",
+      "want": -1
+    },
+    {
+      "a": "1.0.0-alpha-two",
+      "b": "1.0.0-alpha",
+      "want": 0
+    },
+    {
+      "a": "1.0.0-alpha+x",
+      "b": "1.0.0-alpha",
+      "want": 0
+    },
+    {
+      "a": "1.a.0",
+      "b": "1.0.0",
+      "want": 0
+    },
+    {
+      "a": "1.2a.0",
+      "b": "1.2.0",
+      "want": 0
+    },
+    {
+      "a": "",
+      "b": "0",
+      "want": 0
+    },
+    {
+      "a": "",
+      "b": "",
+      "want": 0
+    },
+    {
+      "a": "abc",
+      "b": "0.0.1",
+      "want": -1
+    },
+    {
+      "a": "2.0.0",
+      "b": "10.0.0",
+      "want": -1
+    },
+    {
+      "a": "0.0.0",
+      "b": "0",
+      "want": 0
+    },
+    {
+      "a": "1..2",
+      "b": "1.0.2",
+      "want": 0
+    },
+    {
+      "a": "99999999999999999999",
+      "b": "99999999999999999998",
+      "want": 0
+    },
+    {
+      "a": "9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+      "b": "9999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999.1",
+      "want": -1
+    },
+    {
+      "a": "1.0.0-RC1",
+      "b": "1.0.0-rc1",
+      "want": -1
+    },
+    {
+      "a": "1.0.0-é",
+      "b": "1.0.0-z",
+      "want": 1
+    },
+    {
+      "a": "1.0.0-😀",
+      "b": "1.0.0-�",
+      "want": -1
+    },
+    {
+      "a": "2.4.1.post1",
+      "b": "2.4.1",
+      "want": 0
+    },
+    {
+      "a": "1.0.0.Final",
+      "b": "1.0.0",
+      "want": 0
+    },
+    {
+      "a": "3.1.0-SNAPSHOT",
+      "b": "3.1.0",
+      "want": -1
+    },
+    {
+      "a": "0.1.0-0",
+      "b": "0.1.0-a",
+      "want": -1
+    },
+    {
+      "a": " 1.0",
+      "b": " 2.0",
+      "want": -1
+    },
+    {
+      "a": "1.0.0--x",
+      "b": "1.0.0",
+      "want": 0
+    },
+    {
+      "a": "1.0.0+",
+      "b": "1.0.0-",
+      "want": 0
+    },
+    {
+      "a": "vv1",
+      "b": "1",
+      "want": -1
+    },
+    {
+      "a": "1.-1",
+      "b": "1.0",
+      "want": -1
+    },
+    {
+      "a": "20241101",
+      "b": "20241031",
+      "want": 1
+    }
+  ],
+  "covers": [
+    {
+      "all": true,
+      "versions": [],
+      "ranges": [],
+      "version": "1.0.0",
+      "want": true
+    },
+    {
+      "all": false,
+      "versions": [
+        "1.0.1"
+      ],
+      "ranges": [],
+      "version": "1.0.1",
+      "want": true
+    },
+    {
+      "all": false,
+      "versions": [
+        "1.0.1"
+      ],
+      "ranges": [],
+      "version": "v1.0.1",
+      "want": false
+    },
+    {
+      "all": false,
+      "versions": [
+        "1.0.1"
+      ],
+      "ranges": [],
+      "version": "1.0.2",
+      "want": false
+    },
+    {
+      "all": false,
+      "versions": [],
+      "ranges": [
+        {
+          "introduced": "0",
+          "fixed": "1.2.0"
+        }
+      ],
+      "version": "1.1.9",
+      "want": true
+    },
+    {
+      "all": false,
+      "versions": [],
+      "ranges": [
+        {
+          "introduced": "0",
+          "fixed": "1.2.0"
+        }
+      ],
+      "version": "1.2.0",
+      "want": false
+    },
+    {
+      "all": false,
+      "versions": [],
+      "ranges": [
+        {
+          "introduced": "1.0.0",
+          "fixed": "1.2.0"
+        }
+      ],
+      "version": "0.9.0",
+      "want": false
+    },
+    {
+      "all": false,
+      "versions": [],
+      "ranges": [
+        {
+          "introduced": "1.0.0",
+          "fixed": "1.2.0"
+        }
+      ],
+      "version": "1.0.0",
+      "want": true
+    },
+    {
+      "all": false,
+      "versions": [],
+      "ranges": [
+        {
+          "introduced": "1.0.0",
+          "lastAffected": "1.1.9"
+        }
+      ],
+      "version": "1.1.9",
+      "want": true
+    },
+    {
+      "all": false,
+      "versions": [],
+      "ranges": [
+        {
+          "introduced": "1.0.0",
+          "lastAffected": "1.1.9"
+        }
+      ],
+      "version": "1.1.10",
+      "want": false
+    },
+    {
+      "all": false,
+      "versions": [],
+      "ranges": [
+        {
+          "introduced": "1.0.0"
+        }
+      ],
+      "version": "7.0.0",
+      "want": true
+    },
+    {
+      "all": false,
+      "versions": [],
+      "ranges": [
+        {
+          "introduced": "1.0.0"
+        }
+      ],
+      "version": "0.1.0",
+      "want": false
+    },
+    {
+      "all": false,
+      "versions": [],
+      "ranges": [
+        {
+          "introduced": "0",
+          "fixed": "1.2.0",
+          "lastAffected": "1.1.9"
+        }
+      ],
+      "version": "1.1.9",
+      "want": true
+    },
+    {
+      "all": false,
+      "versions": [],
+      "ranges": [
+        {
+          "introduced": "0",
+          "fixed": "1.2.0",
+          "lastAffected": "1.1.0"
+        }
+      ],
+      "version": "1.1.5",
+      "want": false
+    },
+    {
+      "all": false,
+      "versions": [],
+      "ranges": [
+        {
+          "introduced": "1.0.0",
+          "fixed": "1.1.0"
+        },
+        {
+          "introduced": "2.0.0",
+          "fixed": "2.1.0"
+        }
+      ],
+      "version": "2.0.5",
+      "want": true
+    },
+    {
+      "all": false,
+      "versions": [],
+      "ranges": [
+        {
+          "introduced": "1.0.0",
+          "fixed": "1.1.0"
+        }
+      ],
+      "version": "1.1.0-rc.1",
+      "want": true
+    },
+    {
+      "all": false,
+      "versions": [],
+      "ranges": [],
+      "version": "1.0.0",
+      "want": false
+    }
+  ],
+  "nameKey": [
+    {
+      "eco": "PyPI",
+      "name": "Foo_Bar.baz",
+      "want": "foo-bar-baz"
+    },
+    {
+      "eco": "PyPI",
+      "name": "foo--__..bar",
+      "want": "foo-bar"
+    },
+    {
+      "eco": "PyPI",
+      "name": " Requests ",
+      "want": "requests"
+    },
+    {
+      "eco": "npm",
+      "name": "@Scope/Left-Pad",
+      "want": "@scope/left-pad"
+    },
+    {
+      "eco": "NuGet",
+      "name": "Newtonsoft.Json",
+      "want": "newtonsoft.json"
+    },
+    {
+      "eco": "Packagist",
+      "name": "Monolog/Monolog",
+      "want": "monolog/monolog"
+    },
+    {
+      "eco": "crates.io",
+      "name": "Serde_JSON",
+      "want": "serde_json"
+    },
+    {
+      "eco": "Go",
+      "name": "github.com/Foo/Bar",
+      "want": "github.com/Foo/Bar"
+    },
+    {
+      "eco": "Maven",
+      "name": "org.Apache:Commons",
+      "want": "org.Apache:Commons"
+    },
+    {
+      "eco": "RubyGems",
+      "name": "Rails",
+      "want": "Rails"
+    },
+    {
+      "eco": "npm",
+      "name": "﻿left-pad\n",
+      "want": "left-pad"
+    },
+    {
+      "eco": "PyPI",
+      "name": "zope.interface",
+      "want": "zope-interface"
+    }
+  ]
+}

@@ -1,0 +1,158 @@
+# The pull-request checks' data: where each language's packages officially
+# come from, the install scripts known to be fine, the bots whose routine
+# updates never alert, the folders that are skipped, and the words of each
+# finding. Read by the kiyesi binary (agent/internal/pullcheck, built in by
+# go generate) and kept current here, like the end-of-life pack.
+# {placeholders} are filled in by the checks; see packs.Fill.
+
+version: 1
+updated: 2026-11-10
+
+# Hosts each language's packages are downloaded from. A host may carry a path
+# prefix (crates.io's index on GitHub). A team adds its own in Kiyesi.
+registries:
+  npm: [registry.npmjs.org, registry.yarnpkg.com]
+  PyPI: [files.pythonhosted.org, pypi.org, pypi.python.org]
+  crates.io: [index.crates.io, static.crates.io, crates.io, github.com/rust-lang/crates.io-index]
+  # Composer downloads most packages straight from where they are hosted.
+  Packagist: [repo.packagist.org, packagist.org, api.github.com, codeload.github.com, github.com, gitlab.com, bitbucket.org]
+  RubyGems: [rubygems.org, index.rubygems.org]
+  Go: [proxy.golang.org]
+  Maven: [repo.maven.apache.org, repo1.maven.org]
+  NuGet: [api.nuget.org]
+
+# The dependency files, by name: their language, the manifest that asks for
+# the packages, and the command that rewrites them. First match wins.
+files:
+  - { name: package.json, ecosystem: npm, manifest: package.json, command: npm install }
+  - { name: package-lock.json, ecosystem: npm, manifest: package.json, command: npm install }
+  - { name: npm-shrinkwrap.json, ecosystem: npm, manifest: package.json, command: npm install }
+  - { name: yarn.lock, ecosystem: npm, manifest: package.json, command: yarn install }
+  - { name: pnpm-lock.yaml, ecosystem: npm, manifest: package.json, command: pnpm install }
+  - { name: "requirements*.txt", ecosystem: PyPI, manifest: "", command: pip install -r <file> }
+  - { name: poetry.lock, ecosystem: PyPI, manifest: pyproject.toml, command: poetry lock }
+  - { name: Pipfile.lock, ecosystem: PyPI, manifest: Pipfile, command: pipenv lock }
+  - { name: uv.lock, ecosystem: PyPI, manifest: pyproject.toml, command: uv lock }
+  - { name: go.mod, ecosystem: Go, manifest: go.mod, command: go mod tidy }
+  - { name: go.sum, ecosystem: Go, manifest: go.mod, command: go mod tidy }
+  - { name: pom.xml, ecosystem: Maven, manifest: pom.xml, command: mvn dependency:resolve }
+  - { name: gradle.lockfile, ecosystem: Maven, manifest: build.gradle, command: ./gradlew dependencies --write-locks }
+  - { name: Gemfile.lock, ecosystem: RubyGems, manifest: Gemfile, command: bundle install }
+  - { name: Cargo.lock, ecosystem: crates.io, manifest: Cargo.toml, command: cargo update }
+  - { name: packages.lock.json, ecosystem: NuGet, manifest: the .csproj file, command: dotnet restore --force-evaluate }
+  - { name: "*.csproj", ecosystem: NuGet, manifest: "", command: dotnet restore }
+  - { name: composer.lock, ecosystem: Packagist, manifest: composer.json, command: composer update }
+
+# npm packages whose own install script is well known and fine. A name
+# ending in /* is a whole scope.
+known-good-install-scripts:
+  - esbuild
+  - "@esbuild/*"
+  - sharp
+  - "@img/*"
+  - prisma
+  - "@prisma/engines"
+  - "@prisma/client"
+  - bcrypt
+  - argon2
+  - node-sass
+  - canvas
+  - sqlite3
+  - better-sqlite3
+  - puppeteer
+  - playwright
+  - core-js
+  - core-js-pure
+  - husky
+  - cypress
+  - electron
+  - fsevents
+  - nx
+  - "@swc/core"
+  - protobufjs
+  - msgpackr-extract
+  - "@parcel/watcher"
+  - lmdb
+  - re2
+  - bufferutil
+  - utf-8-validate
+  - cpu-features
+  - ssh2
+  - "@sentry/cli"
+  - turbo
+  - "@tailwindcss/oxide"
+  - unrs-resolver
+  - es5-ext
+  - styled-components
+  - nodemon
+  - "@datadog/native-metrics"
+  - dtrace-provider
+  - leveldown
+  - deasync
+  - "@biomejs/biome"
+  - "@nestjs/core"
+
+# Pull requests opened by these accounts are routine updates: only a
+# malicious package alerts.
+bots: ["dependabot[bot]", "renovate[bot]", "dependabot-preview[bot]"]
+
+# Folders that are someone else's code, or built from the repository's own.
+# A file inside one is skipped, lockfiles included.
+vendored: [vendor, node_modules, third_party, third-party, bower_components]
+built: [dist, build, out, .next, .nuxt, target, coverage]
+built-suffixes: [.min.js, .min.css, .map, .bundle.js]
+
+# GitHub's own actions are not third-party; every other action must be
+# pinned to a full commit.
+github-owners: [actions, github]
+
+# The words of each finding.
+words:
+  malicious:
+    title: "Malicious package added: {name} {version}"
+    how: "This change adds {name} {version} to {file}, and the malicious-package list reports it ({reports})."
+    fix: "Remove {name} from {files}, run {command}, and check any machine that installed it: see {reports}."
+  lockfile-host:
+    title: "Package from an unexpected host: {name} {version}"
+    how: "{file} now downloads {name} {version} from {host}, which is not the {ecosystem} registry or one of your team's registries."
+    fix: "If {host} is not yours, restore {file} from the base branch and run {command}; if it is, add it to your team's registries in Kiyesi."
+  lockfile-source:
+    title: "Packages from an unexpected source: {host}"
+    how: "{file} now installs packages from {host}, which is not the {ecosystem} registry or one of your team's registries."
+    fix: "If {host} is not yours, restore {file} from the base branch and run {command}; if it is, add it to your team's registries in Kiyesi."
+  lockfile-checksum:
+    title: "Checksum changed: {name} {version}"
+    how: "{file} keeps {name} at {version} but its checksum changed, so the file was edited by hand or the package was swapped."
+    fix: "Restore {file} from the base branch, run {command}, and find out where the new checksum came from before you merge."
+  install-script:
+    title: "Install script downloads and runs code: {script}"
+    how: "This change makes the {script} script in {file} download code and run it while packages install."
+    fix: "Remove the download from the {script} script, or check in the file it fetches so it can be reviewed."
+  install-dependency:
+    title: "New dependency runs an install script: {name} {version}"
+    how: "This change adds {name} {version}, which runs its own script when it is installed."
+    fix: "Read what {name}'s install script does before you merge; if you do not need it, remove it from {manifest} and run {command}."
+  install-build:
+    title: "Build file downloads and runs code: {file}"
+    how: "This change makes {file} download code and run it when the package is built or installed."
+    fix: "Remove the download from {file}, or check in what it fetches so it can be reviewed."
+  hidden-invisible:
+    title: "Invisible characters added: {file}"
+    how: "This change adds {chars} to {file}, which can make code read differently from how it runs."
+    fix: "Delete the invisible characters (the snippet shows them as <U+…>), unless the text truly needs them."
+  hidden-encoded:
+    title: "Encoded code that is run: {file}"
+    how: "This change adds a long encoded block to {file} and runs it with {runner}."
+    fix: "Remove the encoded block, or replace it with readable code; find out where it came from first."
+  workflow-unpinned:
+    title: "Action not pinned to a commit: {action}"
+    how: "This change uses {action} by a tag or branch, which its owner can point at new code at any time."
+    fix: "Pin it to a full commit: uses: {repo}@<40-character commit> # {ref}"
+  workflow-untrusted:
+    title: "Workflow runs pull-request code with your secrets: {file}"
+    how: "This change makes {file} run on {trigger} and check out the pull request's own code, so a stranger's pull request runs with your repository's secrets."
+    fix: "Use the pull_request trigger instead, or do not check out or run the pull request's code in this workflow."
+  workflow-secret:
+    title: "Workflow step prints a secret: {file}"
+    how: "This change makes a step in {file} print a secret into the build log, where anyone who can read the log sees it."
+    fix: "Remove the line that prints it; pass secrets to the step through env and never echo them."

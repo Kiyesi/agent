@@ -546,6 +546,64 @@
     ]
   },
   {
+    "path": "kiyesi hook",
+    "use": "kiyesi hook",
+    "short": "Check each push for malicious packages and hidden code before it leaves this computer",
+    "long": "A git pre-push hook that checks what each push adds, on this computer, with the\nrules of Kiyesi's pull-request check: malicious packages, lockfile tampering,\nhidden code, install scripts and risky workflows. It is free and needs no\naccount. A malicious package, hidden code or a tampered lockfile stops the\npush, with the fix; install scripts and workflow advice are shown and the\npush goes on. git push --no-verify skips the check, as it skips any hook.\n\nThe malicious-package list is kept in your cache folder and refreshed when it\nis over 6 hours old, waiting at most 3 seconds. Offline, the copy is used and\nits age is shown. Nothing from your repository is sent anywhere.",
+    "example": "  kiyesi hook install\n  kiyesi hook status\n  git push --no-verify     skip the check for one push"
+  },
+  {
+    "path": "kiyesi hook install",
+    "use": "kiyesi hook install [flags]",
+    "short": "Add Kiyesi's pre-push hook to this repository",
+    "long": "Adds a pre-push hook to the repository: each git push is checked first.\nA pre-push hook already there is kept, and runs after Kiyesi's check;\nkiyesi hook uninstall puts it back as it was. When the repository keeps\nits hooks in a folder of its own (core.hooksPath, as Husky sets it), nothing\nis changed: Kiyesi prints the line to add to that hook.",
+    "example": "  kiyesi hook install\n  kiyesi hook install --path ~/code/shop",
+    "flags": [
+      {
+        "name": "path",
+        "usage": "the repository, or any folder in it",
+        "default": "."
+      }
+    ]
+  },
+  {
+    "path": "kiyesi hook status",
+    "use": "kiyesi hook status [flags]",
+    "short": "Whether this repository's pushes are checked, and how old the malicious-package list is",
+    "example": "  kiyesi hook status\n  kiyesi hook status --json",
+    "flags": [
+      {
+        "name": "json",
+        "usage": "print the hook and the list as JSON, for scripts"
+      },
+      {
+        "name": "path",
+        "usage": "the repository, or any folder in it",
+        "default": "."
+      }
+    ]
+  },
+  {
+    "path": "kiyesi hook uninstall",
+    "use": "kiyesi hook uninstall [flags]",
+    "short": "Remove Kiyesi's pre-push hook, and put back the one it kept",
+    "example": "  kiyesi hook uninstall",
+    "flags": [
+      {
+        "name": "path",
+        "usage": "the repository, or any folder in it",
+        "default": "."
+      }
+    ]
+  },
+  {
+    "path": "kiyesi hook update",
+    "use": "kiyesi hook update",
+    "short": "Get the newest malicious-package list now",
+    "long": "Gets the newest malicious-package list from Kiyesi, as each push does when\nits copy is over 6 hours old. No account is needed.",
+    "example": "  kiyesi hook update"
+  },
+  {
     "path": "kiyesi incident",
     "use": "kiyesi incident <id> [flags]",
     "short": "One incident: the likely source, the evidence, the timeline and the fix",

@@ -100,3 +100,36 @@ func TestParseRejectsRootWithoutReason(t *testing.T) {
 		t.Fatal("expected an error when a check needs root but gives no reason")
 	}
 }
+
+// The pull-request checks' data parses, and the copy built in is current.
+func TestPullChecksLoad(t *testing.T) {
+	p, err := LoadPullChecks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.IsKnownGood("esbuild") || !p.IsKnownGood("@esbuild/linux-x64") || p.IsKnownGood("left-pad-x") {
+		t.Error("the known-good install scripts are not read as written")
+	}
+	if f, ok := p.DependencyFile("app/requirements-dev.txt"); !ok || f.Ecosystem != "PyPI" {
+		t.Errorf("requirements-dev.txt = %+v, %v", f, ok)
+	}
+	if f, ok := p.DependencyFile("src/App/App.csproj"); !ok || f.Ecosystem != "NuGet" {
+		t.Errorf("App.csproj = %+v, %v", f, ok)
+	}
+	if len(p.Bots) != 3 {
+		t.Errorf("bots = %v", p.Bots)
+	}
+	src, err := os.ReadFile("../../../packs/pullchecks.yaml")
+	if err != nil {
+		t.Skip("repository root not available:", err)
+	}
+	if string(src) != string(pullChecksYAML) {
+		t.Fatal("agent/internal/packs/data/pullchecks.yaml is out of date: run go generate ./... in agent/")
+	}
+}
+
+func TestPullChecksRefuseAnIncompleteFile(t *testing.T) {
+	if _, err := ParsePullChecks([]byte("version: 1\nregistries: {npm: [registry.npmjs.org]}\n")); err == nil {
+		t.Error("a file without every language's registry was accepted")
+	}
+}

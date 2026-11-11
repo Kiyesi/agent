@@ -245,7 +245,11 @@ func wantsNotice(cmd *cobra.Command, environ []string) bool {
 	}
 	for c := cmd; c != nil; c = c.Parent() {
 		switch c.Name() {
-		case "agent", "update", "mcp", "completion", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+		case "agent", "update", "mcp", "completion", "pullcheck", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
+			return false
+		}
+		// git shows the hook's words with its own: the push's, not Kiyesi's news.
+		if c.Name() == "run" && c.Parent() != nil && c.Parent().Name() == "hook" {
 			return false
 		}
 	}

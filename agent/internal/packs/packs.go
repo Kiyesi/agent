@@ -7,6 +7,7 @@ package packs
 //go:generate cp ../../../packs/countries/names.yaml data/countries/names.yaml
 //go:generate cp ../../../packs/countries/ng.yaml data/countries/ng.yaml
 //go:generate cp ../../../packs/eol.yaml data/eol.yaml
+//go:generate cp ../../../packs/pullchecks.yaml data/pullchecks.yaml
 
 import (
 	_ "embed"

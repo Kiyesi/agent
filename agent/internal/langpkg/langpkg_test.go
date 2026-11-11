@@ -132,3 +132,13 @@ func TestBrokenFilesAreSkipped(t *testing.T) {
 		t.Errorf("sources = %+v", r.Sources)
 	}
 }
+
+func TestParseLockfileByName(t *testing.T) {
+	eco, pkgs, ok := ParseLockfile("web/Cargo.lock", []byte("[[package]]\nname = \"serde\"\nversion = \"1.0.0\"\n"))
+	if !ok || eco != Crates || len(pkgs) != 1 || pkgs[0] != [2]string{"serde", "1.0.0"} {
+		t.Errorf("Cargo.lock = %s %v %v", eco, pkgs, ok)
+	}
+	if _, _, ok := ParseLockfile("README.md", nil); ok {
+		t.Error("README.md was read as a lockfile")
+	}
+}
